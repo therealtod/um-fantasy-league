@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: um-fantasy-league
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/umfl}
+    username: ${DB_USER:umfl}
+    password: ${DB_PASSWORD:umfl}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# There are no `umfl.*` tunables. Scoring weights are reference data in
+# `scoring_coefficient`, and the roster budget is `tournament.credit_grant` --
+# both are retuned with an UPDATE, not a redeploy.
+
+# `rate-limit.*` is operational tuning for RateLimitFilter -- how hard a
+# deployed instance throttles per client IP -- not domain data, so it's not
+# one of the `umfl.*` tunables disclaimed above.
+rate-limit:
+  api:
+    capacity: 300
+    refill-period: PT1M
+
+logging:
+  level:
+    com.umfl: INFO

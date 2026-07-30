@@ -1,0 +1,197 @@
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import type { MatchResultDto } from '@/api/types'
+import { api } from '@/api/client'
+
+interface Props {
+  tournamentId: number
+}
+
+const props = defineProps<Props>()
+
+const matches = ref<MatchResultDto[]>([])
+const isLoading = ref(false)
+const error = ref<string | null>(null)
+const selectedRound = ref<number | null>(null)
+
+const rounds = computed(() => {
+  const roundsSet = new Set<number>()
+  matches.value.forEach(match => roundsSet.add(match.round))
+  return Array.from(roundsSet).sort((a, b) => a - b)
+})
+
+const filteredMatches = computed(() => {
+  if (selectedRound.value === null) return matches.value
+  return matches.value.filter(match => match.round === selectedRound.value)
+})
+
+async function loadMatches() {
+  isLoading.value = true
+  error.value = null
+  try {
+    matches.value = await api.admin.listMatches(props.tournamentId, selectedRound.value || undefined)
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to load matches'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+function formatDateTime(isoString: string): string {
+  const date = new Date(isoString)
+  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+// The hero is what scores, so it leads; the player label is appended only when recorded.
+function getWinner(match: MatchResultDto): string {
+  const winner = match.participants.find(p => p.isWinner)
+  if (!winner) return 'Draw'
+  return winner.playerLabel ? `${winner.heroName} (${winner.playerLabel})` : winner.heroName
+}
+
+function handleEdit(matchId: number) {
+  // This will be implemented to open the match wizard in edit mode
+  console.log('Edit match:', matchId)
+  emit('edit', matchId)
+}
+
+async function handleDelete(matchId: number) {
+  if (!confirm('Are you sure you want to delete this match?')) return
+
+  try {
+    await api.admin.deleteMatch(props.tournamentId, matchId)
+    await loadMatches() // Refresh the list
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to delete match'
+  }
+}
+
+function handleCreate() {
+  emit('create')
+}
+
+const emit = defineEmits<{
+  create: []
+  edit: [matchId: number]
+}>()
+
+// Load matches on component mount
+loadMatches()
+</script>
+
+<template>
+  <div class="panel p-4 md:p-8">
+    <div class="mb-8 flex flex-wrap items-start justify-between gap-3">
+      <h2 class="headline text-2xl text-cyan">Match Results</h2>
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+          <label for="round-filter" class="font-mono text-sm text-ink-dim">Filter by Round:</label>
+          <select
+            id="round-filter"
+            v-model="selectedRound"
+            class="cursor-pointer border border-edge bg-surface-lowest px-2 py-1 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            @change="loadMatches"
+          >
+            <option :value="null">All Rounds</option>
+            <option v-for="round in rounds" :key="round" :value="round">
+              Round {{ round }}
+            </option>
+          </select>
+        </div>
+        <button class="btn-primary" @click="handleCreate">
+          + Record New Match
+        </button>
+      </div>
+    </div>
+
+    <p v-if="error" class="mb-4 border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
+      {{ error }}
+    </p>
+
+    <div v-if="isLoading" class="p-8 text-center font-mono text-ink-dim">
+      Loading matches...
+    </div>
+
+    <div v-else-if="filteredMatches.length === 0" class="p-12 text-center text-ink-dim">
+      <p>No matches found.</p>
+      <button class="btn-primary mt-4" @click="handleCreate">
+        Record the first match
+      </button>
+    </div>
+
+    <div v-else class="overflow-x-auto">
+      <table class="w-full min-w-[44rem] border-collapse">
+        <thead>
+          <tr>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Round</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Map</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Played At</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Participants</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Winner</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Bans</th>
+            <th class="w-[180px] border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="match in filteredMatches"
+            :key="match.matchId"
+            class="border-b border-edge last:border-none hover:bg-surface-mid"
+          >
+            <td class="px-3 py-3 align-top md:px-4">
+              <span class="inline-block border border-edge bg-surface-lowest px-1.5 py-0.5 font-mono text-xs text-ink-dim uppercase tracking-wide">
+                Rd {{ match.round }}
+              </span>
+            </td>
+            <td class="px-3 py-3 align-top md:px-4">{{ match.mapName || '—' }}</td>
+            <td class="px-3 py-3 align-top md:px-4">{{ formatDateTime(match.playedAt) }}</td>
+            <td class="px-3 py-3 align-top md:px-4">
+              <div class="flex flex-col gap-2">
+                <div
+                  v-for="participant in match.participants"
+                  :key="participant.participantId"
+                  class="flex items-center gap-2 font-mono text-sm"
+                >
+                  {{ participant.heroName }}
+                  <span v-if="participant.playerLabel">({{ participant.playerLabel }})</span>
+                  <span class="text-xs text-danger">❤️ {{ participant.healthRemaining }}</span>
+                  <span
+                    v-if="participant.isWinner"
+                    class="bg-lime px-1.5 py-0.5 font-mono text-[10px] text-surface-lowest uppercase tracking-wide"
+                  >
+                    WIN
+                  </span>
+                </div>
+              </div>
+            </td>
+            <td class="px-3 py-3 align-top md:px-4">{{ getWinner(match) }}</td>
+            <td class="px-3 py-3 align-top md:px-4">
+              <div v-if="match.bans.length > 0" class="flex flex-col gap-1">
+                <div v-for="ban in match.bans" :key="ban.heroId" class="font-mono text-sm text-ink-dim">
+                  {{ ban.heroName }}
+                </div>
+              </div>
+              <span v-else class="text-ink-dim italic">—</span>
+            </td>
+            <td class="px-3 py-3 align-top md:px-4">
+              <div class="flex gap-2">
+                <button
+                  class="border border-lime px-3 py-1 font-mono text-xs text-lime transition-colors hover:bg-lime/10"
+                  @click="handleEdit(match.matchId)"
+                >
+                  Edit
+                </button>
+                <button
+                  class="border border-danger px-3 py-1 font-mono text-xs text-danger transition-colors hover:bg-danger/10"
+                  @click="handleDelete(match.matchId)"
+                >
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>

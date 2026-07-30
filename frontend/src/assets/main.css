@@ -1,0 +1,205 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens ported from the Stitch "Tactical Analytics" design system
+ * (project 13163612977730740340).
+ *
+ * The look is deliberately hard-edged: obsidian surfaces, 1px technical
+ * borders, zero corner radius, neon accents used sparingly for live data.
+ */
+@theme {
+  /* Surfaces — depth comes from tonal layering, never drop shadows. */
+  --color-surface: #131313;
+  --color-surface-lowest: #0e0e0e;
+  --color-surface-low: #1c1b1b;
+  --color-surface-mid: #201f1f;
+  --color-surface-high: #2a2a2a;
+  --color-surface-highest: #353534;
+
+  /* Foreground */
+  --color-ink: #e5e2e1;
+  --color-ink-muted: #b9cacb;
+  --color-ink-dim: #849495;
+
+  /* Borders */
+  --color-edge: #2d2d2d;
+  --color-edge-strong: #3a494b;
+
+  /* Accents */
+  --color-cyan: #00f2ff;
+  --color-cyan-soft: #e1fdff;
+  --color-cyan-deep: #006a71;
+  --color-magenta: #ff24e4;
+  --color-magenta-soft: #fface8;
+  --color-lime: #bdec00;
+  --color-lime-soft: #efffbb;
+  --color-danger: #ffb4ab;
+
+  /* Type */
+  --font-display: 'Anybody', 'Arial Black', sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Rhythm — 4px base unit. */
+  --spacing: 0.25rem;
+
+  /* Strictly geometric: no rounded corners anywhere. */
+  --radius-none: 0px;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Sharp edges are part of the brand — opt in to radius, never inherit it. */
+  * {
+    border-radius: 0;
+  }
+
+  /* Touch targets: the button paddings below land around 40px, under the 44px
+     guideline. Only coarse pointers pay the extra height. */
+  @media (pointer: coarse) {
+    .btn-primary,
+    .btn-ghost {
+      min-height: 44px;
+    }
+  }
+
+  /* Thin cyan scrollbars that only assert themselves on interaction. */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-surface-lowest);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-edge);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-cyan-deep);
+  }
+}
+
+@layer components {
+  /* Uppercase monospaced micro-label — the HUD voice. */
+  .label-caps {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-ink-dim);
+  }
+
+  .stat-value {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .headline {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+  }
+
+  /* Standard container: one tonal step up from the page, 1px technical border. */
+  .panel {
+    background-color: var(--color-surface-low);
+    border: 1px solid var(--color-edge);
+  }
+
+  /* Primary action: obsidian body, cyan hairline, fills on hover. */
+  .btn-primary {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.75rem 1.25rem;
+    color: var(--color-cyan);
+    background-color: transparent;
+    border: 1px solid var(--color-cyan);
+    transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+    cursor: pointer;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--color-cyan) 16%, transparent);
+    box-shadow: 0 0 15px color-mix(in srgb, var(--color-cyan) 35%, transparent);
+  }
+  .btn-primary:disabled {
+    color: var(--color-ink-dim);
+    border-color: var(--color-edge);
+    cursor: not-allowed;
+  }
+
+  .btn-ghost {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.625rem 1rem;
+    color: var(--color-ink-muted);
+    background-color: transparent;
+    border: 1px solid var(--color-edge);
+    transition: border-color 120ms ease, color 120ms ease;
+    cursor: pointer;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    border-color: var(--color-ink-dim);
+    color: var(--color-ink);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  /* Leaderboard rows carry an *opaque* background so the pinned identity columns
+     can hide the metric columns scrolling underneath them. `.cell-pinned` inherits
+     that computed colour, so one class serves both the plain and highlighted rows.
+     `.row-opaque-mine` is the old translucent magenta/5 pre-composited over the panel. */
+  .row-opaque {
+    background-color: var(--color-surface-low);
+  }
+  .row-opaque-mine {
+    background-color: color-mix(in srgb, var(--color-magenta) 5%, var(--color-surface-low));
+  }
+  .cell-pinned {
+    position: sticky;
+    z-index: 1;
+    background-color: inherit;
+  }
+  /* The seam at the pinned/scrolling boundary. An inset shadow rather than a
+     border-right: under border-collapse the borders belong to the table, not
+     the cell, so they do not travel with a sticky column. */
+  .cell-pinned-edge {
+    box-shadow: inset -1px 0 0 var(--color-edge);
+  }
+
+  /* Active data point: illuminated-display glow rather than a fill. */
+  .glow-cyan {
+    box-shadow: 0 0 15px color-mix(in srgb, var(--color-cyan) 30%, transparent);
+    border-color: color-mix(in srgb, var(--color-cyan) 50%, transparent);
+  }
+}
+
+@utility scanline-bg {
+  background-image: repeating-linear-gradient(
+    0deg,
+    color-mix(in srgb, var(--color-surface-highest) 5%, transparent) 0px,
+    color-mix(in srgb, var(--color-surface-highest) 5%, transparent) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+}

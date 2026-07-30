@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: umfl-db
+    environment:
+      POSTGRES_DB: umfl
+      POSTGRES_USER: umfl
+      POSTGRES_PASSWORD: umfl
+    ports:
+      - "5433:5432"
+    volumes:
+      - umfl-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umfl -d umfl"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    container_name: umfl-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      DB_URL: jdbc:postgresql://db:5432/umfl
+      DB_USER: umfl
+      DB_PASSWORD: umfl
+    ports:
+      - "8080:8080"
+
+volumes:
+  umfl-pgdata:

@@ -1,0 +1,120 @@
+Enum TournamentFormat {
+  BANQUEST
+  ARSENAL
+}
+
+Table users {
+  id int [pk, increment]
+  username varchar
+  email varchar
+}
+
+Table heroes {
+  id int [pk, increment]
+  name varchar
+  image_url varchar
+}
+
+Table maps {
+  id int [pk, increment]
+  name varchar
+}
+
+Table tournaments {
+  id int [pk, increment]
+  name varchar
+  start_date date
+  end_date date
+  format TournamentFormat
+}
+
+Table tournament_heroes {
+  tournament_id int
+  hero_id int
+
+  indexes {
+    (tournament_id, hero_id) [pk]
+  }
+}
+
+Table tournament_maps {
+  tournament_id int
+  map_id int
+
+  indexes {
+    (tournament_id, map_id) [pk]
+  }
+}
+
+Table scoring_rule_sets {
+  id int [pk, increment]
+  tournament_id int
+  name varchar
+}
+
+Table scoring_coefficients {
+  id int [pk, increment]
+  ruleset_id int
+  metric varchar
+  coefficient decimal
+}
+
+Table players {
+  id int [pk, increment]
+  name varchar
+}
+
+Table matches {
+  id int [pk, increment]
+  tournament_id int
+  round int
+  played_at datetime
+}
+
+Table match_participants {
+  id int [pk, increment]
+  match_id int
+  player_id int
+  hero_id int
+  health_remaining int
+  is_winner boolean
+  was_banned boolean
+}
+
+Table tournament_registrations {
+  id int [pk, increment]
+  tournament_id int
+  user_id int
+  registered_at datetime
+  fantasy_points decimal
+}
+
+Table registration_heroes {
+  registration_id int
+  hero_id int
+
+  indexes {
+    (registration_id, hero_id) [pk]
+  }
+}
+
+Ref: tournament_heroes.tournament_id > tournaments.id
+Ref: tournament_heroes.hero_id > heroes.id
+
+Ref: tournament_maps.tournament_id > tournaments.id
+Ref: tournament_maps.map_id > maps.id
+
+Ref: scoring_rule_sets.tournament_id > tournaments.id
+Ref: scoring_coefficients.ruleset_id > scoring_rule_sets.id
+
+Ref: matches.tournament_id > tournaments.id
+
+Ref: match_participants.match_id > matches.id
+Ref: match_participants.player_id > players.id
+Ref: match_participants.hero_id > heroes.id
+
+Ref: tournament_registrations.user_id > users.id
+Ref: tournament_registrations.tournament_id > tournaments.id
+
+Ref: registration_heroes.registration_id > tournament_registrations.id
+Ref: registration_heroes.hero_id > heroes.id

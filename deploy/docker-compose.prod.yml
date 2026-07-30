@@ -1,0 +1,19 @@
+services:
+  backend:
+    image: ghcr.io/therealtod/umfl-backend:latest
+    container_name: umfl-backend
+    restart: unless-stopped
+    mem_limit: 768m
+    stop_grace_period: 35s
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5

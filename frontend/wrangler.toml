@@ -1,0 +1,7 @@
+name = "um-fantasy-league-frontend"
+main = "src/worker.ts"
+compatibility_date = "2026-08-03"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"

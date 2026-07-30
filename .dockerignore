@@ -1,0 +1,11 @@
+.git
+.gradle
+.idea
+.kotlin
+.vscode
+build
+backend/build
+frontend
+gradle/wrapper/gradle-wrapper.jar.sha256
+*.log
+*.md
