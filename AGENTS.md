@@ -280,6 +280,15 @@ scoring rule set deactivates any active sibling in the same transaction, since o
 per tournament. An unknown scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a
 non-blocking warning on the response, never rejected.
 
+`ScoringRuleSetPolicy` (pure, same pattern again) validates a rule set's coefficients on create and
+update, with rule codes `DUPLICATE_METRIC` and `MALFORMED_METRIC`, raising `ScoringRuleException` —
+a third 422 type of the same shape. Both checks run against the *normalised* metric, so `' win '`
+and `'Win'` are a duplicate of each other, and `MALFORMED_METRIC` mirrors the schema's
+`^[A-Z][A-Z0-9_]*$` CHECK in Kotlin. Without it a duplicated or hyphenated metric reached the
+database and came back as the `DataIntegrityViolationException` backstop's generic 409, which names
+nothing. The policy validates the *shape* of a metric name and never the *set* — an unimplemented
+metric stays a warning, per the paragraph above.
+
 ## Admin frontend
 
 `/admin` (`AdminDashboardView.vue`) is a manager-gated dashboard, not a separate app — it composes

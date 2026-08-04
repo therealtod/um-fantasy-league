@@ -1,6 +1,7 @@
 package com.umfl.scoring
 
 import com.umfl.common.ConflictException
+import com.umfl.common.ScoringRuleException
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
 import org.junit.jupiter.api.Test
@@ -151,5 +152,50 @@ class AdminScoringServiceIntegrationTest @Autowired constructor(
 
         assertEquals(2, updated.coefficients.size)
         assertTrue(updated.coefficients.any { it.metric == "BAN" })
+    }
+
+    /**
+     * Both of these used to reach the database and come back as the
+     * `DataIntegrityViolationException` backstop's generic 409 — the unique
+     * `(rule_set_id, metric)` index for the first, the metric format CHECK for
+     * the second. [ScoringRuleSetPolicy] now names them before the insert.
+     */
+    @Test
+    fun `creating with the same metric twice is a named rule violation, not a data integrity 409`() {
+        val failure = assertFailsWith<ScoringRuleException> {
+            adminScoringService.create(
+                winterOfChampionsId(),
+                name = "Double Weighted",
+                coefficients = listOf(
+                    ScoringCoefficientInput("WIN", BigDecimal("1.0"), 0),
+                    ScoringCoefficientInput("WIN", BigDecimal("2.0"), 1),
+                ),
+                activate = false,
+            )
+        }
+
+        assertEquals(listOf(ScoringRule.DUPLICATE_METRIC), failure.violations.map { it.rule })
+    }
+
+    @Test
+    fun `updating with a malformed metric is a named rule violation, not a data integrity 409`() {
+        val tournamentId = winterOfChampionsId()
+        val created = adminScoringService.create(
+            tournamentId,
+            name = "Retuned Weights",
+            coefficients = listOf(ScoringCoefficientInput("WIN", BigDecimal("12.0"), 0)),
+            activate = false,
+        ).ruleSet
+
+        val failure = assertFailsWith<ScoringRuleException> {
+            adminScoringService.update(
+                tournamentId,
+                requireNotNull(created.id),
+                name = "Retuned Weights",
+                coefficients = listOf(ScoringCoefficientInput("win-rate", BigDecimal("1.0"), 0)),
+            )
+        }
+
+        assertEquals(listOf(ScoringRule.MALFORMED_METRIC), failure.violations.map { it.rule })
     }
 }

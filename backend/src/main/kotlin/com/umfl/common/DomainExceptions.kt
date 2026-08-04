@@ -1,6 +1,7 @@
 package com.umfl.common
 
 import com.umfl.match.MatchViolation
+import com.umfl.scoring.ScoringViolation
 import com.umfl.tournament.RosterViolation
 
 sealed class DomainException(message: String) : RuntimeException(message)
@@ -28,4 +29,12 @@ class RosterRuleException(val violations: List<RosterViolation>) :
  * roster and match violation reporting can evolve independently.
  */
 class MatchRuleException(val violations: List<MatchViolation>) :
+    DomainException(violations.joinToString("; ") { it.message })
+
+/**
+ * An admin scoring rule set submission broke one or more coefficient rules.
+ * Same shape and reasoning as [MatchRuleException] — its own type so scoring's
+ * violation vocabulary stays independent of roster's and match's.
+ */
+class ScoringRuleException(val violations: List<ScoringViolation>) :
     DomainException(violations.joinToString("; ") { it.message })

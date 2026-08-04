@@ -56,6 +56,20 @@ class GlobalExceptionHandler {
             )
         }
 
+    @ExceptionHandler(ScoringRuleException::class)
+    fun handleScoringRule(ex: ScoringRuleException): ProblemDetail =
+        problem(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            "Scoring rule set rules violated",
+            ex.message,
+            "scoring-rule-violation",
+        ).apply {
+            setProperty(
+                "violations",
+                ex.violations.map { mapOf("rule" to it.rule.name, "message" to it.message) },
+            )
+        }
+
     /**
      * Backstop for a foreign key / unique constraint reaching the database
      * unvalidated — every known case is caught earlier by a domain policy

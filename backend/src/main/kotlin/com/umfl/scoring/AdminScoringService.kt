@@ -2,12 +2,10 @@ package com.umfl.scoring
 
 import com.umfl.common.ConflictException
 import com.umfl.common.NotFoundException
+import com.umfl.common.ScoringRuleException
 import com.umfl.tournament.TournamentService
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.math.BigDecimal
-
-data class ScoringCoefficientInput(val metric: String, val coefficient: BigDecimal, val sortOrder: Int = 0)
 
 /** One rule set as create/update/list return it, paired with any metrics nothing prices — see [ScoringRuleSet]'s doc. */
 data class ScoringRuleSetResult(val ruleSet: ScoringRuleSet, val unknownMetrics: List<String>)
@@ -40,6 +38,7 @@ class AdminScoringService(
         activate: Boolean,
     ): ScoringRuleSetResult {
         tournamentService.requireTournament(tournamentId)
+        validate(coefficients)
         if (ruleSetRepository.findByTournamentIdAndName(tournamentId, name) != null) {
             throw ConflictException("A scoring rule set named '$name' already exists for tournament $tournamentId.")
         }
@@ -64,6 +63,7 @@ class AdminScoringService(
         coefficients: List<ScoringCoefficientInput>,
     ): ScoringRuleSetResult {
         val existing = requireRuleSet(tournamentId, ruleSetId)
+        validate(coefficients)
         val collision = ruleSetRepository.findByTournamentIdAndName(tournamentId, name)
         if (collision != null && collision.id != ruleSetId) {
             throw ConflictException("A scoring rule set named '$name' already exists for tournament $tournamentId.")
@@ -89,6 +89,16 @@ class AdminScoringService(
             .forEach { ruleSetRepository.save(it.copy(isActive = false)) }
 
         return ruleSetRepository.save(target.copy(isActive = true))
+    }
+
+    /**
+     * Duplicate and malformed metrics are caught here rather than left to the
+     * `unique (rule_set_id, metric)` constraint and the format CHECK, which
+     * would surface as the generic 409 backstop with nothing naming the bad row.
+     */
+    private fun validate(coefficients: List<ScoringCoefficientInput>) {
+        val violations = ScoringRuleSetPolicy.validate(coefficients)
+        if (violations.isNotEmpty()) throw ScoringRuleException(violations)
     }
 
     private fun requireRuleSet(tournamentId: Long, ruleSetId: Long): ScoringRuleSet =
