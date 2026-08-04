@@ -60,7 +60,7 @@ class ScoringEngineTest {
         assertEquals(
             mapOf(
                 "WIN" to 10.0,
-                "HEALTH_REMAINING" to 8.25,   // 11 * 0.75
+                "HEALTH_REMAINING" to 8.25, // 11 * 0.75
                 "HEALTH_DIFFERENTIAL" to 5.5, // (11 - 0) * 0.5
                 "SHUTOUT" to 3.0,
                 "APPEARANCE" to 1.0,

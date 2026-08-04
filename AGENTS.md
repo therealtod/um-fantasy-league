@@ -50,12 +50,29 @@ cd frontend && npm run type-check    # vue-tsc --noEmit
 cd frontend && npx vitest run src/domain/rosterPolicy.spec.ts   # single file
 ```
 
+Formatting:
+
+```bash
+./gradlew :backend:ktlintCheck    # merge gate, alongside :backend:test
+./gradlew :backend:ktlintFormat   # auto-fix — read the diff, it is not always an improvement
+```
+
 Everything under `com.umfl.support.PostgresIntegrationTest` shares one static Postgres container and
 runs inside a rolled-back transaction, so tests may mutate seed data freely. That base class
 deliberately does **not** use `@Testcontainers`/`@Container`: the extension stops a static container
 in `afterAll` of *every* class it annotates, so from the second test class onward Spring's cached
 context points at a dead port. The container is started in a static initializer and lives for the
 JVM. Don't add the annotations back.
+
+ktlint runs off the root `.editorconfig`, on the `intellij_idea` style baseline rather than the
+stricter `ktlint_official` one: the linter is there to *preserve* the existing formatting and catch
+the mechanical slips (unused imports, import order, stray whitespace), not to reformat the codebase
+into a different style. Three rules are off everywhere — the two `trailing-comma-*` rules and
+`function-signature`/`class-signature` — because they contradict each other over this codebase's
+multi-line-signature-with-trailing-comma house style, and `ktlintFormat` resolves that contradiction
+by collapsing declarations onto one line with a dangling comma. Test sources additionally opt out of
+the wrapping rules and the line-length cap so fixture tables can stay tabular. Retune the
+`.editorconfig` rather than reformatting a file to satisfy a rule.
 
 Spring Boot is pinned to 4.1.0 (managing Testcontainers 2.0.5, up from the 1.21.x line this repo
 started on). The original reason for the pin — 1.21.3 negotiating a Docker API version too old for
@@ -314,9 +331,9 @@ A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched sta
 
 ## CI/CD
 
-GitHub Actions. `.github/workflows/backend-ci.yml` runs `:backend:test` (Testcontainers included —
-GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master` branches, as the
-merge gate. `.github/workflows/backend-deploy.yml` re-runs the same tests, then on a green push to
+GitHub Actions. `.github/workflows/backend-ci.yml` runs `:backend:ktlintCheck` then `:backend:test` (Testcontainers
+included — GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master`
+branches, as the merge gate. `.github/workflows/backend-deploy.yml` re-runs the same tests, then on a green push to
 `master` builds the root `Dockerfile`, pushes `ghcr.io/<owner>/umfl-backend:{sha,latest}`, and SSHes
 into the VPS to `docker compose pull && up -d` against `deploy/docker-compose.prod.yml` (which the
 VPS keeps a copy of at `/opt/umfl`, alongside a `.env` — modeled on `deploy/.env.example` — that is

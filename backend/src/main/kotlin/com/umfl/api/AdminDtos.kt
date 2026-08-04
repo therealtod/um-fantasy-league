@@ -6,7 +6,6 @@ import com.umfl.match.BanResult
 import com.umfl.match.MatchResult
 import com.umfl.match.ParticipantResult
 import com.umfl.scoring.ScoringRuleSet
-import com.umfl.tournament.Tournament
 import com.umfl.tournament.TournamentFormat
 import com.umfl.tournament.TournamentStatus
 import jakarta.validation.Valid

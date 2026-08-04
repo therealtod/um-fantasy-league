@@ -49,7 +49,11 @@ class RateLimitFilter(
         .expireAfterAccess(properties.refillPeriod.multipliedBy(2))
         .build<String, Bucket> { newBucket() }
 
-    override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
+    override fun doFilterInternal(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        filterChain: FilterChain,
+    ) {
         if (!request.requestURI.startsWith("/api/")) {
             filterChain.doFilter(request, response)
             return

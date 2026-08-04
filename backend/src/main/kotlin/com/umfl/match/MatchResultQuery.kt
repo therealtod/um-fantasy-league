@@ -32,14 +32,22 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
      * Every recorded match in a tournament, oldest first — the scoring fold's input.
      * Optionally narrowed to one [round] — the admin match list's filter.
      */
-    fun findByTournament(tournamentId: Long, round: Int? = null): List<MatchResult> {
-        val roundClause = if (round != null) "and m.round = :round" else ""
-        var spec = jdbcClient
-            .sql("$SELECT_MATCH where m.tournament_id = :tournamentId $roundClause order by m.played_at, m.id")
-            .param("tournamentId", tournamentId)
-        if (round != null) spec = spec.param("round", round)
-        return assemble(spec.query(::mapMatchRow).list())
-    }
+    fun findByTournament(tournamentId: Long, round: Int? = null): List<MatchResult> =
+        assemble(
+            jdbcClient
+                .sql(
+                    """
+                    $SELECT_MATCH
+                    where m.tournament_id = :tournamentId
+                      and (cast(:round as int) is null or m.round = cast(:round as int))
+                    order by m.played_at, m.id
+                    """
+                )
+                .param("tournamentId", tournamentId)
+                .param("round", round)
+                .query(::mapMatchRow)
+                .list()
+        )
 
     /**
      * The newest [limit] matches after [sinceMatchId] — the ticker's page.
