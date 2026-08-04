@@ -26,8 +26,11 @@ class RateLimitFilterTest {
 
     private val jsonMapper = JsonMapper.builder().build()
 
-    private fun newFilter(capacity: Long = 3) =
-        RateLimitFilter(jsonMapper, RateLimitProperties(capacity = capacity, refillPeriod = Duration.ofMinutes(1)))
+    private fun newFilter(capacity: Long = 3, maxTrackedIps: Long = 100_000) =
+        RateLimitFilter(
+            jsonMapper,
+            RateLimitProperties(capacity = capacity, refillPeriod = Duration.ofMinutes(1), maxTrackedIps = maxTrackedIps),
+        )
 
     private fun request(uri: String, remoteAddr: String): HttpServletRequest {
         val request = mock(HttpServletRequest::class.java)
@@ -98,5 +101,20 @@ class RateLimitFilterTest {
         }
 
         verify(chain, times(5)).doFilter(any(), any())
+    }
+
+    @Test
+    fun `the bucket store evicts once it exceeds maxTrackedIps`() {
+        // Regression for the unbounded ConcurrentHashMap this cache replaced: every
+        // distinct IP used to allocate a Bucket that lived for the JVM's lifetime.
+        val filter = newFilter(capacity = 1, maxTrackedIps = 5)
+        val chain = mock(FilterChain::class.java)
+        val buckets = RateLimitFilter::class.java.getDeclaredField("buckets").apply { isAccessible = true }
+            .get(filter) as com.github.benmanes.caffeine.cache.LoadingCache<*, *>
+
+        repeat(50) { i -> filter.doFilter(request("/api/tournaments", "10.0.0.$i"), FakeResponse().response, chain) }
+        buckets.cleanUp()
+
+        assertTrue(buckets.estimatedSize() <= 5, "expected eviction to cap the bucket store at 5, got ${buckets.estimatedSize()}")
     }
 }

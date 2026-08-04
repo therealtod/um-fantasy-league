@@ -1,5 +1,6 @@
 package com.umfl.ratelimit
 
+import com.github.benmanes.caffeine.cache.Caffeine
 import io.github.bucket4j.Bandwidth
 import io.github.bucket4j.Bucket
 import jakarta.servlet.FilterChain
@@ -14,7 +15,6 @@ import org.springframework.web.filter.OncePerRequestFilter
 import tools.jackson.databind.json.JsonMapper
 import java.net.URI
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * IP-keyed token bucket in front of every `/api` route, registered in both
@@ -28,6 +28,15 @@ import java.util.concurrent.ConcurrentHashMap
  * connecting straight to the backend. The tradeoff is that traffic proxied
  * through Cloudflare Pages (see `frontend/public/_redirects`) shares a
  * bucket per Cloudflare edge IP rather than per real visitor.
+ *
+ * The key space is "every IP on the internet that touches `/api/`", which is
+ * unbounded, so the bucket store itself must be bounded and self-evicting —
+ * a plain `ConcurrentHashMap` would let a port scan grow this without limit
+ * for the JVM's lifetime. Caffeine expires an IP's bucket once it has been
+ * quiet for two refill periods (its bandwidth would have fully refilled
+ * anyway, so nothing is lost by starting over) and caps the map at
+ * [RateLimitProperties.maxTrackedIps] regardless, evicting least-recently-used
+ * entries first.
  */
 @Component
 class RateLimitFilter(
@@ -35,7 +44,10 @@ class RateLimitFilter(
     private val properties: RateLimitProperties,
 ) : OncePerRequestFilter() {
 
-    private val buckets = ConcurrentHashMap<String, Bucket>()
+    private val buckets = Caffeine.newBuilder()
+        .maximumSize(properties.maxTrackedIps)
+        .expireAfterAccess(properties.refillPeriod.multipliedBy(2))
+        .build<String, Bucket> { newBucket() }
 
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
         if (!request.requestURI.startsWith("/api/")) {
@@ -43,7 +55,7 @@ class RateLimitFilter(
             return
         }
 
-        val bucket = buckets.computeIfAbsent(request.remoteAddr) { newBucket() }
+        val bucket = buckets.get(request.remoteAddr)
         val probe = bucket.tryConsumeAndReturnRemaining(1)
         if (probe.isConsumed) {
             filterChain.doFilter(request, response)

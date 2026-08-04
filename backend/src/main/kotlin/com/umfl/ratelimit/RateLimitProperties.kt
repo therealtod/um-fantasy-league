@@ -15,4 +15,11 @@ import java.time.Duration
 data class RateLimitProperties(
     val capacity: Long = 300,
     val refillPeriod: Duration = Duration.ofMinutes(1),
+    /**
+     * Upper bound on distinct IPs tracked at once — the key space is "every
+     * IP that touches `/api/`", so [RateLimitFilter]'s bucket cache must cap
+     * itself rather than grow for the JVM's lifetime. Least-recently-used
+     * entries are evicted first once this is exceeded.
+     */
+    val maxTrackedIps: Long = 100_000,
 )
