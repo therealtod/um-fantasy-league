@@ -12,6 +12,7 @@ const heroPoolHeroes = ref<Hero[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const showAddForm = ref(false)
+const removingHero = ref<Hero | null>(null)
 
 const addForm = ref({
   heroId: null as number | null,
@@ -40,6 +41,7 @@ async function loadHeroes() {
 
 // Watch tournament selection to load its hero pool
 watch(selectedTournamentId, async (newId) => {
+  removingHero.value = null
   if (newId !== null) {
     await loadHeroPool(newId)
   } else {
@@ -108,6 +110,32 @@ async function updateHeroCost(heroId: number, newCost: number) {
     loading.value = false
   }
 }
+
+function startRemoveHero(hero: Hero) {
+  error.value = null
+  removingHero.value = hero
+}
+
+function cancelRemoveHero() {
+  removingHero.value = null
+}
+
+async function confirmRemoveHero() {
+  if (!selectedTournamentId.value || !removingHero.value) return
+
+  loading.value = true
+  error.value = null
+
+  try {
+    await api.admin.removeHeroFromPool(selectedTournamentId.value, removingHero.value.id)
+    removingHero.value = null
+    await loadHeroPool(selectedTournamentId.value)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Failed to remove hero from pool'
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -136,7 +164,7 @@ async function updateHeroCost(heroId: number, newCost: number) {
     </div>
 
     <!-- Hero pool controls -->
-    <div v-if="selectedTournamentId && !showAddForm" class="flex gap-3">
+    <div v-if="selectedTournamentId && !showAddForm && !removingHero" class="flex gap-3">
       <button class="btn-primary" @click="startAddHero">+ Add Hero to Pool</button>
     </div>
 
@@ -184,8 +212,27 @@ async function updateHeroCost(heroId: number, newCost: number) {
       </div>
     </div>
 
+    <!-- Remove confirmation — costs are joined live, so dropping the row re-prices unlocked rosters -->
+    <div v-if="removingHero" class="panel flex flex-col gap-5 border-magenta p-6">
+      <h3 class="headline text-lg text-magenta">Remove Hero from Pool</h3>
+      <p class="font-mono text-sm leading-relaxed text-ink-dim">
+        Remove <strong>{{ removingHero.name }}</strong> from this tournament's pool? Any unlocked
+        roster still holding this hero will re-price it to 0 credits until it is picked again.
+      </p>
+      <div class="flex justify-end gap-3 pt-2">
+        <button class="btn-ghost" :disabled="loading" @click="cancelRemoveHero">Cancel</button>
+        <button
+          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="loading"
+          @click="confirmRemoveHero"
+        >
+          {{ loading ? 'Removing...' : 'Remove from Pool' }}
+        </button>
+      </div>
+    </div>
+
     <!-- Hero pool list -->
-    <div v-if="selectedTournamentId && !showAddForm" class="flex flex-col gap-2">
+    <div v-if="selectedTournamentId && !showAddForm && !removingHero" class="flex flex-col gap-2">
       <div v-if="heroPoolHeroes.length === 0" class="p-12 text-center">
         <p class="text-ink-dim">No heroes in this tournament's pool yet. Add heroes to begin.</p>
       </div>
@@ -212,6 +259,12 @@ async function updateHeroCost(heroId: number, newCost: number) {
             "
           />
           <span class="font-mono text-xs text-ink-dim">CR</span>
+          <button
+            class="border border-magenta px-4 py-1.5 font-mono text-xs text-magenta transition-opacity hover:opacity-85"
+            @click="startRemoveHero(hero)"
+          >
+            Remove
+          </button>
         </div>
       </div>
     </div>

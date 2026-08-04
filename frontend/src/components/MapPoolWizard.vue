@@ -11,6 +11,7 @@ const maps = ref<MapAdminDto[]>([])
 const mapPool = ref<MapAdminDto[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const removingMap = ref<MapAdminDto | null>(null)
 
 const addForm = ref({
   mapId: null as number | null,
@@ -47,6 +48,7 @@ async function loadMapPool(tournamentId: number) {
 // Clear form and reload the pool when tournament changes
 watch(selectedTournamentId, async (newId) => {
   addForm.value = { mapId: null }
+  removingMap.value = null
   if (newId !== null) {
     await loadMapPool(newId)
   } else {
@@ -69,6 +71,33 @@ async function addMapToPool() {
     await loadMapPool(selectedTournamentId.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to add map to pool'
+  } finally {
+    loading.value = false
+  }
+}
+
+function startRemoveMap(map: MapAdminDto) {
+  error.value = null
+  removingMap.value = map
+}
+
+function cancelRemoveMap() {
+  removingMap.value = null
+}
+
+async function confirmRemoveMap() {
+  if (!selectedTournamentId.value || !removingMap.value) return
+
+  loading.value = true
+  error.value = null
+
+  try {
+    await api.admin.removeMapFromPool(selectedTournamentId.value, removingMap.value.id)
+    removingMap.value = null
+    await loadMapPool(selectedTournamentId.value)
+  } catch (e) {
+    // A 409 here means the tournament already has a match recorded on this board.
+    error.value = e instanceof Error ? e.message : 'Failed to remove map from pool'
   } finally {
     loading.value = false
   }
@@ -101,7 +130,7 @@ async function addMapToPool() {
     </div>
 
     <!-- Add map form -->
-    <div v-if="selectedTournamentId" class="panel flex flex-col gap-5 p-6">
+    <div v-if="selectedTournamentId && !removingMap" class="panel flex flex-col gap-5 p-6">
       <h3 class="headline text-lg text-cyan">Add Map to Tournament Pool</h3>
 
       <div class="flex flex-col gap-2">
@@ -131,8 +160,27 @@ async function addMapToPool() {
       </div>
     </div>
 
+    <!-- Remove confirmation — the API rejects this if a match was already played on the board -->
+    <div v-if="removingMap" class="panel flex flex-col gap-5 border-magenta p-6">
+      <h3 class="headline text-lg text-magenta">Remove Map from Pool</h3>
+      <p class="font-mono text-sm leading-relaxed text-ink-dim">
+        Remove <strong>{{ removingMap.name }}</strong> from this tournament's pool? This is rejected
+        if the tournament already has a match recorded on this board.
+      </p>
+      <div class="flex justify-end gap-3 pt-2">
+        <button class="btn-ghost" :disabled="loading" @click="cancelRemoveMap">Cancel</button>
+        <button
+          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="loading"
+          @click="confirmRemoveMap"
+        >
+          {{ loading ? 'Removing...' : 'Remove from Pool' }}
+        </button>
+      </div>
+    </div>
+
     <!-- Current pool -->
-    <div v-if="selectedTournamentId" class="flex flex-col gap-3">
+    <div v-if="selectedTournamentId && !removingMap" class="flex flex-col gap-3">
       <h3 class="headline text-lg text-cyan">Current Pool</h3>
       <div v-if="mapPool.length === 0" class="p-12 text-center">
         <p class="text-ink-dim">No maps in this tournament's pool yet.</p>
@@ -141,9 +189,15 @@ async function addMapToPool() {
         <li
           v-for="map in mapPool"
           :key="map.id"
-          class="panel headline p-4 text-base text-ink"
+          class="panel flex flex-wrap items-center justify-between gap-3 p-4"
         >
-          {{ map.name }}
+          <span class="headline text-base text-ink">{{ map.name }}</span>
+          <button
+            class="border border-magenta px-4 py-1.5 font-mono text-xs text-magenta transition-opacity hover:opacity-85"
+            @click="startRemoveMap(map)"
+          >
+            Remove
+          </button>
         </li>
       </ul>
     </div>
