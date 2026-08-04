@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MatchResultDto } from '@/api/types'
 
@@ -52,16 +52,19 @@ async function mountList() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
   listMatches.mockResolvedValue(matches)
   deleteMatch.mockResolvedValue(undefined)
 })
+
+function clickButton(wrapper: VueWrapper, label: string) {
+  return wrapper.findAll('button').find((b) => b.text() === label)!.trigger('click')
+}
 
 describe('MatchListAdmin', () => {
   it('loads the tournament\'s matches on mount', async () => {
     const wrapper = await mountList()
 
-    expect(listMatches).toHaveBeenCalledWith(1, undefined)
+    expect(listMatches).toHaveBeenCalledWith(1)
     expect(wrapper.text()).toContain('Center Square')
     expect(wrapper.text()).toContain('Baskerville Manor')
   })
@@ -73,15 +76,39 @@ describe('MatchListAdmin', () => {
     expect(options).toEqual(['All Rounds', 'Round 1', 'Round 2'])
   })
 
-  it('filters the visible rows to the selected round and re-requests it from the server', async () => {
+  it('filters the visible rows to the selected round without re-requesting', async () => {
     const wrapper = await mountList()
 
-    await wrapper.find('#round-filter').setValue('1')
+    await wrapper.find('#round-filter').setValue(1)
     await flushPromises()
 
-    expect(listMatches).toHaveBeenLastCalledWith(1, 1)
+    expect(listMatches).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('Center Square')
     expect(wrapper.text()).not.toContain('Baskerville Manor')
+  })
+
+  // A server-side filter would shrink the list the options are derived from, stranding the
+  // filter on whichever round was picked.
+  it('keeps offering every round while a round is selected', async () => {
+    const wrapper = await mountList()
+
+    await wrapper.find('#round-filter').setValue(1)
+    await flushPromises()
+
+    const options = wrapper.findAll('#round-filter option').map((o) => o.text().trim())
+    expect(options).toEqual(['All Rounds', 'Round 1', 'Round 2'])
+  })
+
+  it('reloads and clears the filter when the tournament changes', async () => {
+    const wrapper = await mountList()
+    await wrapper.find('#round-filter').setValue(1)
+    await flushPromises()
+
+    await wrapper.setProps({ tournamentId: 2 })
+    await flushPromises()
+
+    expect(listMatches).toHaveBeenLastCalledWith(2)
+    expect(wrapper.text()).toContain('Baskerville Manor')
   })
 
   it('shows the winning hero, falling back to the player label when recorded', async () => {
@@ -111,33 +138,38 @@ describe('MatchListAdmin', () => {
   it('emits edit with the match id', async () => {
     const wrapper = await mountList()
 
-    await wrapper.findAll('button').find((b) => b.text() === 'Edit')!.trigger('click')
+    await clickButton(wrapper, 'Edit')
 
     expect(wrapper.emitted('edit')).toEqual([[1]])
   })
 
-  it('asks for confirmation before deleting, and reloads the list once confirmed', async () => {
+  it('confirms in-app before deleting, and reloads the list once confirmed', async () => {
     const wrapper = await mountList()
-    listMatches.mockResolvedValue([matches[1]!])
 
-    await wrapper.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
+    await clickButton(wrapper, 'Delete')
+
+    expect(wrapper.text()).toContain('Delete Match')
+    expect(deleteMatch).not.toHaveBeenCalled()
+
+    listMatches.mockResolvedValue([matches[1]!])
+    await clickButton(wrapper, 'Delete Match')
     await flushPromises()
 
-    expect(window.confirm).toHaveBeenCalled()
     expect(deleteMatch).toHaveBeenCalledWith(1, 1)
     expect(listMatches).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).not.toContain('Center Square')
   })
 
-  it('leaves the list untouched when the delete confirmation is declined', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('leaves the list untouched when the delete confirmation is cancelled', async () => {
     const wrapper = await mountList()
 
-    await wrapper.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
+    await clickButton(wrapper, 'Delete')
+    await clickButton(wrapper, 'Cancel')
     await flushPromises()
 
     expect(deleteMatch).not.toHaveBeenCalled()
     expect(listMatches).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('Center Square')
   })
 
   it('surfaces a failed load as an error rather than an empty table', async () => {
@@ -151,7 +183,8 @@ describe('MatchListAdmin', () => {
     deleteMatch.mockRejectedValue(new Error('Match already deleted'))
     const wrapper = await mountList()
 
-    await wrapper.findAll('button').find((b) => b.text() === 'Delete')!.trigger('click')
+    await clickButton(wrapper, 'Delete')
+    await clickButton(wrapper, 'Delete Match')
     await flushPromises()
 
     expect(wrapper.text()).toContain('Match already deleted')
