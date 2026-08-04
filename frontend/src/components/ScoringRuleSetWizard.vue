@@ -2,14 +2,23 @@
 import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
-import type { ScoringCoefficientRequest } from '@/api/types'
+import type { ScoringCoefficientRequest, ScoringRuleSetDto } from '@/api/types'
 
 const tournamentsStore = useTournamentsStore()
 
 const selectedTournamentId = ref<number | null>(null)
+const ruleSets = ref<ScoringRuleSetDto[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const showForm = ref(false)
+const editingRuleSet = ref<ScoringRuleSetDto | null>(null)
+
+/**
+ * The `warnings` off the last save. An unknown metric is accepted on purpose
+ * (`MatchMetrics` scores it zero and drops it from the leaderboard's columns),
+ * so a clean 201 is the only signal an admin would otherwise get for a typo.
+ */
+const savedWarnings = ref<{ name: string; metrics: string[] } | null>(null)
 
 const form = ref({
   name: '',
@@ -19,8 +28,12 @@ const form = ref({
 
 const tournaments = computed(() => tournamentsStore.tournaments)
 
-// Common metrics for quick reference
-const commonMetrics = [
+/**
+ * Mirrors `MatchMetrics`' extractor registry. Purely a hint: the backend takes
+ * any metric string and reports the unpriced ones as warnings, so nothing here
+ * blocks a save — see `unknownFormMetrics`.
+ */
+const knownMetrics = [
   'APPEARANCE',
   'BAN',
   'WIN',
@@ -31,24 +44,79 @@ const commonMetrics = [
   'SHUTOUT',
 ]
 
+/** Same normalisation as `MatchMetrics.normalise`, so the hint matches the server's verdict. */
+function normaliseMetric(metric: string): string {
+  return metric.trim().toUpperCase()
+}
+
+function isUnknownMetric(metric: string): boolean {
+  const normalised = normaliseMetric(metric)
+  return normalised.length > 0 && !knownMetrics.includes(normalised)
+}
+
+/** Distinct unpriced metrics in the open form — warned about before the round trip, never rejected. */
+const unknownFormMetrics = computed(() => [
+  ...new Set(
+    form.value.coefficients
+      .map((c) => normaliseMetric(c.metric))
+      .filter((m) => m.length > 0 && !knownMetrics.includes(m)),
+  ),
+])
+
 watch(selectedTournamentId, () => {
-  resetForm()
+  cancelForm()
+  savedWarnings.value = null
+  void loadRuleSets()
 })
 
-function resetForm() {
-  form.value = {
-    name: '',
-    coefficients: [],
-    activate: false,
+async function loadRuleSets() {
+  if (!selectedTournamentId.value) {
+    ruleSets.value = []
+    return
   }
-  showForm.value = false
+
+  loading.value = true
+  error.value = null
+  try {
+    ruleSets.value = await api.admin.listScoringRuleSets(selectedTournamentId.value)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Failed to load scoring rule sets'
+  } finally {
+    loading.value = false
+  }
 }
 
 function startCreate() {
-  resetForm()
-  // Add one empty coefficient to start
-  form.value.coefficients.push({ metric: '', coefficient: 1.0, sortOrder: 0 })
+  editingRuleSet.value = null
+  savedWarnings.value = null
+  form.value = {
+    name: '',
+    // One empty coefficient to start — the backend requires at least one.
+    coefficients: [{ metric: '', coefficient: 1.0, sortOrder: 0 }],
+    activate: false,
+  }
   showForm.value = true
+}
+
+function startEdit(ruleSet: ScoringRuleSetDto) {
+  editingRuleSet.value = ruleSet
+  savedWarnings.value = null
+  form.value = {
+    name: ruleSet.name,
+    coefficients: ruleSet.coefficients.map((c, i) => ({
+      metric: c.metric,
+      coefficient: c.coefficient,
+      sortOrder: i,
+    })),
+    activate: false,
+  }
+  showForm.value = true
+}
+
+function cancelForm() {
+  showForm.value = false
+  editingRuleSet.value = null
+  form.value = { name: '', coefficients: [], activate: false }
 }
 
 function addCoefficient() {
@@ -69,6 +137,16 @@ function removeCoefficient(index: number) {
 
 function useMetric(index: number, metric: string) {
   form.value.coefficients[index].metric = metric
+}
+
+/** Replaces one rule set in the list, or appends it if it's new. */
+function mergeRuleSet(saved: ScoringRuleSetDto) {
+  const index = ruleSets.value.findIndex((r) => r.id === saved.id)
+  if (index === -1) {
+    ruleSets.value.push(saved)
+  } else {
+    ruleSets.value[index] = saved
+  }
 }
 
 async function saveRuleSet() {
@@ -94,16 +172,47 @@ async function saveRuleSet() {
 
   loading.value = true
   error.value = null
+  savedWarnings.value = null
 
   try {
-    await api.admin.createScoringRuleSet(selectedTournamentId.value, {
-      name: form.value.name,
-      coefficients: form.value.coefficients,
-      activate: form.value.activate,
-    })
-    resetForm()
+    const editing = editingRuleSet.value
+    const saved = editing
+      ? await api.admin.updateScoringRuleSet(selectedTournamentId.value, editing.id, {
+          name: form.value.name,
+          coefficients: form.value.coefficients,
+        })
+      : await api.admin.createScoringRuleSet(selectedTournamentId.value, {
+          name: form.value.name,
+          coefficients: form.value.coefficients,
+          activate: form.value.activate,
+        })
+
+    savedWarnings.value = { name: saved.name, metrics: saved.warnings ?? [] }
+    cancelForm()
+    // Activating deactivates a sibling, so the whole list is stale after a create+activate.
+    if (saved.isActive) {
+      await loadRuleSets()
+    } else {
+      mergeRuleSet(saved)
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to save scoring rule set'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
+  if (!selectedTournamentId.value) return
+
+  loading.value = true
+  error.value = null
+  try {
+    await api.admin.activateScoringRuleSet(selectedTournamentId.value, ruleSet.id)
+    // Reload rather than patch: the previously active sibling was deactivated too.
+    await loadRuleSets()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Failed to activate scoring rule set'
   } finally {
     loading.value = false
   }
@@ -119,6 +228,38 @@ async function saveRuleSet() {
     <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
       {{ error }}
     </p>
+
+    <!-- Post-save warnings: the save succeeded, but nothing scores these metrics. -->
+    <div
+      v-if="savedWarnings"
+      class="flex flex-col gap-2 border p-4 font-mono text-sm"
+      :class="
+        savedWarnings.metrics.length === 0
+          ? 'border-lime/50 bg-lime/10 text-lime'
+          : 'border-danger/50 bg-danger/10 text-danger'
+      "
+    >
+      <p v-if="savedWarnings.metrics.length === 0">
+        Saved “{{ savedWarnings.name }}”. Every metric is priced by the scoring engine.
+      </p>
+      <template v-else>
+        <p class="font-bold">
+          Saved “{{ savedWarnings.name }}”, but {{ savedWarnings.metrics.length }} metric{{
+            savedWarnings.metrics.length === 1 ? '' : 's'
+          }}
+          will score zero:
+        </p>
+        <ul class="flex flex-wrap gap-2">
+          <li v-for="metric in savedWarnings.metrics" :key="metric" class="border border-danger/50 px-2 py-1">
+            {{ metric }}
+          </li>
+        </ul>
+        <p class="text-xs">
+          No extractor implements these, so they add no points and never appear as a leaderboard
+          column. Check for a typo, or leave them if they are placeholders.
+        </p>
+      </template>
+    </div>
 
     <!-- Tournament selector -->
     <div class="flex flex-col gap-2">
@@ -142,7 +283,9 @@ async function saveRuleSet() {
 
     <!-- Form -->
     <div v-if="showForm" class="panel flex flex-col gap-5 p-6">
-      <h3 class="headline text-lg text-cyan">Create Scoring Rule Set</h3>
+      <h3 class="headline text-lg text-cyan">
+        {{ editingRuleSet ? `Edit “${editingRuleSet.name}”` : 'Create Scoring Rule Set' }}
+      </h3>
 
       <div class="flex flex-col gap-2">
         <label for="rule-set-name" class="label-caps">Rule Set Name *</label>
@@ -172,11 +315,15 @@ async function saveRuleSet() {
                   v-model="coef.metric"
                   type="text"
                   class="border border-edge bg-surface-low px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                  :class="isUnknownMetric(coef.metric) ? 'border-danger text-danger' : ''"
                   placeholder="METRIC_NAME"
                 />
+                <p v-if="isUnknownMetric(coef.metric)" class="font-mono text-[10px] text-danger">
+                  Nothing scores this metric — it will be worth zero points.
+                </p>
                 <div class="flex flex-wrap gap-1">
                   <button
-                    v-for="metric in commonMetrics"
+                    v-for="metric in knownMetrics"
                     :key="metric"
                     type="button"
                     class="border border-edge bg-surface-low px-2 py-1 font-mono text-[10px] text-ink-dim transition-colors hover:border-cyan hover:text-cyan"
@@ -225,7 +372,16 @@ async function saveRuleSet() {
         </button>
       </div>
 
-      <div class="flex flex-col gap-2">
+      <p
+        v-if="unknownFormMetrics.length > 0"
+        class="border border-danger/50 bg-danger/10 p-3 font-mono text-xs text-danger"
+      >
+        {{ unknownFormMetrics.join(', ') }} — no extractor implements
+        {{ unknownFormMetrics.length === 1 ? 'this metric' : 'these metrics' }}. Saving is allowed;
+        {{ unknownFormMetrics.length === 1 ? 'it' : 'they' }} will simply score zero.
+      </p>
+
+      <div v-if="!editingRuleSet" class="flex flex-col gap-2">
         <label class="flex cursor-pointer items-center gap-2 font-mono text-sm text-ink">
           <input v-model="form.activate" type="checkbox" />
           <span>Activate this rule set immediately</span>
@@ -233,10 +389,66 @@ async function saveRuleSet() {
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
-        <button class="btn-ghost" :disabled="loading" @click="resetForm">Cancel</button>
+        <button class="btn-ghost" :disabled="loading" @click="cancelForm">Cancel</button>
         <button class="btn-primary" :disabled="loading" @click="saveRuleSet">
           {{ loading ? 'Saving...' : 'Save Rule Set' }}
         </button>
+      </div>
+    </div>
+
+    <!-- Rule set list -->
+    <div v-if="selectedTournamentId && !showForm" class="flex flex-col gap-3">
+      <p v-if="ruleSets.length === 0 && !loading" class="p-12 text-center text-ink-dim">
+        This tournament has no scoring rule sets yet.
+      </p>
+
+      <div v-for="ruleSet in ruleSets" :key="ruleSet.id" class="panel flex flex-col gap-4 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="headline text-base text-ink">{{ ruleSet.name }}</span>
+            <span
+              v-if="ruleSet.isActive"
+              class="border border-lime/50 bg-lime/10 px-2 py-0.5 font-mono text-[10px] tracking-[0.1em] text-lime uppercase"
+            >
+              Active
+            </span>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-if="!ruleSet.isActive"
+              :id="`activate-${ruleSet.id}`"
+              class="border border-lime px-3 py-1 font-mono text-xs text-lime transition-colors hover:bg-lime/10"
+              :disabled="loading"
+              @click="activateRuleSet(ruleSet)"
+            >
+              Activate
+            </button>
+            <button
+              :id="`edit-${ruleSet.id}`"
+              class="btn-ghost px-4 py-2 text-xs"
+              :disabled="loading"
+              @click="startEdit(ruleSet)"
+            >
+              Edit
+            </button>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <span
+            v-for="coef in ruleSet.coefficients"
+            :key="coef.metric"
+            class="border border-edge bg-surface-lowest px-2 py-1 font-mono text-xs"
+            :class="ruleSet.warnings?.includes(coef.metric) ? 'text-danger' : 'text-ink-dim'"
+          >
+            {{ coef.metric }} × {{ coef.coefficient }}
+          </span>
+        </div>
+
+        <p v-if="ruleSet.warnings?.length" class="font-mono text-xs text-danger">
+          Unscored: {{ ruleSet.warnings.join(', ') }} — worth zero points, and absent from the
+          leaderboard's columns.
+        </p>
       </div>
     </div>
   </div>

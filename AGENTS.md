@@ -290,6 +290,14 @@ through the same `src/api/client.ts`. It's reachable only by managers with `isAd
 Routes above for the two layers of UI gating — with the Admin API's own `hasRole("ADMIN")` check as
 the actual security boundary.
 
+`ScoringRuleSetWizard` is the one place the "unknown metrics are a warning, not a rejection" rule
+becomes visible. It lists a tournament's rule sets with their active flag, edits and activates them,
+and **renders `ScoringRuleSetDto.warnings` after every save** — without that, a mistyped metric is a
+clean `201` followed by a column that silently scores zero forever. Its `knownMetrics` array mirrors
+`MatchMetrics`' extractor registry and only drives a hint (an inline flag while typing, normalised
+the same `trim().uppercase()` way); it never blocks a save, because the server deciding what it can
+price is the whole point of the warning. Keep the array in step when adding an extractor.
+
 ## Deliberately not built
 
 A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched stats — `heroes` is only
