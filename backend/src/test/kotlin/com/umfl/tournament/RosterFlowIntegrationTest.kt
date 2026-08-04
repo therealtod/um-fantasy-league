@@ -66,6 +66,25 @@ class RosterFlowIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `a full tournament is closed to new entries`() {
+        val tournament = requireNotNull(winterOfChampions().id)
+        tournamentService.register(tournament, manager("SherlockMain"))
+
+        // Shrink capacity to what is already taken rather than registering 64
+        // managers the seed does not have.
+        val taken = entryRepository.countByTournamentId(tournament)
+        jdbcClient.sql("update tournament set capacity = :c where id = :id")
+            .param("c", taken)
+            .param("id", tournament)
+            .update()
+
+        val error = assertFailsWith<ConflictException> {
+            tournamentService.register(tournament, manager("MythicMind"))
+        }
+        assertTrue(error.message!!.contains("is full"), error.message!!)
+    }
+
+    @Test
     fun `a finished tournament is closed to new entries`() {
         val summer = assertNotNull(tournamentRepository.findByName("Summer of Legends"))
 

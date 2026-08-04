@@ -46,6 +46,13 @@ class TournamentService(
      * Entering is free: there is no fee and no wallet. What registration does is
      * hand over a budget — the tournament's `credit_grant`, snapshotted onto the
      * entry so a later retune cannot disturb a roster drafted against it.
+     *
+     * The two ways this can race are guarded differently. Double registration is
+     * caught by `unique (tournament_id, manager_id)` even if the read below misses
+     * a concurrent insert. Capacity has no such constraint — a count is not a
+     * row — so the last seat is protected by locking the tournament row first:
+     * concurrent registrations for the same tournament serialise there, and each
+     * one counts entries only after the previous has committed its own.
      */
     @Transactional
     fun register(tournamentId: Long, manager: Manager): RosterSnapshot {
@@ -58,6 +65,9 @@ class TournamentService(
         if (entryRepository.findByTournamentIdAndManagerId(tournamentId, managerId) != null) {
             throw ConflictException("Already registered for ${tournament.name}.")
         }
+
+        tournamentRepository.lockById(tournamentId)
+            ?: throw NotFoundException("No tournament with id $tournamentId")
         if (entryRepository.countByTournamentId(tournamentId) >= tournament.capacity) {
             throw ConflictException("${tournament.name} is full (${tournament.capacity} entries).")
         }
