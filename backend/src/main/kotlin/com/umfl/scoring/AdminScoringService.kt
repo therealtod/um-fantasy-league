@@ -9,7 +9,7 @@ import java.math.BigDecimal
 
 data class ScoringCoefficientInput(val metric: String, val coefficient: BigDecimal, val sortOrder: Int = 0)
 
-/** The result of a create/update, paired with any metrics nothing prices — see [ScoringRuleSet]'s doc. */
+/** One rule set as create/update/list return it, paired with any metrics nothing prices — see [ScoringRuleSet]'s doc. */
 data class ScoringRuleSetResult(val ruleSet: ScoringRuleSet, val unknownMetrics: List<String>)
 
 @Service
@@ -17,6 +17,20 @@ class AdminScoringService(
     private val tournamentService: TournamentService,
     private val ruleSetRepository: ScoringRuleSetRepository,
 ) {
+
+    /**
+     * Every rule set for [tournamentId], active one first — an admin's only way
+     * to see what already exists. Transactional despite being a read: Spring
+     * Data JDBC loads each rule set's `coefficients` in its own statement, so
+     * without one the listing could straddle a concurrent activate/update.
+     */
+    @Transactional(readOnly = true)
+    fun list(tournamentId: Long): List<ScoringRuleSetResult> {
+        tournamentService.requireTournament(tournamentId)
+        return ruleSetRepository.findByTournamentId(tournamentId)
+            .sortedWith(compareByDescending<ScoringRuleSet> { it.isActive }.thenBy { it.name })
+            .map { ScoringRuleSetResult(it, MatchMetrics.unknown(it.coefficients.map { c -> c.metric })) }
+    }
 
     @Transactional
     fun create(

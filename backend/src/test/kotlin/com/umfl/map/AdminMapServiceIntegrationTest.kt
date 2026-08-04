@@ -1,6 +1,7 @@
 package com.umfl.map
 
 import com.umfl.common.ConflictException
+import com.umfl.common.NotFoundException
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
 import org.junit.jupiter.api.Test
@@ -18,6 +19,7 @@ class AdminMapServiceIntegrationTest @Autowired constructor(
 ) : PostgresIntegrationTest() {
 
     private fun winterOfChampionsId() = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
+    private fun summerOfLegendsId() = requireNotNull(tournamentRepository.findByName("Summer of Legends")?.id)
 
     @Test
     fun `creates a new map`() {
@@ -72,5 +74,37 @@ class AdminMapServiceIntegrationTest @Autowired constructor(
         adminMapService.addToPool(tournamentId, raptorPaddock)
 
         assertTrue(mapPoolAdminRepository.poolMaps(tournamentId).any { it.name == "Raptor Paddock" })
+    }
+
+    @Test
+    fun `removes a map from a tournament's pool`() {
+        val tournamentId = winterOfChampionsId()
+        val raptorPaddock = requireNotNull(gameMapRepository.findByName("Raptor Paddock")?.id)
+        adminMapService.addToPool(tournamentId, raptorPaddock)
+
+        adminMapService.removeFromPool(tournamentId, raptorPaddock)
+
+        assertTrue(raptorPaddock !in mapPoolAdminRepository.poolMapIds(tournamentId))
+    }
+
+    @Test
+    fun `removing a map not in the pool is rejected`() {
+        val tournamentId = winterOfChampionsId()
+        val created = adminMapService.create("Never Pooled Arena")
+
+        assertFailsWith<NotFoundException> {
+            adminMapService.removeFromPool(tournamentId, requireNotNull(created.id))
+        }
+    }
+
+    @Test
+    fun `removing a map with a recorded match on it is rejected, rather than surfacing a raw FK error`() {
+        val tournamentId = summerOfLegendsId()
+        val baskervilleManor = requireNotNull(gameMapRepository.findByName("Baskerville Manor")?.id)
+
+        assertFailsWith<ConflictException> {
+            adminMapService.removeFromPool(tournamentId, baskervilleManor)
+        }
+        assertTrue(baskervilleManor in mapPoolAdminRepository.poolMapIds(tournamentId), "the pool row must survive the rejected removal")
     }
 }

@@ -51,7 +51,7 @@ async function loadHeroPool(tournamentId: number) {
   loading.value = true
   error.value = null
   try {
-    heroPoolHeroes.value = await api.heroes(tournamentId)
+    heroPoolHeroes.value = await api.admin.listHeroPool(tournamentId)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load hero pool'
   } finally {

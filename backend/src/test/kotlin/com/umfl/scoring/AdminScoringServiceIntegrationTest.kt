@@ -21,6 +21,39 @@ class AdminScoringServiceIntegrationTest @Autowired constructor(
     private fun winterOfChampionsId() = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
 
     @Test
+    fun `lists a tournament's rule sets, active one first`() {
+        val tournamentId = winterOfChampionsId()
+        adminScoringService.create(
+            tournamentId,
+            name = "Retuned Weights",
+            coefficients = listOf(ScoringCoefficientInput("WIN", BigDecimal("12.0"), 0)),
+            activate = false,
+        )
+
+        val listed = adminScoringService.list(tournamentId)
+
+        assertEquals(2, listed.size)
+        assertEquals("Season 2026 Standard", listed.first().ruleSet.name)
+        assertTrue(listed.first().ruleSet.isActive)
+        assertTrue(listed.any { it.ruleSet.name == "Retuned Weights" && !it.ruleSet.isActive })
+    }
+
+    @Test
+    fun `listing surfaces the same unknown-metric warning as create does`() {
+        val tournamentId = winterOfChampionsId()
+        adminScoringService.create(
+            tournamentId,
+            name = "Experimental Weights",
+            coefficients = listOf(ScoringCoefficientInput("CROWD_FAVOURITE", BigDecimal("5.0"), 0)),
+            activate = false,
+        )
+
+        val listed = adminScoringService.list(tournamentId)
+
+        assertEquals(listOf("CROWD_FAVOURITE"), listed.single { it.ruleSet.name == "Experimental Weights" }.unknownMetrics)
+    }
+
+    @Test
     fun `creates a new inactive rule set alongside the seeded active one`() {
         val tournamentId = winterOfChampionsId()
 

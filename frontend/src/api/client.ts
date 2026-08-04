@@ -156,6 +156,12 @@ export const api = {
         body: JSON.stringify({ cost }),
       }),
 
+    listHeroPool: (tournamentId: number): Promise<Hero[]> =>
+      request(`/admin/tournaments/${tournamentId}/heroes`),
+
+    removeHeroFromPool: (tournamentId: number, heroId: number): Promise<void> =>
+      request(`/admin/tournaments/${tournamentId}/heroes/${heroId}`, { method: 'DELETE' }),
+
     // Maps
     listMaps: (): Promise<MapAdminDto[]> =>
       request('/admin/maps'),
@@ -171,6 +177,9 @@ export const api = {
 
     listMapPool: (tournamentId: number): Promise<MapAdminDto[]> =>
       request(`/admin/tournaments/${tournamentId}/maps`),
+
+    removeMapFromPool: (tournamentId: number, mapId: number): Promise<void> =>
+      request(`/admin/tournaments/${tournamentId}/maps/${mapId}`, { method: 'DELETE' }),
 
     // Matches
     listMatches: (tournamentId: number, round?: number): Promise<MatchResultDto[]> =>
@@ -199,6 +208,9 @@ export const api = {
       request(`/admin/tournaments/${tournamentId}/matches/${matchId}`, { method: 'DELETE' }),
 
     // Scoring
+    listScoringRuleSets: (tournamentId: number): Promise<ScoringRuleSetDto[]> =>
+      request(`/admin/tournaments/${tournamentId}/scoring-rule-sets`),
+
     createScoringRuleSet: (
       tournamentId: number,
       data: CreateScoringRuleSetRequest,

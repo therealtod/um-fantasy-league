@@ -3,16 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Hero, MapAdminDto, MatchResultDto } from '@/api/types'
 
 const listMapPool = vi.fn()
-const heroes = vi.fn()
+const listHeroPool = vi.fn()
 const recordMatch = vi.fn()
 const correctMatch = vi.fn()
 const getMatch = vi.fn()
 
 vi.mock('@/api/client', () => ({
   api: {
-    heroes: (...args: unknown[]) => heroes(...args),
     admin: {
       listMapPool: (...args: unknown[]) => listMapPool(...args),
+      listHeroPool: (...args: unknown[]) => listHeroPool(...args),
       recordMatch: (...args: unknown[]) => recordMatch(...args),
       correctMatch: (...args: unknown[]) => correctMatch(...args),
       getMatch: (...args: unknown[]) => getMatch(...args),
@@ -40,15 +40,16 @@ async function mountWizard(props: { tournamentId?: number; matchId?: number; mod
 beforeEach(() => {
   vi.clearAllMocks()
   listMapPool.mockResolvedValue(mapPool)
-  heroes.mockResolvedValue(heroPool)
+  listHeroPool.mockResolvedValue(heroPool)
 })
 
 describe('MatchResultWizard', () => {
   it('loads the tournament\'s map and hero pools instead of asking for raw ids', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    // Both pools come from the admin surface, never the player-facing /api/tournaments/{id}/heroes.
     expect(listMapPool).toHaveBeenCalledWith(1)
-    expect(heroes).toHaveBeenCalledWith(1)
+    expect(listHeroPool).toHaveBeenCalledWith(1)
     // No more raw-id number inputs for map or hero — every id comes from a <select>.
     expect(wrapper.find('#match-map').element.tagName).toBe('SELECT')
     expect(wrapper.find('#hero-0').element.tagName).toBe('SELECT')

@@ -42,6 +42,22 @@ class AdminHeroService(
             ?: error("Just-priced hero not found")
     }
 
+    /** A tournament's hero pool, priced — see `AdminHeroController.listPool` for why this is its own endpoint. */
+    fun pool(tournamentId: Long): List<HeroView> {
+        tournamentService.requireTournament(tournamentId)
+        return heroQueryRepository.findByTournament(tournamentId)
+    }
+
+    /** Removes [heroId] from [tournamentId]'s pool. See [HeroPoolAdminRepository.removeFromPool]'s doc for what this does to rosters that already hold it. */
+    @Transactional
+    fun removeFromPool(tournamentId: Long, heroId: Long) {
+        tournamentService.requireTournament(tournamentId)
+        requireHero(heroId)
+        if (!heroPoolAdminRepository.removeFromPool(tournamentId, heroId)) {
+            throw NotFoundException("Hero $heroId is not in tournament $tournamentId's pool")
+        }
+    }
+
     private fun requireHero(heroId: Long): Hero =
         heroRepository.findById(heroId).orElseThrow { NotFoundException("No hero with id $heroId") }
 }

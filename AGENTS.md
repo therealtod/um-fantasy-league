@@ -256,7 +256,12 @@ plus optional `VITE_DEV_MANAGER_ID` to skip Supabase Auth against a dev backend.
 `/api/admin/**`, `hasRole("ADMIN")`-gated, backed by `manager.is_admin` (our own data, independent of
 any identity provider). Covers create/update for tournaments, heroes, maps, per-tournament hero
 pool/pricing (`tournament_hero`), per-tournament board pool (`tournament_map`), and scoring rule
-sets/coefficients, plus create/update/delete for match results. The `V1__core_schema.sql` seed SQL is
+sets/coefficients, plus create/update/delete for match results. Both pools also support removal, and
+the two removals are deliberately asymmetric: dropping a hero from `tournament_hero` is always
+allowed and simply re-prices any roster still holding it to 0 (the "no cost snapshot" invariant
+above, applied to a removal rather than a re-price), while dropping a map from `tournament_map` is
+rejected with a `ConflictException` when the tournament has a recorded match on it, since
+`tournament_match` carries a composite FK onto that row. The `V1__core_schema.sql` seed SQL is
 still what populated the original fixtures — nothing about it changed — but it is no longer the only
 way new reference data or results can enter the system.
 

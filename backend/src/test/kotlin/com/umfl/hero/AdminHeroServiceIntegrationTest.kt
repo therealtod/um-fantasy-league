@@ -1,6 +1,7 @@
 package com.umfl.hero
 
 import com.umfl.common.ConflictException
+import com.umfl.common.NotFoundException
 import com.umfl.manager.ManagerRepository
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
@@ -10,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class AdminHeroServiceIntegrationTest @Autowired constructor(
     private val adminHeroService: AdminHeroService,
@@ -74,5 +76,50 @@ class AdminHeroServiceIntegrationTest @Autowired constructor(
 
         val reloaded = requireNotNull(tournamentService.findMyEntry(tournamentId, manager))
         assertEquals(3_000, reloaded.budget.spent, "nothing was snapshotted, so the draft re-prices itself")
+    }
+
+    @Test
+    fun `pool lists a tournament's hero pool, admin-scoped`() {
+        val tournamentId = winterOfChampionsId()
+
+        val pool = adminHeroService.pool(tournamentId)
+
+        assertTrue(pool.any { it.name == "Bigfoot" })
+        assertEquals(pool, heroQueryRepository.findByTournament(tournamentId))
+    }
+
+    @Test
+    fun `removes a hero from a tournament's pool`() {
+        val tournamentId = winterOfChampionsId()
+        val bigfootId = heroQueryRepository.findByTournament(tournamentId).single { it.name == "Bigfoot" }.id
+
+        adminHeroService.removeFromPool(tournamentId, bigfootId)
+
+        assertTrue(heroQueryRepository.findByTournament(tournamentId).none { it.id == bigfootId })
+    }
+
+    @Test
+    fun `removing a hero not in the pool is rejected`() {
+        val tournamentId = winterOfChampionsId()
+        val hero = adminHeroService.create("Never Pooled", null)
+
+        assertFailsWith<NotFoundException> {
+            adminHeroService.removeFromPool(tournamentId, requireNotNull(hero.id))
+        }
+    }
+
+    @Test
+    fun `removing a hero from the pool re-prices an unlocked roster holding it to 0, same as re-pricing does`() {
+        val tournamentId = winterOfChampionsId()
+        val bigfootId = heroQueryRepository.findByTournament(tournamentId).single { it.name == "Bigfoot" }.id
+        val manager = requireNotNull(managerRepository.findByHandle("MythicMind"))
+        tournamentService.register(tournamentId, manager)
+        val drafted = tournamentService.setSlots(tournamentId, manager, listOf(bigfootId))
+        assertEquals(2_100, drafted.budget.spent)
+
+        adminHeroService.removeFromPool(tournamentId, bigfootId)
+
+        val reloaded = requireNotNull(tournamentService.findMyEntry(tournamentId, manager))
+        assertEquals(0, reloaded.budget.spent, "the slot still holds the hero, but it costs nothing once out of the pool")
     }
 }

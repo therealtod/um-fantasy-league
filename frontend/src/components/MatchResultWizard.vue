@@ -85,7 +85,7 @@ async function loadPools() {
 
   const [maps, heroes] = await Promise.all([
     api.admin.listMapPool(tournamentId),
-    api.heroes(tournamentId),
+    api.admin.listHeroPool(tournamentId),
   ])
   mapPool.value = maps
   heroPool.value = heroes

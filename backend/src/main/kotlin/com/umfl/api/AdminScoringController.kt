@@ -8,6 +8,7 @@ import com.umfl.scoring.ScoringRuleSetResult
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.security.access.prepost.PreAuthorize
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -16,13 +17,19 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 
-/** Admin-only: create, update and activate a tournament's scoring rule sets. */
+/** Admin-only: create, update, list and activate a tournament's scoring rule sets. */
 @RestController
 @RequestMapping("/api/admin/tournaments/{tournamentId}/scoring-rule-sets")
 @PreAuthorize("hasRole('ADMIN')")
 class AdminScoringController(
     private val adminScoringService: AdminScoringService,
 ) {
+
+    @GetMapping
+    fun list(
+        @PathVariable tournamentId: Long,
+        @CurrentManager admin: Manager,
+    ): List<ScoringRuleSetDto> = adminScoringService.list(tournamentId).map { it.toDto() }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
