@@ -7,6 +7,7 @@ on:
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle/**"
+      - ".editorconfig"
       - ".github/workflows/backend-ci.yml"
   push:
     branches-ignore:
@@ -16,6 +17,7 @@ on:
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle/**"
+      - ".editorconfig"
       - ".github/workflows/backend-ci.yml"
 
 jobs:
@@ -30,6 +32,9 @@ jobs:
           java-version: "21"
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: Check Kotlin formatting
+        run: ./gradlew :backend:ktlintCheck
 
       - name: Run backend test suite
         run: ./gradlew :backend:test

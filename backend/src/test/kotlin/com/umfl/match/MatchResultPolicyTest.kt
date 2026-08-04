@@ -99,6 +99,51 @@ class MatchResultPolicyTest {
         assertEquals(listOf(MatchRule.DUPLICATE_HERO), violations.map { it.rule })
     }
 
+    /**
+     * `MatchResult.heroContexts()` resolves a played-and-banned hero in favour of
+     * "played". That branch is a backstop for bad data, so the write path must not
+     * be able to produce it.
+     */
+    @Test
+    fun `a hero both played and banned in the same match is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            mapId = 1L,
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = listOf(participant(10, winner = true), participant(11)),
+            bans = listOf(MatchBanInput(heroId = 10)),
+        )
+
+        assertEquals(listOf(MatchRule.DUPLICATE_HERO), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("10"))
+    }
+
+    @Test
+    fun `the same hero banned twice is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            mapId = 1L,
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = listOf(participant(10, winner = true), participant(11)),
+            bans = listOf(MatchBanInput(heroId = 12), MatchBanInput(heroId = 12)),
+        )
+
+        assertEquals(listOf(MatchRule.DUPLICATE_HERO), violations.map { it.rule })
+    }
+
+    @Test
+    fun `a hero banned in one match and played in another is legal`() {
+        val violations = MatchResultPolicy.validate(
+            mapId = 1L,
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = listOf(participant(10, winner = true), participant(11)),
+            bans = listOf(MatchBanInput(heroId = 12)),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+    }
+
     @Test
     fun `two winners is rejected`() {
         val violations = MatchResultPolicy.validate(

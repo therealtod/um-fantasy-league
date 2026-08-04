@@ -4,15 +4,14 @@ import com.umfl.common.ConflictException
 import com.umfl.support.PostgresIntegrationTest
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.jdbc.core.simple.JdbcClient
 import java.time.LocalDate
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
-
-import org.springframework.jdbc.core.simple.JdbcClient
 
 class AdminTournamentServiceIntegrationTest @Autowired constructor(
     private val adminTournamentService: AdminTournamentService,
@@ -132,7 +131,7 @@ class AdminTournamentServiceIntegrationTest @Autowired constructor(
             .param("id", summerId).query(Int::class.java).single()
         val matchCount = jdbcClient.sql("select count(*) from tournament_match where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
-        
+
         assertTrue(entryCount > 0, "Summer of Legends should have entries")
         assertTrue(matchCount > 0, "Summer of Legends should have matches")
 
@@ -141,7 +140,7 @@ class AdminTournamentServiceIntegrationTest @Autowired constructor(
 
         // Verify tournament is gone
         assertNull(tournamentRepository.findByName("Summer of Legends"))
-        
+
         // Verify related data is gone (cascade delete)
         val entriesAfter = jdbcClient.sql("select count(*) from tournament_entry where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()

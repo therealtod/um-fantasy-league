@@ -53,7 +53,9 @@ data class MatchResult(
      * Every hero this match touched -- played or banned -- exactly once, each
      * carrying its role so the metric extractors can price it.
      *
-     * A hero cannot both play and be banned in the same match; if a bad record
+     * A hero cannot both play and be banned in the same match — [MatchResultPolicy]
+     * rejects that submission as `DUPLICATE_HERO`, so the de-duplication below is a
+     * backstop for data that predates the check, not a supported input. If a record
      * ever says otherwise, playing wins, because it has real health and a real
      * result attached.
      */

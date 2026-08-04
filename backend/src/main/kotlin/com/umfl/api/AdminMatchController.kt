@@ -1,6 +1,7 @@
 package com.umfl.api
 
 import com.umfl.auth.CurrentManager
+import com.umfl.common.NotFoundException
 import com.umfl.manager.Manager
 import com.umfl.match.AdminMatchService
 import com.umfl.match.MatchBanInput
@@ -61,7 +62,7 @@ class AdminMatchController(
             .findById(matchId)
             ?.takeIf { it.tournamentId == tournamentId }
             ?.let(MatchResultDto::from)
-            ?: throw com.umfl.common.NotFoundException("No match $matchId in tournament $tournamentId")
+            ?: throw NotFoundException("No match $matchId in tournament $tournamentId")
     }
 
     @PostMapping

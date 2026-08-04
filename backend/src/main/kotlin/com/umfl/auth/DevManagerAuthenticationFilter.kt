@@ -24,7 +24,11 @@ class DevManagerAuthenticationFilter(
     private val managerRepository: ManagerRepository,
 ) : OncePerRequestFilter() {
 
-    override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, filterChain: FilterChain) {
+    override fun doFilterInternal(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        filterChain: FilterChain,
+    ) {
         val headerId = request.getHeader(DevManagerProvider.MANAGER_ID_HEADER)?.toLongOrNull()
         val manager = if (headerId != null) {
             managerRepository.findById(headerId).orElseThrow {

@@ -7,7 +7,7 @@ enum class MatchRule {
     /** The match does not have exactly the expected number of sides. */
     INVALID_PARTICIPANT_COUNT,
 
-    /** The same hero appears more than once. */
+    /** The same hero appears more than once — twice on the table, twice in the bans, or both played and banned. */
     DUPLICATE_HERO,
 
     /** More than one side is flagged as the winner. */
@@ -79,7 +79,11 @@ object MatchResultPolicy {
             )
         }
 
-        val duplicateHeroes = participants.groupingBy { it.heroId }.eachCount().filterValues { it > 1 }.keys
+        // Across participants *and* bans: a hero cannot be picked twice, banned twice, or
+        // banned and then played. The last case is what keeps MatchResult.heroContexts()'
+        // "playing wins" tie-break a backstop for bad data rather than a supported input.
+        val duplicateHeroes = (participants.map { it.heroId } + bans.map { it.heroId })
+            .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         if (duplicateHeroes.isNotEmpty()) {
             add(
                 MatchViolation(

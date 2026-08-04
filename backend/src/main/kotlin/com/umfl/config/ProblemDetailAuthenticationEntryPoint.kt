@@ -25,7 +25,11 @@ class ProblemDetailAuthenticationEntryPoint(private val jsonMapper: JsonMapper) 
 
     private val log = LoggerFactory.getLogger(javaClass)
 
-    override fun commence(request: HttpServletRequest, response: HttpServletResponse, authException: AuthenticationException) {
+    override fun commence(
+        request: HttpServletRequest,
+        response: HttpServletResponse,
+        authException: AuthenticationException,
+    ) {
         // The response body deliberately stays generic (matching Bearer's
         // convention of not handing token-validation specifics to the
         // client), but that means this is the only place the real reason

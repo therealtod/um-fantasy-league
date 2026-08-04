@@ -1,7 +1,6 @@
 package com.umfl.tournament
 
 import com.umfl.common.ConflictException
-import com.umfl.common.NotFoundException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate

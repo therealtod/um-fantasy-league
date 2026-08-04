@@ -111,6 +111,10 @@ class AdminScoringService(
 
     private fun toCoefficients(coefficients: List<ScoringCoefficientInput>): Set<ScoringCoefficient> =
         coefficients.map {
-            ScoringCoefficient(metric = MatchMetrics.normalise(it.metric), coefficient = it.coefficient, sortOrder = it.sortOrder)
+            ScoringCoefficient(
+                metric = MatchMetrics.normalise(it.metric),
+                coefficient = it.coefficient,
+                sortOrder = it.sortOrder,
+            )
         }.toSet()
 }
