@@ -24,6 +24,7 @@ class RosterFlowIntegrationTest @Autowired constructor(
     private val tournamentService: TournamentService,
     private val tournamentRepository: TournamentRepository,
     private val entryRepository: TournamentEntryRepository,
+    private val entryQuery: TournamentEntryQuery,
     private val managerRepository: ManagerRepository,
     private val heroQueryRepository: HeroQueryRepository,
     private val standingsQuery: StandingsQuery,
@@ -122,6 +123,25 @@ class RosterFlowIntegrationTest @Autowired constructor(
         val locked = tournamentService.lockRoster(tournament, manager(handle))
         assertEquals(EntryStatus.LOCKED, locked.entry.status)
         assertNotNull(locked.entry.lockedAt)
+    }
+
+    @Test
+    fun `the lobby's entry-status projection tracks registration and locking`() {
+        val tournament = requireNotNull(winterOfChampions().id)
+        val handle = "MythicMind"
+        val managerId = requireNotNull(manager(handle).id)
+
+        // Every seeded manager holds a locked Summer of Legends entry; Winter starts empty.
+        assertEquals(null, entryQuery.statusesByTournament(managerId)[tournament])
+
+        tournamentService.register(tournament, manager(handle))
+        assertEquals(EntryStatus.DRAFT, entryQuery.statusesByTournament(managerId)[tournament])
+
+        tournamentService.setSlots(tournament, manager(handle), heroIds("Alice", "Robin Hood", "Bigfoot"))
+        tournamentService.lockRoster(tournament, manager(handle))
+        val statuses = entryQuery.statusesByTournament(managerId)
+        assertEquals(EntryStatus.LOCKED, statuses[tournament])
+        assertTrue(statuses.size > 1, "the seeded Summer of Legends entry is still in the projection")
     }
 
     @Test

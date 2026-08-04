@@ -35,8 +35,6 @@ interface TournamentEntryRepository : CrudRepository<TournamentEntry, Long> {
 
     fun findByTournamentId(tournamentId: Long): List<TournamentEntry>
 
-    fun findByManagerId(managerId: Long): List<TournamentEntry>
-
     fun countByTournamentId(tournamentId: Long): Int
 
     /**

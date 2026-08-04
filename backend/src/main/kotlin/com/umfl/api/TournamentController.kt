@@ -5,7 +5,7 @@ import com.umfl.common.NotFoundException
 import com.umfl.manager.Manager
 import com.umfl.tournament.AdminTournamentService
 import com.umfl.tournament.EntryStatus
-import com.umfl.tournament.TournamentEntryRepository
+import com.umfl.tournament.TournamentEntryQuery
 import com.umfl.tournament.TournamentService
 import com.umfl.tournament.TournamentStatus
 import jakarta.validation.Valid
@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/tournaments")
 class TournamentController(
     private val tournamentService: TournamentService,
-    private val entryRepository: TournamentEntryRepository,
+    private val entryQuery: TournamentEntryQuery,
     private val adminTournamentService: AdminTournamentService,
 ) {
 
@@ -95,7 +95,6 @@ class TournamentController(
 
     private fun myEntryStatuses(manager: Manager?): Map<Long, EntryStatus> =
         manager?.id
-            ?.let { entryRepository.findByManagerId(it) }
-            ?.associate { it.tournamentId to it.status }
+            ?.let(entryQuery::statusesByTournament)
             .orEmpty()
 }
