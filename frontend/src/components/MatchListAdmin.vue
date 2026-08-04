@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { MatchResultDto } from '@/api/types'
 import { api } from '@/api/client'
 
@@ -13,6 +13,8 @@ const matches = ref<MatchResultDto[]>([])
 const isLoading = ref(false)
 const error = ref<string | null>(null)
 const selectedRound = ref<number | null>(null)
+const deletingMatch = ref<MatchResultDto | null>(null)
+const isDeleting = ref(false)
 
 const rounds = computed(() => {
   const roundsSet = new Set<number>()
@@ -20,6 +22,8 @@ const rounds = computed(() => {
   return Array.from(roundsSet).sort((a, b) => a - b)
 })
 
+// The round filter is client-side only: the dropdown's options are derived from the loaded
+// matches, so narrowing the request would leave it offering only the round already selected.
 const filteredMatches = computed(() => {
   if (selectedRound.value === null) return matches.value
   return matches.value.filter(match => match.round === selectedRound.value)
@@ -29,7 +33,7 @@ async function loadMatches() {
   isLoading.value = true
   error.value = null
   try {
-    matches.value = await api.admin.listMatches(props.tournamentId, selectedRound.value || undefined)
+    matches.value = await api.admin.listMatches(props.tournamentId)
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load matches'
   } finally {
@@ -50,19 +54,32 @@ function getWinner(match: MatchResultDto): string {
 }
 
 function handleEdit(matchId: number) {
-  // This will be implemented to open the match wizard in edit mode
-  console.log('Edit match:', matchId)
   emit('edit', matchId)
 }
 
-async function handleDelete(matchId: number) {
-  if (!confirm('Are you sure you want to delete this match?')) return
+function startDelete(match: MatchResultDto) {
+  error.value = null
+  deletingMatch.value = match
+}
 
+function cancelDelete() {
+  deletingMatch.value = null
+}
+
+async function confirmDelete() {
+  const match = deletingMatch.value
+  if (!match) return
+
+  isDeleting.value = true
+  error.value = null
   try {
-    await api.admin.deleteMatch(props.tournamentId, matchId)
+    await api.admin.deleteMatch(props.tournamentId, match.matchId)
+    deletingMatch.value = null
     await loadMatches() // Refresh the list
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to delete match'
+  } finally {
+    isDeleting.value = false
   }
 }
 
@@ -75,8 +92,17 @@ const emit = defineEmits<{
   edit: [matchId: number]
 }>()
 
-// Load matches on component mount
-loadMatches()
+// Load on mount, and again whenever the parent switches tournament — the round filter is
+// reset with it, since round numbers from the old tournament mean nothing in the new one.
+watch(
+  () => props.tournamentId,
+  () => {
+    selectedRound.value = null
+    deletingMatch.value = null
+    loadMatches()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -90,7 +116,6 @@ loadMatches()
             id="round-filter"
             v-model="selectedRound"
             class="cursor-pointer border border-edge bg-surface-lowest px-2 py-1 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
-            @change="loadMatches"
           >
             <option :value="null">All Rounds</option>
             <option v-for="round in rounds" :key="round" :value="round">
@@ -107,6 +132,26 @@ loadMatches()
     <p v-if="error" class="mb-4 border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
       {{ error }}
     </p>
+
+    <!-- Delete confirmation -->
+    <div v-if="deletingMatch" class="panel mb-4 flex flex-col gap-5 border-magenta p-6">
+      <h3 class="headline text-lg text-magenta">Delete Match</h3>
+      <p class="font-mono text-sm leading-relaxed text-ink-dim">
+        Are you sure you want to delete the round {{ deletingMatch.round }} match on
+        <strong>{{ deletingMatch.mapName ?? '—' }}</strong>? Its participants and bans go with it,
+        and every standing derived from it is recomputed. This cannot be undone.
+      </p>
+      <div class="flex justify-end gap-3 pt-2">
+        <button class="btn-ghost" :disabled="isDeleting" @click="cancelDelete">Cancel</button>
+        <button
+          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="isDeleting"
+          @click="confirmDelete"
+        >
+          {{ isDeleting ? 'Deleting...' : 'Delete Match' }}
+        </button>
+      </div>
+    </div>
 
     <div v-if="isLoading" class="p-8 text-center font-mono text-ink-dim">
       Loading matches...
@@ -183,7 +228,7 @@ loadMatches()
                 </button>
                 <button
                   class="border border-danger px-3 py-1 font-mono text-xs text-danger transition-colors hover:bg-danger/10"
-                  @click="handleDelete(match.matchId)"
+                  @click="startDelete(match)"
                 >
                   Delete
                 </button>
