@@ -14,6 +14,7 @@ data class ScoringRuleSetResult(val ruleSet: ScoringRuleSet, val unknownMetrics:
 class AdminScoringService(
     private val tournamentService: TournamentService,
     private val ruleSetRepository: ScoringRuleSetRepository,
+    private val ruleSetAdminRepository: ScoringRuleSetAdminRepository,
 ) {
 
     /**
@@ -77,18 +78,20 @@ class AdminScoringService(
 
     /**
      * Deactivates any currently-active sibling before activating [ruleSetId] —
-     * two separate saves, so the partial unique index never sees two active
-     * rows for the same tournament at once.
+     * two separate statements, so the partial unique index never sees two
+     * active rows for the same tournament at once.
+     *
+     * Both go through [ScoringRuleSetAdminRepository] rather than an aggregate
+     * save: flipping the flag must not rewrite the rule sets' coefficient rows.
      */
     @Transactional
     fun activate(tournamentId: Long, ruleSetId: Long): ScoringRuleSet {
         val target = requireRuleSet(tournamentId, ruleSetId)
 
-        ruleSetRepository.findByTournamentId(tournamentId)
-            .filter { it.isActive && it.id != ruleSetId }
-            .forEach { ruleSetRepository.save(it.copy(isActive = false)) }
+        ruleSetAdminRepository.deactivateOthers(tournamentId, ruleSetId)
+        ruleSetAdminRepository.activate(ruleSetId)
 
-        return ruleSetRepository.save(target.copy(isActive = true))
+        return target.copy(isActive = true)
     }
 
     /**

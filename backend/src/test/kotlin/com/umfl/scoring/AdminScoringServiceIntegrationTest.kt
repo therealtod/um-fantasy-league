@@ -117,6 +117,27 @@ class AdminScoringServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `activating leaves both rule sets' coefficient rows untouched`() {
+        val tournamentId = winterOfChampionsId()
+        val created = adminScoringService.create(
+            tournamentId,
+            name = "Retuned Weights",
+            coefficients = listOf(ScoringCoefficientInput("WIN", BigDecimal("12.0"), 0)),
+            activate = false,
+        ).ruleSet
+        val idsBefore = coefficientIdsByRuleSet(tournamentId)
+
+        adminScoringService.activate(tournamentId, requireNotNull(created.id))
+
+        // A boolean flip must not delete-and-reinsert the owned children.
+        assertEquals(idsBefore, coefficientIdsByRuleSet(tournamentId))
+    }
+
+    private fun coefficientIdsByRuleSet(tournamentId: Long): Map<Long?, Set<Long?>> =
+        ruleSetRepository.findByTournamentId(tournamentId)
+            .associate { it.id to it.coefficients.map { c -> c.id }.toSet() }
+
+    @Test
     fun `create can activate immediately`() {
         val tournamentId = winterOfChampionsId()
 
