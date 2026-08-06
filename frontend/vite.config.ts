@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // Keeps the browser on a single origin in development.
       '/api': {
-        target: 'https://unity-consider-weather-aware.trycloudflare.com',
+        target: 'https://cord-mountain-venice-fever.trycloudflare.com',
         changeOrigin: true,
       },
     },
