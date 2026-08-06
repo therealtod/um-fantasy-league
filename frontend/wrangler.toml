@@ -1,7 +1,14 @@
-name = "um-fantasy-league-frontend"
+name = "um-fantasy-league"
 main = "src/worker.ts"
 compatibility_date = "2026-08-03"
 
 [assets]
 directory = "./dist"
 binding = "ASSETS"
+
+# Not a secret — this is just the backend's base URL, so a plain [vars] entry
+# (checked into git, one place to update) beats `wrangler secret put`. Swap
+# this for the real backend host once one exists at a stable, non-tunnel
+# hostname (see BACKEND_HOST in AGENTS.md's CI/CD section).
+[vars]
+BACKEND_HOST = "https://cord-mountain-venice-fever.trycloudflare.com"
