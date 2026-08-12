@@ -95,10 +95,10 @@ class StandingsIntegrationTest @Autowired constructor(
 
         assertEquals(
             listOf(
-                "ArthurianLegend" to 84.00,
-                "NeonStrategist" to 75.75,
-                "MythicMind" to 63.25,
-                "SherlockMain" to 61.50,
+                "ArthurianLegend" to 98.00,
+                "NeonStrategist" to 72.25,
+                "SherlockMain" to 68.00,
+                "MythicMind" to 51.50,
             ),
             board.rows.map { it.handle to it.totalPoints },
         )
@@ -108,17 +108,17 @@ class StandingsIntegrationTest @Autowired constructor(
     /**
      * The row worked out by hand, metric by metric.
      *
-     * King Arthur — m3 loss (HR 4x0.75=3.00, HD (4-5)x0.5=-0.50, APP 1.00);
-     *   m8 win (WIN 10, HR 10x0.75=7.50, HD (10-3)x0.5=3.50, APP 1.00);
+     * King Arthur — m3 loss (HR 0, HD (0-5)x0.5=-2.50, APP 1.00);
+     *   m8 win (WIN 10, HR 10x0.75=7.50, HD (10-0)x0.5=5.00, SHUTOUT 3.00, APP 1.00);
      *   m12 banned (BAN 2.00).
-     * Yennenga — m3 win (WIN 10, HR 3.75, HD 0.50, APP 1.00);
-     *   m11 banned (BAN 2.00); m12 win (WIN 10, HR 6.75, HD 3.00, APP 1.00).
+     * Yennenga — m3 win (WIN 10, HR 3.75, HD 2.50, SHUTOUT 3.00, APP 1.00);
+     *   m11 banned (BAN 2.00); m12 win (WIN 10, HR 6.75, HD 4.50, SHUTOUT 3.00, APP 1.00).
      * Beowulf — m3 banned (BAN 2.00); m6 shut out (HR 0, HD (0-11)x0.5=-5.50,
-     *   APP 1.00); m8 banned (BAN 2.00); m10 win (WIN 10, HR 6.00, HD 2.00,
-     *   APP 1.00).
+     *   APP 1.00); m8 banned (BAN 2.00); m10 win (WIN 10, HR 6.00, HD 4.00,
+     *   SHUTOUT 3.00, APP 1.00).
      *
-     * WIN 40.00 + HEALTH_REMAINING 27.00 + HEALTH_DIFFERENTIAL 3.00
-     *   + SHUTOUT 0.00 + BAN 8.00 + APPEARANCE 6.00 = 84.00
+     * WIN 40.00 + HEALTH_REMAINING 24.00 + HEALTH_DIFFERENTIAL 8.00
+     *   + SHUTOUT 12.00 + BAN 8.00 + APPEARANCE 6.00 = 98.00
      */
     @Test
     fun `the winning row adds up metric by metric`() {
@@ -131,31 +131,31 @@ class StandingsIntegrationTest @Autowired constructor(
         assertEquals(
             mapOf(
                 "WIN" to 40.0,
-                "HEALTH_REMAINING" to 27.0,
-                "HEALTH_DIFFERENTIAL" to 3.0,
-                "SHUTOUT" to 0.0,
+                "HEALTH_REMAINING" to 24.0,
+                "HEALTH_DIFFERENTIAL" to 8.0,
+                "SHUTOUT" to 12.0,
                 "BAN" to 8.0,
                 "APPEARANCE" to 6.0,
             ),
             arthurian.breakdown,
         )
-        assertEquals(84.0, arthurian.totalPoints)
+        assertEquals(98.0, arthurian.totalPoints)
     }
 
-    /** The only roster holding the shutout hero, so the only one with SHUTOUT points. */
+    /** Every 0-health opponent awards SHUTOUT points to the winner's drafters. */
     @Test
     fun `the shutout shows up on exactly the rosters that drafted Bigfoot`() {
         val board = board()
 
         assertEquals(
             mapOf(
-                "ArthurianLegend" to 0.0,
-                "NeonStrategist" to 3.0,
-                "MythicMind" to 3.0,
-                "SherlockMain" to 0.0,
+                "ArthurianLegend" to 12.0,
+                "NeonStrategist" to 9.0,
+                "MythicMind" to 6.0,
+                "SherlockMain" to 9.0,
             ),
             board.rows.associate { it.handle to (it.breakdown["SHUTOUT"] ?: 0.0) },
-            "Bigfoot's single shutout is counted once into each of the two rosters holding it",
+            "each defeated hero on exactly zero health is a shutout",
         )
     }
 
@@ -176,10 +176,10 @@ class StandingsIntegrationTest @Autowired constructor(
 
         assertEquals(
             listOf(
-                "ArthurianLegend" to 43.75,
-                "NeonStrategist" to 8.00,
-                "MythicMind" to 6.25,
-                "SherlockMain" to 40.00,
+                "ArthurianLegend" to 53.25,
+                "NeonStrategist" to 3.00,
+                "SherlockMain" to 44.25,
+                "MythicMind" to -2.50,
             ),
             board.rows.map { it.handle to it.roundPoints },
         )
@@ -311,10 +311,10 @@ class StandingsIntegrationTest @Autowired constructor(
         val game = decisiveMatch.games.single()
         assertEquals(listOf("Sherlock Holmes", "Dracula"), game.sides.map { it.heroName })
         assertEquals(listOf(true, false), game.sides.map { it.isWinner })
-        assertEquals(listOf(7, 5), game.sides.map { it.healthRemaining })
-        // 10 + 5.25 + 1 + 1 = 17.25 against 3.75, LOSS being unpriced in the seed.
+        assertEquals(listOf(7, 0), game.sides.map { it.healthRemaining })
+        // 10 + 5.25 + 3.5 + 3 + 1 = 22.75 against (-3.5) + 1 = -2.5, LOSS being unpriced in the seed.
         assertEquals(
-            mapOf("Sherlock Holmes" to 17.25, "Dracula" to 3.75),
+            mapOf("Sherlock Holmes" to 22.75, "Dracula" to -2.5),
             game.sides.associate { it.heroName to it.points },
         )
         assertEquals(listOf("Medusa", "Yennenga"), decisiveMatch.bannedHeroNames)
@@ -341,10 +341,10 @@ class StandingsIntegrationTest @Autowired constructor(
         assertTrue(board.rows.all { "Medusa" !in it.roster && "Achilles" !in it.roster })
         assertEquals(
             listOf(
-                "ArthurianLegend" to 84.00,
-                "NeonStrategist" to 75.75,
-                "MythicMind" to 63.25,
-                "SherlockMain" to 61.50,
+                "ArthurianLegend" to 98.00,
+                "NeonStrategist" to 72.25,
+                "SherlockMain" to 68.00,
+                "MythicMind" to 51.50,
             ),
             board.rows.map { it.handle to it.totalPoints },
         )

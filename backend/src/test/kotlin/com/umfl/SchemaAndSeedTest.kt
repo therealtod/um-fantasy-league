@@ -275,6 +275,21 @@ class SchemaAndSeedTest @Autowired constructor(
     }
 
     @Test
+    fun `the database rejects positive health for a losing hero`() {
+        assertFailsWith<DataIntegrityViolationException> {
+            jdbcClient
+                .sql(
+                    """
+                    update match_game_participant
+                    set health_remaining = 1
+                    where game_id = 1 and side = 1
+                    """
+                )
+                .update()
+        }
+    }
+
+    @Test
     fun `the database rejects a game recorded without a map`() {
         assertFailsWith<DataIntegrityViolationException> {
             jdbcClient

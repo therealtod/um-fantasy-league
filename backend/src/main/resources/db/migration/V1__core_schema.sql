@@ -293,11 +293,11 @@ create table match_game (
 
 -- One side's result in one game: the hero it brought and how it ended.
 --
--- `health_remaining` is the survivor's health at the end, 0 for a defeated
--- hero. Exactly one side of a game carries `is_winner` -- a game always has
--- a winner, enforced in MatchResultPolicy (NOT_EXACTLY_ONE_WINNER) rather
--- than here, since a partial unique index could pin "at most one" but not
--- "at least one".
+-- A losing hero has 0 or less health at the end of the game. The winner can
+-- have any health, including a negative value. Exactly one side of a game
+-- carries `is_winner` -- a game always has a winner, enforced in
+-- MatchResultPolicy (NOT_EXACTLY_ONE_WINNER) rather than here, since a partial
+-- unique index could pin "at most one" but not "at least one".
 --
 -- `unique (game_id, hero_id)` is unambiguous here precisely because banned
 -- heroes live in `hero_ban` and never appear as a game participant.
@@ -313,10 +313,11 @@ create table match_game_participant (
     game_id          bigint  not null references match_game (id) on delete cascade,
     side             integer not null check (side in (0, 1)),
     hero_id          bigint  not null references heroes (id),
-    health_remaining integer not null check (health_remaining >= 0),
+    health_remaining integer not null,
     is_winner        boolean not null default false,
     primary key (game_id, side),
-    unique (game_id, hero_id)
+    unique (game_id, hero_id),
+    constraint match_game_participant_loser_defeated check (is_winner or health_remaining <= 0)
 );
 
 create unique index uq_match_game_participant_winner
@@ -705,36 +706,36 @@ from (values
     join game_map m on m.name = v.map_name;
 
 -- Match 6 is the SHUTOUT: Bigfoot finishes on 11 health, Beowulf on 0.
--- Match 11 is won on health with both heroes still alive (7 vs 5) -- there is
--- no drawn result to seed, see match_game_participant's comment.
+-- Every losing hero finishes on 0 or less health. Every game has a winner --
+-- there is no drawn result to seed, see match_game_participant's comment.
 insert into match_game_participant (game_id, side, hero_id, health_remaining, is_winner)
 select mg.id, v.side, h.id, v.health_remaining, v.is_winner
 from (values
     ( 1, 0, 'Sun Wukong',       9, true),
-    ( 1, 1, 'Alice',            3, false),
+    ( 1, 1, 'Alice',            0, false),
     ( 2, 0, 'Robin Hood',       6, true),
-    ( 2, 1, 'Achilles',         2, false),
+    ( 2, 1, 'Achilles',         0, false),
     ( 3, 0, 'Yennenga',         5, true),
-    ( 3, 1, 'King Arthur',      4, false),
+    ( 3, 1, 'King Arthur',      0, false),
     ( 4, 0, 'Sherlock Holmes',  7, true),
-    ( 4, 1, 'Dracula',          1, false),
+    ( 4, 1, 'Dracula',          0, false),
     ( 5, 0, 'Medusa',           8, true),
-    ( 5, 1, 'Sun Wukong',       2, false),
+    ( 5, 1, 'Sun Wukong',       0, false),
     -- shutout
     ( 6, 0, 'Bigfoot',         11, true),
     ( 6, 1, 'Beowulf',          0, false),
     ( 7, 0, 'Alice',            6, true),
-    ( 7, 1, 'Sinbad',           4, false),
+    ( 7, 1, 'Sinbad',           0, false),
     ( 8, 0, 'King Arthur',     10, true),
-    ( 8, 1, 'Robin Hood',       3, false),
+    ( 8, 1, 'Robin Hood',       0, false),
     ( 9, 0, 'Medusa',           7, true),
-    ( 9, 1, 'Achilles',         5, false),
+    ( 9, 1, 'Achilles',         0, false),
     (10, 0, 'Beowulf',          8, true),
-    (10, 1, 'Bigfoot',          4, false),
+    (10, 1, 'Bigfoot',          0, false),
     (11, 0, 'Sherlock Holmes',  7, true),
-    (11, 1, 'Dracula',          5, false),
+    (11, 1, 'Dracula',          0, false),
     (12, 0, 'Yennenga',         9, true),
-    (12, 1, 'Sinbad',           3, false)
+    (12, 1, 'Sinbad',           0, false)
 ) as v(match_id, side, hero_name, health_remaining, is_winner)
     join match_game mg on mg.match_id = v.match_id and mg.game_number = 1
     join heroes h on h.name = v.hero_name;

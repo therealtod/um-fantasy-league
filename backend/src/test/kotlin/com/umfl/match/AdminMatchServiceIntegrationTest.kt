@@ -265,11 +265,31 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 playedAt = Instant.now(),
                 externalLink = null,
                 participants = participants(),
-                games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, winnerA = false, healthB = 5),
+                games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 0, winnerA = false, healthB = 0),
                 bans = emptyList(),
             )
         }
         assertEquals(listOf(MatchRule.NOT_EXACTLY_ONE_WINNER), error.violations.map { it.rule })
+    }
+
+    @Test
+    fun `a game with a positive-health loser is rejected`() {
+        val tournamentId = winterOfChampionsId()
+        val mapId = id("game_map", "Baskerville Manor")
+
+        val error = assertFailsWith<MatchRuleException> {
+            adminMatchService.record(
+                tournamentId,
+                round = 1,
+                playedAt = Instant.now(),
+                externalLink = null,
+                participants = participants(),
+                games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, healthB = 5),
+                bans = emptyList(),
+            )
+        }
+
+        assertEquals(listOf(MatchRule.LOSER_HAS_POSITIVE_HEALTH), error.violations.map { it.rule })
     }
 
     @Test

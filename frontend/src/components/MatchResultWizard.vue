@@ -135,7 +135,8 @@ function removeBan(index: number) {
 // Picking a side makes it the sole winner of that game and clears the other.
 // There is no way to pick *neither*, and that is deliberate: every game is
 // played to a decision, so the server rejects a game with no winner
-// (NOT_EXACTLY_ONE_WINNER).
+// (NOT_EXACTLY_ONE_WINNER). The losing side must finish with 0 or less health;
+// the winning side may have any health, including a negative value.
 function setWinner(gameIndex: number, participantIndex: number) {
   form.value.games[gameIndex].participants.forEach((p, i) => {
     p.isWinner = i === participantIndex
@@ -166,6 +167,10 @@ async function saveMatch() {
   // untouched winner radio reads as a prompt rather than a 422.
   if (form.value.games.some((g) => g.participants.filter((p) => p.isWinner).length !== 1)) {
     error.value = 'Every game needs exactly one winner — a game cannot end in a draw'
+    return
+  }
+  if (form.value.games.some((g) => g.participants.some((p) => !p.isWinner && p.healthRemaining > 0))) {
+    error.value = 'The losing hero must have 0 or less health'
     return
   }
 
@@ -350,12 +355,11 @@ onMounted(async () => {
             </div>
 
             <div class="flex flex-col gap-2">
-              <label :for="`game-${gameIndex}-health-${participantIndex}`" class="label-caps">Health Remaining</label>
+              <label :for="`game-${gameIndex}-health-${participantIndex}`" class="label-caps">Health (loser: 0 or less)</label>
               <input
                 :id="`game-${gameIndex}-health-${participantIndex}`"
                 v-model.number="participant.healthRemaining"
                 type="number"
-                min="0"
                 class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
               />
             </div>

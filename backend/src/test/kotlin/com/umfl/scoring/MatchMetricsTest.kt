@@ -67,11 +67,11 @@ class MatchMetricsTest {
         bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.PRE_BAN)),
     )
 
-    /** Match 11 of the seed: Sherlock Holmes wins 7 to Dracula's 5, both still alive. */
+    /** Match 11 of the seed: Sherlock Holmes wins 7 to Dracula's 0. */
     private val decisiveMatch = match(
         listOf(
             gameParticipant(side = 0, heroId = 5, heroName = "Sherlock Holmes", health = 7, isWinner = true),
-            gameParticipant(side = 1, heroId = 6, heroName = "Dracula", health = 5),
+            gameParticipant(side = 1, heroId = 6, heroName = "Dracula", health = 0),
         ),
     )
 
@@ -170,7 +170,7 @@ class MatchMetricsTest {
         fun `HEALTH_REMAINING is the hero's own end-of-game health`() {
             assertEquals(11.0, measure("HEALTH_REMAINING", contextFor(shutoutMatch, 7)))
             assertEquals(0.0, measure("HEALTH_REMAINING", contextFor(shutoutMatch, 11)))
-            assertEquals(5.0, measure("HEALTH_REMAINING", contextFor(decisiveMatch, 6)))
+            assertEquals(0.0, measure("HEALTH_REMAINING", contextFor(decisiveMatch, 6)))
         }
 
         @Test
@@ -178,8 +178,8 @@ class MatchMetricsTest {
             val sherlock = measure("HEALTH_DIFFERENTIAL", contextFor(decisiveMatch, 5))
             val dracula = measure("HEALTH_DIFFERENTIAL", contextFor(decisiveMatch, 6))
 
-            assertEquals(2.0, sherlock)
-            assertEquals(-2.0, dracula)
+            assertEquals(7.0, sherlock)
+            assertEquals(-7.0, dracula)
             assertEquals(0.0, sherlock + dracula, "a differential must neither create nor destroy points")
         }
 

@@ -103,6 +103,22 @@ describe('MatchResultWizard', () => {
     expect(wrapper.text()).toContain('cannot end in a draw')
   })
 
+  it('refuses to save a game with a positive-health loser', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('1')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('losing hero must have 0 or less health')
+  })
+
   it('moves the winner to the other side instead of ever having two', async () => {
     recordMatch.mockResolvedValue({})
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })

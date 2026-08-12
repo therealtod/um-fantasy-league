@@ -32,6 +32,9 @@ enum class MatchRule {
      */
     NOT_EXACTLY_ONE_WINNER,
 
+    /** A losing hero finished with positive health. */
+    LOSER_HAS_POSITIVE_HEALTH,
+
     /** A `heroId` referenced by a game participant or a ban does not exist. */
     UNKNOWN_HERO,
 }
@@ -163,6 +166,18 @@ object MatchResultPolicy {
                     MatchRule.NOT_EXACTLY_ONE_WINNER,
                     "Game(s) $undecidedGames do not have exactly one winner. Every game is " +
                         "played to a decision, so a game with no winner is as invalid as one with two.",
+                )
+            )
+        }
+
+        val survivingLoserGames = games
+            .filter { game -> game.participants.any { !it.isWinner && it.healthRemaining > 0 } }
+            .map { it.gameNumber }.sorted()
+        if (survivingLoserGames.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.LOSER_HAS_POSITIVE_HEALTH,
+                    "Losing hero(es) in game(s) $survivingLoserGames must have 0 or less health.",
                 )
             )
         }

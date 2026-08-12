@@ -52,6 +52,37 @@ class MatchResultPolicyTest {
     }
 
     @Test
+    fun `a game with a positive-health loser is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = listOf(
+                game(participants = listOf(gameParticipant(10, health = 7, winner = true), gameParticipant(11, health = 5))),
+            ),
+            bans = emptyList(),
+        )
+
+        assertEquals(listOf(MatchRule.LOSER_HAS_POSITIVE_HEALTH), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("[1]"))
+    }
+
+    @Test
+    fun `a winner with negative health is legal`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = listOf(
+                game(participants = listOf(gameParticipant(10, health = -2, winner = true), gameParticipant(11))),
+            ),
+            bans = emptyList(),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+    }
+
+    @Test
     fun `a best-of-three series with a hero repeated across games is legal`() {
         val violations = MatchResultPolicy.validate(
             validMapIds = validMaps,

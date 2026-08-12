@@ -51,8 +51,8 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                         gameNumber = 1,
                         mapId = baskerville,
                         participants = listOf(
-                            MatchGameParticipant(heroId = alice, healthRemaining = 6, isWinner = true),
-                            MatchGameParticipant(heroId = robinHood, healthRemaining = 2, isWinner = false),
+                            MatchGameParticipant(heroId = alice, healthRemaining = -2, isWinner = true),
+                            MatchGameParticipant(heroId = robinHood, healthRemaining = 0, isWinner = false),
                         ),
                     ),
                 ),
@@ -74,8 +74,8 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         assertEquals(1, game.gameNumber)
         assertEquals(baskerville, game.mapId)
         assertEquals(2, game.participants.size)
-        assertTrue(game.participants.any { it.heroId == alice && it.isWinner && it.healthRemaining == 6 })
-        assertTrue(game.participants.any { it.heroId == robinHood && !it.isWinner && it.healthRemaining == 2 })
+        assertTrue(game.participants.any { it.heroId == alice && it.isWinner && it.healthRemaining == -2 })
+        assertTrue(game.participants.any { it.heroId == robinHood && !it.isWinner && it.healthRemaining == 0 })
 
         val ban = reloaded.bans.single()
         assertEquals(bigfoot, ban.heroId)
