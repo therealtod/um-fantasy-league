@@ -4,6 +4,7 @@ import type { MapAdminDto } from '@/api/types'
 
 const listMaps = vi.fn()
 const listMapPool = vi.fn()
+const addMapsToPool = vi.fn()
 const removeMapFromPool = vi.fn()
 
 vi.mock('@/api/client', () => ({
@@ -12,6 +13,7 @@ vi.mock('@/api/client', () => ({
       listMaps: (...args: unknown[]) => listMaps(...args),
       listMapPool: (...args: unknown[]) => listMapPool(...args),
       addMapToPool: vi.fn(),
+      addMapsToPool: (...args: unknown[]) => addMapsToPool(...args),
       removeMapFromPool: (...args: unknown[]) => removeMapFromPool(...args),
     },
   },
@@ -38,6 +40,10 @@ async function mountWizardWithTournament() {
 
 function removeButton(wrapper: Awaited<ReturnType<typeof mountWizardWithTournament>>) {
   return wrapper.findAll('button').find((b) => b.text() === 'Remove')
+}
+
+function mapCheckbox(wrapper: Awaited<ReturnType<typeof mountWizardWithTournament>>, mapId: number) {
+  return wrapper.find(`input[type="checkbox"][value="${mapId}"]`)
 }
 
 beforeEach(() => {
@@ -84,5 +90,41 @@ describe('MapPoolWizard removal', () => {
     expect(wrapper.text()).toContain('Map is used by a recorded match')
     // The confirmation stays open on failure so the admin can retry or back out.
     expect(wrapper.text()).toContain('Remove Map from Pool')
+  })
+})
+
+describe('MapPoolWizard batch add', () => {
+  it('checks maps locally without calling the API', async () => {
+    const wrapper = await mountWizardWithTournament()
+
+    await mapCheckbox(wrapper, 6).setValue(true)
+
+    expect(addMapsToPool).not.toHaveBeenCalled()
+    expect(wrapper.findAll('button').find((b) => b.text() === 'Add 1 Map to Pool')).toBeTruthy()
+  })
+
+  it('submits every checked map in one batch request', async () => {
+    const wrapper = await mountWizardWithTournament()
+    addMapsToPool.mockResolvedValue([])
+
+    await mapCheckbox(wrapper, 6).setValue(true)
+    await wrapper.findAll('button').find((b) => b.text() === 'Add 1 Map to Pool')!.trigger('click')
+    await flushPromises()
+
+    expect(addMapsToPool).toHaveBeenCalledTimes(1)
+    expect(addMapsToPool).toHaveBeenCalledWith(1, [6])
+    expect(listMapPool).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the selection if the batch submit fails', async () => {
+    const wrapper = await mountWizardWithTournament()
+    addMapsToPool.mockRejectedValue(new Error('Map 6 is already recorded'))
+
+    await mapCheckbox(wrapper, 6).setValue(true)
+    await wrapper.findAll('button').find((b) => b.text() === 'Add 1 Map to Pool')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Map 6 is already recorded')
+    expect((mapCheckbox(wrapper, 6).element as HTMLInputElement).checked).toBe(true)
   })
 })

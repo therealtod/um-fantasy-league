@@ -7,6 +7,7 @@ import type {
   CreateTournamentRequest,
   Hero,
   HeroAdminDto,
+  HeroPoolEntryRequest,
   HeroSort,
   Manager,
   MapAdminDto,
@@ -159,6 +160,13 @@ export const api = {
     listHeroPool: (tournamentId: number): Promise<Hero[]> =>
       request(`/admin/tournaments/${tournamentId}/heroes`),
 
+    /** Adds/re-prices several heroes in one request — the batch counterpart to `setHeroCost`. */
+    addHeroesToPool: (tournamentId: number, heroes: HeroPoolEntryRequest[]): Promise<Hero[]> =>
+      request(`/admin/tournaments/${tournamentId}/heroes`, {
+        method: 'POST',
+        body: JSON.stringify({ heroes }),
+      }),
+
     removeHeroFromPool: (tournamentId: number, heroId: number): Promise<void> =>
       request(`/admin/tournaments/${tournamentId}/heroes/${heroId}`, { method: 'DELETE' }),
 
@@ -177,6 +185,13 @@ export const api = {
 
     listMapPool: (tournamentId: number): Promise<MapAdminDto[]> =>
       request(`/admin/tournaments/${tournamentId}/maps`),
+
+    /** Adds several maps in one request — the batch counterpart to `addMapToPool`. */
+    addMapsToPool: (tournamentId: number, mapIds: number[]): Promise<MapAdminDto[]> =>
+      request(`/admin/tournaments/${tournamentId}/maps`, {
+        method: 'POST',
+        body: JSON.stringify({ mapIds }),
+      }),
 
     removeMapFromPool: (tournamentId: number, mapId: number): Promise<void> =>
       request(`/admin/tournaments/${tournamentId}/maps/${mapId}`, { method: 'DELETE' }),

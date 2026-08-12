@@ -2,6 +2,7 @@ package com.umfl.api
 
 import com.umfl.auth.CurrentManager
 import com.umfl.hero.AdminHeroService
+import com.umfl.hero.HeroPoolEntryInput
 import com.umfl.hero.HeroRepository
 import com.umfl.manager.Manager
 import jakarta.validation.Valid
@@ -54,6 +55,17 @@ class AdminHeroController(
         @Valid @RequestBody request: UpdateHeroRequest,
         @CurrentManager admin: Manager,
     ): HeroAdminDto = HeroAdminDto.from(adminHeroService.update(id, requireNotNull(request.name), request.imageUrl))
+
+    /** Batch counterpart to [setPoolCost] — adds/re-prices several heroes in one request. */
+    @PostMapping("/api/admin/tournaments/{tournamentId}/heroes")
+    fun addBatchToPool(
+        @PathVariable tournamentId: Long,
+        @Valid @RequestBody request: AddHeroesToPoolRequest,
+        @CurrentManager admin: Manager,
+    ): List<HeroDto> = adminHeroService.addBatchToPool(
+        tournamentId,
+        request.heroes.orEmpty().map { HeroPoolEntryInput(requireNotNull(it.heroId), requireNotNull(it.cost)) },
+    ).map(HeroDto::from)
 
     @PutMapping("/api/admin/tournaments/{tournamentId}/heroes/{heroId}")
     fun setPoolCost(

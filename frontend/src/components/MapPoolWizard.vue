@@ -13,9 +13,8 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const removingMap = ref<MapAdminDto | null>(null)
 
-const addForm = ref({
-  mapId: null as number | null,
-})
+// Maps staged for the next batch submit — checked here, sent in one request.
+const selectedMapIds = ref<number[]>([])
 
 const tournaments = computed(() => tournamentsStore.tournaments)
 
@@ -45,9 +44,9 @@ async function loadMapPool(tournamentId: number) {
   }
 }
 
-// Clear form and reload the pool when tournament changes
+// Clear selection and reload the pool when tournament changes
 watch(selectedTournamentId, async (newId) => {
-  addForm.value = { mapId: null }
+  selectedMapIds.value = []
   removingMap.value = null
   if (newId !== null) {
     await loadMapPool(newId)
@@ -56,21 +55,18 @@ watch(selectedTournamentId, async (newId) => {
   }
 })
 
-async function addMapToPool() {
-  if (!selectedTournamentId.value || !addForm.value.mapId) {
-    error.value = 'Please select a map'
-    return
-  }
+async function submitBatch() {
+  if (!selectedTournamentId.value || selectedMapIds.value.length === 0) return
 
   loading.value = true
   error.value = null
 
   try {
-    await api.admin.addMapToPool(selectedTournamentId.value, addForm.value.mapId)
-    addForm.value = { mapId: null }
+    await api.admin.addMapsToPool(selectedTournamentId.value, selectedMapIds.value)
+    selectedMapIds.value = []
     await loadMapPool(selectedTournamentId.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to add map to pool'
+    error.value = e instanceof Error ? e.message : 'Failed to add maps to pool'
   } finally {
     loading.value = false
   }
@@ -129,33 +125,34 @@ async function confirmRemoveMap() {
       </select>
     </div>
 
-    <!-- Add map form -->
+    <!-- Add maps form — check several, then submit once as a batch -->
     <div v-if="selectedTournamentId && !removingMap" class="panel flex flex-col gap-5 p-6">
-      <h3 class="headline text-lg text-cyan">Add Map to Tournament Pool</h3>
+      <h3 class="headline text-lg text-cyan">Add Maps to Tournament Pool</h3>
 
-      <div class="flex flex-col gap-2">
-        <label for="map-select" class="label-caps">Map *</label>
-        <select
-          id="map-select"
-          v-model.number="addForm.mapId"
-          class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+      <p v-if="maps.length === 0" class="font-mono text-xs text-ink-dim italic">
+        No maps exist yet. Create one in the Maps section first.
+      </p>
+      <p v-else-if="availableMaps.length === 0" class="font-mono text-xs text-ink-dim italic">
+        Every map is already in this tournament's pool.
+      </p>
+      <div v-else class="flex flex-col gap-2">
+        <label
+          v-for="map in availableMaps"
+          :key="map.id"
+          class="flex cursor-pointer items-center gap-3 border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink"
         >
-          <option :value="null">-- Choose a map --</option>
-          <option v-for="map in availableMaps" :key="map.id" :value="map.id">
-            {{ map.name }}
-          </option>
-        </select>
-        <p v-if="maps.length === 0" class="font-mono text-xs text-ink-dim italic">
-          No maps exist yet. Create one in the Maps section first.
-        </p>
-        <p v-else-if="availableMaps.length === 0" class="font-mono text-xs text-ink-dim italic">
-          Every map is already in this tournament's pool.
-        </p>
+          <input v-model="selectedMapIds" type="checkbox" :value="map.id" class="cursor-pointer" />
+          {{ map.name }}
+        </label>
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
-        <button class="btn-primary" :disabled="loading || !addForm.mapId" @click="addMapToPool">
-          {{ loading ? 'Adding...' : 'Add to Pool' }}
+        <button class="btn-primary" :disabled="loading || selectedMapIds.length === 0" @click="submitBatch">
+          {{
+            loading
+              ? 'Adding...'
+              : `Add ${selectedMapIds.length} ${selectedMapIds.length === 1 ? 'Map' : 'Maps'} to Pool`
+          }}
         </button>
       </div>
     </div>

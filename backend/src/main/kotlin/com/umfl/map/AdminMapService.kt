@@ -41,6 +41,20 @@ class AdminMapService(
         return map
     }
 
+    /** Adds many maps to [tournamentId]'s board pool in one round trip — the batch counterpart to [addToPool]. */
+    @Transactional
+    fun addBatchToPool(tournamentId: Long, mapIds: List<Long>): List<GameMap> {
+        tournamentService.requireTournament(tournamentId)
+        val distinct = mapIds.toSet()
+        val maps = gameMapRepository.findAllById(distinct).toList()
+        val missing = distinct - maps.mapNotNull { it.id }.toSet()
+        if (missing.isNotEmpty()) {
+            throw NotFoundException("No map(s) with id(s) ${missing.sorted().joinToString()}")
+        }
+        mapPoolAdminRepository.addToPoolBatch(tournamentId, distinct)
+        return maps
+    }
+
     /**
      * Removes [mapId] from [tournamentId]'s board pool. Rejected outright, as a
      * 409 rather than a raw FK error, if the tournament already has a recorded

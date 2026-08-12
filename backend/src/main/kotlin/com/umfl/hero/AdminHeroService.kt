@@ -6,6 +6,8 @@ import com.umfl.tournament.TournamentService
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
+data class HeroPoolEntryInput(val heroId: Long, val cost: Int)
+
 @Service
 class AdminHeroService(
     private val heroRepository: HeroRepository,
@@ -42,6 +44,20 @@ class AdminHeroService(
             ?: error("Just-priced hero not found")
     }
 
+    /**
+     * Adds/re-prices many heroes into [tournamentId]'s pool in one round trip —
+     * the batch counterpart to [setPoolCost] for admin UIs that stage several
+     * picks before submitting once. A heroId repeated within [entries] behaves
+     * like calling [setPoolCost] for it twice: last cost wins.
+     */
+    @Transactional
+    fun addBatchToPool(tournamentId: Long, entries: List<HeroPoolEntryInput>): List<HeroView> {
+        tournamentService.requireTournament(tournamentId)
+        requireHeroes(entries.map { it.heroId })
+        heroPoolAdminRepository.upsertCosts(tournamentId, entries)
+        return heroQueryRepository.findByIds(tournamentId, entries.map { it.heroId }.distinct())
+    }
+
     /** A tournament's hero pool, priced — see `AdminHeroController.listPool` for why this is its own endpoint. */
     fun pool(tournamentId: Long): List<HeroView> {
         tournamentService.requireTournament(tournamentId)
@@ -60,4 +76,13 @@ class AdminHeroService(
 
     private fun requireHero(heroId: Long): Hero =
         heroRepository.findById(heroId).orElseThrow { NotFoundException("No hero with id $heroId") }
+
+    private fun requireHeroes(heroIds: List<Long>) {
+        val distinct = heroIds.toSet()
+        val found = heroRepository.findAllById(distinct).mapNotNull { it.id }.toSet()
+        val missing = distinct - found
+        if (missing.isNotEmpty()) {
+            throw NotFoundException("No hero(es) with id(s) ${missing.sorted().joinToString()}")
+        }
+    }
 }

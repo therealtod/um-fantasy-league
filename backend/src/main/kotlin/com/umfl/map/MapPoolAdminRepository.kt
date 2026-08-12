@@ -18,6 +18,19 @@ class MapPoolAdminRepository(private val jdbcClient: JdbcClient) {
         ).param("tournamentId", tournamentId).param("mapId", mapId).update()
     }
 
+    /** Same idempotent add as [addToPool], batched into one multi-row INSERT. */
+    fun addToPoolBatch(tournamentId: Long, mapIds: Collection<Long>) {
+        if (mapIds.isEmpty()) return
+        val ids = mapIds.toList()
+        val valuesSql = ids.indices.joinToString(", ") { "(:tournamentId, :mapId$it)" }
+        val statement = ids.foldIndexed(
+            jdbcClient.sql(
+                "insert into tournament_map (tournament_id, map_id) values $valuesSql on conflict do nothing"
+            ).param("tournamentId", tournamentId)
+        ) { i, spec, mapId -> spec.param("mapId$i", mapId) }
+        statement.update()
+    }
+
     /** The set of maps this tournament may record a match on — reused by [com.umfl.match.MatchResultPolicy]. */
     fun poolMapIds(tournamentId: Long): Set<Long> =
         jdbcClient.sql("select map_id from tournament_map where tournament_id = :tournamentId")

@@ -72,6 +72,19 @@ data class SetHeroCostRequest(
     val cost: Int?,
 )
 
+data class HeroPoolEntryRequest(
+    @field:NotNull(message = "heroId is required")
+    val heroId: Long?,
+    @field:Positive(message = "cost must be positive")
+    val cost: Int?,
+)
+
+data class AddHeroesToPoolRequest(
+    @field:Valid
+    @field:Size(min = 1, message = "at least one hero is required")
+    val heroes: List<HeroPoolEntryRequest>?,
+)
+
 // ---------------------------------------------------------------------------
 // Maps
 // ---------------------------------------------------------------------------
@@ -91,6 +104,11 @@ data class MapAdminDto(
         fun from(map: GameMap) = MapAdminDto(id = requireNotNull(map.id), name = map.name)
     }
 }
+
+data class AddMapsToPoolRequest(
+    @field:Size(min = 1, message = "at least one map is required")
+    val mapIds: List<Long>?,
+)
 
 // ---------------------------------------------------------------------------
 // Match results

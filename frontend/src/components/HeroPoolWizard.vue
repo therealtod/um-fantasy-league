@@ -19,12 +19,16 @@ const addForm = ref({
   cost: 1000,
 })
 
+// Heroes staged for the next batch submit — built up client-side, sent in one request.
+const pendingHeroes = ref<{ heroId: number; name: string; cost: number }[]>([])
+
 const tournaments = computed(() => tournamentsStore.tournaments)
 
-// Heroes not yet in this tournament's pool — the only ones worth adding.
+// Heroes not yet in this tournament's pool and not already staged — the only ones worth adding.
 const availableHeroes = computed(() => {
   const poolIds = new Set(heroPoolHeroes.value.map((h) => h.id))
-  return heroes.value.filter((h) => !poolIds.has(h.id))
+  const pendingIds = new Set(pendingHeroes.value.map((p) => p.heroId))
+  return heroes.value.filter((h) => !poolIds.has(h.id) && !pendingIds.has(h.id))
 })
 
 onMounted(() => {
@@ -42,6 +46,7 @@ async function loadHeroes() {
 // Watch tournament selection to load its hero pool
 watch(selectedTournamentId, async (newId) => {
   removingHero.value = null
+  cancelAddForm()
   if (newId !== null) {
     await loadHeroPool(newId)
   } else {
@@ -63,33 +68,49 @@ async function loadHeroPool(tournamentId: number) {
 
 function startAddHero() {
   addForm.value = { heroId: null, cost: 1000 }
+  pendingHeroes.value = []
   showAddForm.value = true
 }
 
 function cancelAddForm() {
   showAddForm.value = false
   addForm.value = { heroId: null, cost: 1000 }
+  pendingHeroes.value = []
 }
 
-async function addHeroToPool() {
-  if (!selectedTournamentId.value || !addForm.value.heroId) {
+// Stages one hero locally — no API call yet. The whole staged list ships in one request from submitBatch.
+function stageHero() {
+  if (!addForm.value.heroId) {
     error.value = 'Please select a hero and enter a cost'
     return
   }
+  const hero = heroes.value.find((h) => h.id === addForm.value.heroId)
+  if (!hero) return
+
+  error.value = null
+  pendingHeroes.value.push({ heroId: hero.id, name: hero.name, cost: addForm.value.cost })
+  addForm.value = { heroId: null, cost: 1000 }
+}
+
+function removePendingHero(index: number) {
+  pendingHeroes.value.splice(index, 1)
+}
+
+async function submitBatch() {
+  if (!selectedTournamentId.value || pendingHeroes.value.length === 0) return
 
   loading.value = true
   error.value = null
 
   try {
-    await api.admin.setHeroCost(
+    await api.admin.addHeroesToPool(
       selectedTournamentId.value,
-      addForm.value.heroId,
-      addForm.value.cost,
+      pendingHeroes.value.map((p) => ({ heroId: p.heroId, cost: p.cost })),
     )
     await loadHeroPool(selectedTournamentId.value)
     cancelAddForm()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to add hero to pool'
+    error.value = e instanceof Error ? e.message : 'Failed to add heroes to pool'
   } finally {
     loading.value = false
   }
@@ -168,46 +189,82 @@ async function confirmRemoveHero() {
       <button class="btn-primary" @click="startAddHero">+ Add Hero to Pool</button>
     </div>
 
-    <!-- Add hero form -->
+    <!-- Add heroes form — stage several picks, then submit once as a batch -->
     <div v-if="showAddForm" class="panel flex flex-col gap-5 p-6">
-      <h3 class="headline text-lg text-cyan">Add Hero to Pool</h3>
+      <h3 class="headline text-lg text-cyan">Add Heroes to Pool</h3>
 
-      <div class="flex flex-col gap-2">
-        <label for="hero-select" class="label-caps">Hero *</label>
-        <select
-          id="hero-select"
-          v-model.number="addForm.heroId"
-          class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
-        >
-          <option :value="null">-- Choose a hero --</option>
-          <option v-for="hero in availableHeroes" :key="hero.id" :value="hero.id">
-            {{ hero.name }}
-          </option>
-        </select>
-        <p v-if="heroes.length === 0" class="font-mono text-xs text-ink-dim italic">
-          No heroes exist yet. Create one in the Heroes section first.
-        </p>
-        <p v-else-if="availableHeroes.length === 0" class="font-mono text-xs text-ink-dim italic">
-          Every hero is already in this tournament's pool.
-        </p>
+      <div class="flex flex-wrap items-end gap-3">
+        <div class="flex flex-1 flex-col gap-2">
+          <label for="hero-select" class="label-caps">Hero</label>
+          <select
+            id="hero-select"
+            v-model.number="addForm.heroId"
+            class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+          >
+            <option :value="null">-- Choose a hero --</option>
+            <option v-for="hero in availableHeroes" :key="hero.id" :value="hero.id">
+              {{ hero.name }}
+            </option>
+          </select>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label for="hero-cost-input" class="label-caps">Cost (Credits)</label>
+          <input
+            id="hero-cost-input"
+            v-model.number="addForm.cost"
+            type="number"
+            min="1"
+            class="w-32 border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            placeholder="e.g., 5000"
+          />
+        </div>
+
+        <button class="btn-primary" :disabled="!addForm.heroId" @click="stageHero">+ Stage Hero</button>
       </div>
 
-      <div class="flex flex-col gap-2">
-        <label for="hero-cost-input" class="label-caps">Cost (Credits) *</label>
-        <input
-          id="hero-cost-input"
-          v-model.number="addForm.cost"
-          type="number"
-          min="1"
-          class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
-          placeholder="e.g., 5000"
-        />
+      <p v-if="heroes.length === 0" class="font-mono text-xs text-ink-dim italic">
+        No heroes exist yet. Create one in the Heroes section first.
+      </p>
+      <p v-else-if="availableHeroes.length === 0 && pendingHeroes.length === 0" class="font-mono text-xs text-ink-dim italic">
+        Every hero is already in this tournament's pool.
+      </p>
+
+      <!-- Staged heroes — nothing is sent to the server until "Add ... to Pool" below -->
+      <div v-if="pendingHeroes.length > 0" class="flex flex-col gap-2">
+        <p class="label-caps">Staged for this batch ({{ pendingHeroes.length }})</p>
+        <div
+          v-for="(pending, index) in pendingHeroes"
+          :key="pending.heroId"
+          class="flex items-center justify-between gap-3 border border-edge bg-surface-lowest px-3 py-2"
+        >
+          <span class="font-mono text-sm text-ink">{{ pending.name }}</span>
+          <div class="flex items-center gap-2">
+            <input
+              v-model.number="pending.cost"
+              type="number"
+              min="1"
+              class="w-24 border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            />
+            <span class="font-mono text-xs text-ink-dim">CR</span>
+            <button
+              class="border border-magenta px-3 py-1 font-mono text-xs text-magenta transition-opacity hover:opacity-85"
+              @click="removePendingHero(index)"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="flex justify-end gap-3 pt-2">
         <button class="btn-ghost" :disabled="loading" @click="cancelAddForm">Cancel</button>
-        <button class="btn-primary" :disabled="loading || !addForm.heroId" @click="addHeroToPool">
-          {{ loading ? 'Adding...' : 'Add to Pool' }}
+        <button class="btn-primary" :disabled="loading || pendingHeroes.length === 0" @click="submitBatch">
+          {{
+            loading
+              ? 'Adding...'
+              : `Add ${pendingHeroes.length} ${pendingHeroes.length === 1 ? 'Hero' : 'Heroes'} to Pool`
+          }}
         </button>
       </div>
     </div>

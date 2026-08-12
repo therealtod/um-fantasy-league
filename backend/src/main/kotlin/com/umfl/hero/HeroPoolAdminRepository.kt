@@ -25,6 +25,25 @@ class HeroPoolAdminRepository(private val jdbcClient: JdbcClient) {
     }
 
     /**
+     * Same upsert as [upsertCost], batched into a single multi-row INSERT so N
+     * additions cost one round trip instead of N.
+     */
+    fun upsertCosts(tournamentId: Long, entries: List<HeroPoolEntryInput>) {
+        if (entries.isEmpty()) return
+        val valuesSql = entries.indices.joinToString(", ") { "(:tournamentId, :heroId$it, :cost$it)" }
+        val statement = entries.foldIndexed(
+            jdbcClient.sql(
+                """
+                insert into tournament_hero (tournament_id, hero_id, cost)
+                values $valuesSql
+                on conflict (tournament_id, hero_id) do update set cost = excluded.cost
+                """
+            ).param("tournamentId", tournamentId)
+        ) { i, spec, entry -> spec.param("heroId$i", entry.heroId).param("cost$i", entry.cost) }
+        statement.update()
+    }
+
+    /**
      * Removes [heroId] from [tournamentId]'s pool. Returns false if it wasn't
      * there to begin with.
      *

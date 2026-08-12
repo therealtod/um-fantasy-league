@@ -50,6 +50,14 @@ class AdminMapController(
         @CurrentManager admin: Manager,
     ): MapAdminDto = MapAdminDto.from(adminMapService.update(id, requireNotNull(request.name)))
 
+    /** Batch counterpart to [addToPool] — adds several maps in one request. */
+    @PostMapping("/api/admin/tournaments/{tournamentId}/maps")
+    fun addBatchToPool(
+        @PathVariable tournamentId: Long,
+        @Valid @RequestBody request: AddMapsToPoolRequest,
+        @CurrentManager admin: Manager,
+    ): List<MapAdminDto> = adminMapService.addBatchToPool(tournamentId, request.mapIds.orEmpty()).map(MapAdminDto::from)
+
     @PutMapping("/api/admin/tournaments/{tournamentId}/maps/{mapId}")
     fun addToPool(
         @PathVariable tournamentId: Long,

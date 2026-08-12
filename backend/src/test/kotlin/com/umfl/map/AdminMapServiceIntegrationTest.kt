@@ -78,6 +78,40 @@ class AdminMapServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `addBatchToPool adds several new maps in one call`() {
+        val tournamentId = winterOfChampionsId()
+        val raptorPaddock = requireNotNull(gameMapRepository.findByName("Raptor Paddock")?.id)
+        val newMap = requireNotNull(adminMapService.create("Batch Map A").id)
+
+        adminMapService.addBatchToPool(tournamentId, listOf(raptorPaddock, newMap))
+
+        val poolIds = mapPoolAdminRepository.poolMapIds(tournamentId)
+        assertTrue(raptorPaddock in poolIds)
+        assertTrue(newMap in poolIds)
+    }
+
+    @Test
+    fun `addBatchToPool is idempotent for a map already in the pool`() {
+        val tournamentId = winterOfChampionsId()
+        val raptorPaddock = requireNotNull(gameMapRepository.findByName("Raptor Paddock")?.id)
+        adminMapService.addToPool(tournamentId, raptorPaddock)
+
+        adminMapService.addBatchToPool(tournamentId, listOf(raptorPaddock))
+
+        assertEquals(1, mapPoolAdminRepository.poolMapIds(tournamentId).count { it == raptorPaddock })
+    }
+
+    @Test
+    fun `addBatchToPool rejects an unknown map id`() {
+        val tournamentId = winterOfChampionsId()
+        val unknownId = 9_999_999L
+
+        assertFailsWith<NotFoundException> {
+            adminMapService.addBatchToPool(tournamentId, listOf(unknownId))
+        }
+    }
+
+    @Test
     fun `removes a map from a tournament's pool`() {
         val tournamentId = winterOfChampionsId()
         val raptorPaddock = requireNotNull(gameMapRepository.findByName("Raptor Paddock")?.id)

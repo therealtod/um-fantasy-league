@@ -79,6 +79,58 @@ class AdminHeroServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `addBatchToPool adds several brand-new heroes in one call`() {
+        val tournamentId = winterOfChampionsId()
+        val heroA = requireNotNull(adminHeroService.create("Batch Hero A", null).id)
+        val heroB = requireNotNull(adminHeroService.create("Batch Hero B", null).id)
+
+        val result = adminHeroService.addBatchToPool(
+            tournamentId,
+            listOf(HeroPoolEntryInput(heroA, 1_200), HeroPoolEntryInput(heroB, 2_400)),
+        )
+
+        assertEquals(setOf(1_200, 2_400), result.map { it.cost }.toSet())
+        val pool = heroQueryRepository.findByIds(tournamentId, listOf(heroA, heroB)).associate { it.id to it.cost }
+        assertEquals(1_200, pool[heroA])
+        assertEquals(2_400, pool[heroB])
+    }
+
+    @Test
+    fun `addBatchToPool re-prices a hero already in the pool alongside adding a new one`() {
+        val tournamentId = winterOfChampionsId()
+        val bigfootId = heroQueryRepository.findByTournament(tournamentId).single { it.name == "Bigfoot" }.id
+        val newHero = requireNotNull(adminHeroService.create("Batch Hero C", null).id)
+
+        adminHeroService.addBatchToPool(
+            tournamentId,
+            listOf(HeroPoolEntryInput(bigfootId, 3_500), HeroPoolEntryInput(newHero, 1_000)),
+        )
+
+        val pool = heroQueryRepository.findByIds(tournamentId, listOf(bigfootId, newHero)).associate { it.id to it.cost }
+        assertEquals(3_500, pool[bigfootId])
+        assertEquals(1_000, pool[newHero])
+    }
+
+    @Test
+    fun `addBatchToPool rejects an unknown hero id and writes nothing from the batch`() {
+        val tournamentId = winterOfChampionsId()
+        val newHero = requireNotNull(adminHeroService.create("Batch Hero D", null).id)
+        val unknownId = 9_999_999L
+
+        assertFailsWith<NotFoundException> {
+            adminHeroService.addBatchToPool(
+                tournamentId,
+                listOf(HeroPoolEntryInput(newHero, 1_500), HeroPoolEntryInput(unknownId, 1_500)),
+            )
+        }
+
+        assertTrue(
+            heroQueryRepository.findByIds(tournamentId, listOf(newHero)).isEmpty(),
+            "the whole batch rolls back, including the valid entry",
+        )
+    }
+
+    @Test
     fun `pool lists a tournament's hero pool, admin-scoped`() {
         val tournamentId = winterOfChampionsId()
 

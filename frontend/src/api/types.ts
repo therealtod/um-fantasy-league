@@ -176,6 +176,15 @@ export interface SetHeroCostRequest {
   cost: number
 }
 
+export interface HeroPoolEntryRequest {
+  heroId: number
+  cost: number
+}
+
+export interface AddHeroesToPoolRequest {
+  heroes: HeroPoolEntryRequest[]
+}
+
 export interface CreateMapRequest {
   name: string
 }
@@ -185,6 +194,10 @@ export type UpdateMapRequest = CreateMapRequest
 export interface MapAdminDto {
   id: number
   name: string
+}
+
+export interface AddMapsToPoolRequest {
+  mapIds: number[]
 }
 
 export type BanType = 'PRE_BAN' | 'OPPONENT_BAN' | 'SELF_BAN'

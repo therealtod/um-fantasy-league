@@ -4,6 +4,7 @@ import type { Hero, HeroAdminDto } from '@/api/types'
 
 const listHeroes = vi.fn()
 const listHeroPool = vi.fn()
+const addHeroesToPool = vi.fn()
 const removeHeroFromPool = vi.fn()
 
 vi.mock('@/api/client', () => ({
@@ -11,6 +12,7 @@ vi.mock('@/api/client', () => ({
     admin: {
       listHeroes: (...args: unknown[]) => listHeroes(...args),
       listHeroPool: (...args: unknown[]) => listHeroPool(...args),
+      addHeroesToPool: (...args: unknown[]) => addHeroesToPool(...args),
       setHeroCost: vi.fn(),
       removeHeroFromPool: (...args: unknown[]) => removeHeroFromPool(...args),
     },
@@ -38,6 +40,20 @@ async function mountWizardWithTournament() {
 
 function removeButton(wrapper: Awaited<ReturnType<typeof mountWizardWithTournament>>) {
   return wrapper.findAll('button').find((b) => b.text() === 'Remove')
+}
+
+async function openAddForm(wrapper: Awaited<ReturnType<typeof mountWizardWithTournament>>) {
+  await wrapper.findAll('button').find((b) => b.text() === '+ Add Hero to Pool')!.trigger('click')
+}
+
+async function stageHero(
+  wrapper: Awaited<ReturnType<typeof mountWizardWithTournament>>,
+  heroId: number,
+  cost: number,
+) {
+  await wrapper.find('#hero-select').setValue(heroId)
+  await wrapper.find('#hero-cost-input').setValue(cost)
+  await wrapper.findAll('button').find((b) => b.text() === '+ Stage Hero')!.trigger('click')
 }
 
 beforeEach(() => {
@@ -92,5 +108,47 @@ describe('HeroPoolWizard removal', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Hero pool entry not found')
+  })
+})
+
+describe('HeroPoolWizard batch add', () => {
+  it('stages heroes locally without calling the API', async () => {
+    const wrapper = await mountWizardWithTournament()
+    await openAddForm(wrapper)
+
+    await stageHero(wrapper, 11, 750)
+
+    expect(addHeroesToPool).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Staged for this batch (1)')
+    expect(wrapper.text()).toContain('Dracula')
+  })
+
+  it('submits every staged hero in one batch request', async () => {
+    const wrapper = await mountWizardWithTournament()
+    addHeroesToPool.mockResolvedValue([])
+    await openAddForm(wrapper)
+    await stageHero(wrapper, 11, 750)
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Add 1 Hero to Pool')!.trigger('click')
+    await flushPromises()
+
+    expect(addHeroesToPool).toHaveBeenCalledTimes(1)
+    expect(addHeroesToPool).toHaveBeenCalledWith(1, [{ heroId: 11, cost: 750 }])
+    // Pool re-read after the write rather than patched client-side.
+    expect(listHeroPool).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('Staged for this batch')
+  })
+
+  it('keeps the staged heroes if the batch submit fails', async () => {
+    const wrapper = await mountWizardWithTournament()
+    addHeroesToPool.mockRejectedValue(new Error('cost must be positive'))
+    await openAddForm(wrapper)
+    await stageHero(wrapper, 11, 750)
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Add 1 Hero to Pool')!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('cost must be positive')
+    expect(wrapper.text()).toContain('Staged for this batch (1)')
   })
 })
