@@ -1,8 +1,11 @@
 package com.umfl.scoring
 
 import com.umfl.match.BanResult
+import com.umfl.match.BanType
+import com.umfl.match.GameParticipantResult
+import com.umfl.match.GameResult
+import com.umfl.match.MatchParticipantResult
 import com.umfl.match.MatchResult
-import com.umfl.match.ParticipantResult
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -15,62 +18,64 @@ import kotlin.test.assertTrue
  * A per-metric truth table over hand-built matches.
  *
  * The fixtures mirror the shapes the seed data actually contains — a decided
- * match, the round-2 shutout, and the round-3 timed draw — so a metric that
- * disagrees with reality fails here rather than three layers up in the
- * leaderboard.
+ * match, the round-2 shutout, the round-3 timed draw, and (in [Games]) the
+ * round-3 best-of-three — so a metric that disagrees with reality fails here
+ * rather than three layers up in the leaderboard.
  */
 class MatchMetricsTest {
 
     private val played = Instant.parse("2026-06-06T11:00:00Z")
 
-    private fun participant(
-        id: Long,
+    private fun gameParticipant(
+        side: Int,
         heroId: Long,
         heroName: String,
         health: Int,
         isWinner: Boolean = false,
-    ) = ParticipantResult(
-        participantId = id,
-        playerLabel = "Player $id",
+    ) = GameParticipantResult(
+        side = side,
         heroId = heroId,
         heroName = heroName,
         healthRemaining = health,
         isWinner = isWinner,
     )
 
+    /** A single-game match: one `GameResult` wrapping [gameParticipants]. */
     private fun match(
-        participants: List<ParticipantResult>,
+        gameParticipants: List<GameParticipantResult>,
         bans: List<BanResult> = emptyList(),
     ) = MatchResult(
         matchId = 6,
         tournamentId = 1,
         round = 2,
-        mapId = 3,
-        mapName = "Raptor Paddock",
         playedAt = played,
-        participants = participants,
+        externalLink = null,
+        participants = gameParticipants.map { MatchParticipantResult(side = it.side, playerLabel = "Player ${it.side}") },
+        games = listOf(
+            GameResult(gameId = 1, gameNumber = 1, mapId = 3, mapName = "Raptor Paddock", participants = gameParticipants),
+        ),
         bans = bans,
     )
 
     /** Match 6 of the seed: Bigfoot 11 beats Beowulf 0. */
     private val shutoutMatch = match(
         listOf(
-            participant(id = 1, heroId = 7, heroName = "Bigfoot", health = 11, isWinner = true),
-            participant(id = 2, heroId = 11, heroName = "Beowulf", health = 0),
+            gameParticipant(side = 0, heroId = 7, heroName = "Bigfoot", health = 11, isWinner = true),
+            gameParticipant(side = 1, heroId = 11, heroName = "Beowulf", health = 0),
         ),
-        bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong")),
+        bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.PRE_BAN)),
     )
 
     /** Match 11 of the seed: nobody wins, both sides alive on 7 and 5. */
     private val timedDraw = match(
         listOf(
-            participant(id = 1, heroId = 5, heroName = "Sherlock Holmes", health = 7),
-            participant(id = 2, heroId = 6, heroName = "Dracula", health = 5),
+            gameParticipant(side = 0, heroId = 5, heroName = "Sherlock Holmes", health = 7),
+            gameParticipant(side = 1, heroId = 6, heroName = "Dracula", health = 5),
         ),
     )
 
     private fun contextFor(match: MatchResult, heroId: Long): MetricContext =
-        assertNotNull(match.heroContexts().singleOrNull { it.heroId == heroId }, "no context for hero $heroId")
+        assertNotNull(match.heroContexts().singleOrNull { it.heroId == heroId }, "no unique context for hero $heroId")
 
     private fun measure(metric: String, context: MetricContext): Double {
         val extractor = assertNotNull(MatchMetrics[metric], "no extractor for $metric")
@@ -154,7 +159,7 @@ class MatchMetricsTest {
     inner class Health {
 
         @Test
-        fun `HEALTH_REMAINING is the hero's own end-of-match health`() {
+        fun `HEALTH_REMAINING is the hero's own end-of-game health`() {
             assertEquals(11.0, measure("HEALTH_REMAINING", contextFor(shutoutMatch, 7)))
             assertEquals(0.0, measure("HEALTH_REMAINING", contextFor(shutoutMatch, 11)))
             assertEquals(5.0, measure("HEALTH_REMAINING", contextFor(timedDraw, 6)))
@@ -174,9 +179,9 @@ class MatchMetricsTest {
         fun `HEALTH_DIFFERENTIAL measures against the healthiest opponent`() {
             val threeWay = match(
                 listOf(
-                    participant(id = 1, heroId = 1, heroName = "Alice", health = 6, isWinner = true),
-                    participant(id = 2, heroId = 2, heroName = "Medusa", health = 4),
-                    participant(id = 3, heroId = 3, heroName = "Sinbad", health = 0),
+                    gameParticipant(side = 0, heroId = 1, heroName = "Alice", health = 6, isWinner = true),
+                    gameParticipant(side = 1, heroId = 2, heroName = "Medusa", health = 4),
+                    gameParticipant(side = 2, heroId = 3, heroName = "Sinbad", health = 0),
                 ),
             )
 
@@ -203,8 +208,8 @@ class MatchMetricsTest {
         fun `a win with the opponent still alive is no shutout`() {
             val narrow = match(
                 listOf(
-                    participant(id = 1, heroId = 4, heroName = "Medusa", health = 8, isWinner = true),
-                    participant(id = 2, heroId = 8, heroName = "Sun Wukong", health = 2),
+                    gameParticipant(side = 0, heroId = 4, heroName = "Medusa", health = 8, isWinner = true),
+                    gameParticipant(side = 1, heroId = 8, heroName = "Sun Wukong", health = 2),
                 ),
             )
 
@@ -215,9 +220,9 @@ class MatchMetricsTest {
         fun `one surviving opponent out of two denies the shutout`() {
             val threeWay = match(
                 listOf(
-                    participant(id = 1, heroId = 1, heroName = "Alice", health = 6, isWinner = true),
-                    participant(id = 2, heroId = 2, heroName = "Medusa", health = 1),
-                    participant(id = 3, heroId = 3, heroName = "Sinbad", health = 0),
+                    gameParticipant(side = 0, heroId = 1, heroName = "Alice", health = 6, isWinner = true),
+                    gameParticipant(side = 1, heroId = 2, heroName = "Medusa", health = 1),
+                    gameParticipant(side = 2, heroId = 3, heroName = "Sinbad", health = 0),
                 ),
             )
 
@@ -251,7 +256,7 @@ class MatchMetricsTest {
         }
 
         @Test
-        fun `heroContexts covers every hero the match touched, exactly once`() {
+        fun `heroContexts covers every hero a single-game match touched, exactly once`() {
             val contexts = shutoutMatch.heroContexts()
 
             assertEquals(listOf(7L, 11L, 8L), contexts.map { it.heroId })
@@ -260,10 +265,103 @@ class MatchMetricsTest {
         }
 
         @Test
-        fun `the ban record carries who struck it`() {
+        fun `a banned hero's role is a bare marker -- its category lives on the ban, not the role`() {
             val role = contextFor(shutoutMatch, heroId = 8).role
 
             assertEquals(HeroRole.Banned, role)
+            assertEquals(BanType.PRE_BAN, shutoutMatch.bans.single { it.heroId == 8L }.banType)
+        }
+    }
+
+    @Nested
+    inner class Games {
+
+        /**
+         * The seed's Bo3 (match 13) with only its first two games played: Medusa
+         * takes game 1, Achilles takes game 2 back. The point of the fixture is
+         * that the same two heroes appear twice with opposite outcomes, so a
+         * metric folded per *series* instead of per *game* cannot pass.
+         */
+        private val bestOfTwoSoFar = MatchResult(
+            matchId = 13,
+            tournamentId = 1,
+            round = 3,
+            playedAt = played,
+            externalLink = "https://challonge.com/example-bo3-decider",
+            participants = listOf(MatchParticipantResult(0, "Rina Okafor"), MatchParticipantResult(1, "Dmitri Kovac")),
+            games = listOf(
+                GameResult(
+                    gameId = 101,
+                    gameNumber = 1,
+                    mapId = 2,
+                    mapName = "Sherwood Forest",
+                    participants = listOf(
+                        gameParticipant(side = 0, heroId = 4, heroName = "Medusa", health = 6, isWinner = true),
+                        gameParticipant(side = 1, heroId = 20, heroName = "Achilles", health = 0),
+                    ),
+                ),
+                GameResult(
+                    gameId = 102,
+                    gameNumber = 2,
+                    mapId = 3,
+                    mapName = "Raptor Paddock",
+                    participants = listOf(
+                        gameParticipant(side = 0, heroId = 4, heroName = "Medusa", health = 0),
+                        gameParticipant(side = 1, heroId = 20, heroName = "Achilles", health = 5, isWinner = true),
+                    ),
+                ),
+            ),
+            bans = emptyList(),
+        )
+
+        @Test
+        fun `a hero played in two games of a series yields two Played contexts, each scoring its own game`() {
+            val medusaContexts = bestOfTwoSoFar.heroContexts().filter { it.heroId == 4L }
+
+            assertEquals(2, medusaContexts.size)
+            val (game1, game2) = medusaContexts
+            assertEquals(6.0, measure("HEALTH_REMAINING", game1))
+            assertEquals(0.0, measure("HEALTH_REMAINING", game2))
+        }
+
+        @Test
+        fun `WIN and LOSS are scoped per game, not per series`() {
+            val (medusaGame1, medusaGame2) = bestOfTwoSoFar.heroContexts().filter { it.heroId == 4L }
+            val (achillesGame1, achillesGame2) = bestOfTwoSoFar.heroContexts().filter { it.heroId == 20L }
+
+            // Game 1: Medusa took it, Achilles lost it.
+            assertEquals(1.0, measure("WIN", medusaGame1))
+            assertEquals(0.0, measure("LOSS", medusaGame1))
+            assertEquals(0.0, measure("WIN", achillesGame1))
+            assertEquals(1.0, measure("LOSS", achillesGame1))
+
+            // Game 2: the other way round, in the same series. Each hero ends the
+            // series holding one WIN and one LOSS rather than a single verdict.
+            assertEquals(0.0, measure("WIN", medusaGame2))
+            assertEquals(1.0, measure("LOSS", medusaGame2))
+            assertEquals(1.0, measure("WIN", achillesGame2))
+            assertEquals(0.0, measure("LOSS", achillesGame2))
+        }
+
+        @Test
+        fun `a banned hero still yields exactly one Banned context regardless of how many games the series has`() {
+            val threeGameSeries = bestOfTwoSoFar.copy(
+                games = bestOfTwoSoFar.games + GameResult(
+                    gameId = 103,
+                    gameNumber = 3,
+                    mapId = 1,
+                    mapName = "Baskerville Manor",
+                    participants = listOf(
+                        gameParticipant(side = 0, heroId = 4, heroName = "Medusa", health = 3, isWinner = true),
+                        gameParticipant(side = 1, heroId = 20, heroName = "Achilles", health = 0),
+                    ),
+                ),
+                bans = listOf(BanResult(heroId = 6, heroName = "Bruce Lee", banType = BanType.PRE_BAN)),
+            )
+
+            val banContexts = threeGameSeries.heroContexts().filter { it.heroId == 6L }
+            assertEquals(1, banContexts.size, "a ban is struck once, before any game -- it must not multiply by game count")
+            assertTrue(banContexts.single().role is HeroRole.Banned)
         }
     }
 }

@@ -40,16 +40,16 @@ class MapPoolAdminRepository(private val jdbcClient: JdbcClient) {
         ).param("tournamentId", tournamentId).query(::mapGameMap).list()
 
     /**
-     * True when this tournament has a recorded match on this map. Unlike hero
-     * removal, this one *is* blocked by the schema: `tournament_match` carries
-     * a composite FK onto `(tournament_id, map_id)` here, so deleting the pool
-     * row out from under a recorded match would fail as a raw
+     * True when this tournament has a recorded game on this map. Unlike hero
+     * removal, this one *is* blocked by the schema: `match_game` carries a
+     * composite FK onto `(tournament_id, map_id)` here, so deleting the pool
+     * row out from under a recorded game would fail as a raw
      * `DataIntegrityViolationException`. The caller checks this first so that
      * surfaces as an explicit [com.umfl.common.ConflictException] instead.
      */
     fun hasRecordedMatch(tournamentId: Long, mapId: Long): Boolean =
         jdbcClient.sql(
-            "select exists(select 1 from tournament_match where tournament_id = :tournamentId and map_id = :mapId)"
+            "select exists(select 1 from match_game where tournament_id = :tournamentId and map_id = :mapId)"
         ).param("tournamentId", tournamentId).param("mapId", mapId).query(Boolean::class.java).single()
 
     /** Removes [mapId] from [tournamentId]'s pool. Returns false if it wasn't there to begin with. */
@@ -58,6 +58,23 @@ class MapPoolAdminRepository(private val jdbcClient: JdbcClient) {
             "delete from tournament_map where tournament_id = :tournamentId and map_id = :mapId"
         ).param("tournamentId", tournamentId).param("mapId", mapId).update()
         return rowsDeleted > 0
+    }
+
+    /**
+     * Checks `match_game_map_in_pool` now, in the caller's transaction, then
+     * restores its deferral.
+     *
+     * That FK is DEFERRABLE INITIALLY DEFERRED for the sake of tournament
+     * deletes (see the schema comment), which means a pool row deleted out
+     * from under a recorded game does *not* fail the `delete` statement — it
+     * fails at commit, long after the service that could name the map and the
+     * tournament has returned. `set constraints ... immediate` fires the
+     * pending check on the spot, so [removeFromPool]'s caller sees the
+     * violation as a `DataIntegrityViolationException` it can still translate.
+     */
+    fun checkMapInPoolNow() {
+        jdbcClient.sql("set constraints match_game_map_in_pool immediate").update()
+        jdbcClient.sql("set constraints match_game_map_in_pool deferred").update()
     }
 }
 

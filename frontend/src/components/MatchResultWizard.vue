@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
-import type { Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
+import type { BanType, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
 
 interface Props {
   tournamentId?: number
@@ -22,20 +22,35 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const isInitialized = ref(false)
 
+const banTypes: { value: BanType; label: string }[] = [
+  { value: 'PRE_BAN', label: 'Pre-ban' },
+  { value: 'OPPONENT_BAN', label: 'Opponent ban' },
+  { value: 'SELF_BAN', label: 'Self ban' },
+]
+
 // The tournament's legal boards and priced hero pool — what the match actually
 // scores against — so the admin picks from a list instead of typing a raw id.
 const mapPool = ref<MapAdminDto[]>([])
 const heroPool = ref<Hero[]>([])
 
+function blankGame(gameNumber: number) {
+  return {
+    gameNumber,
+    mapId: 0,
+    participants: [
+      { heroId: 0, healthRemaining: 0, isWinner: false },
+      { heroId: 0, healthRemaining: 0, isWinner: false },
+    ],
+  }
+}
+
 function blankForm(): RecordMatchRequest {
   return {
     round: 1,
-    mapId: 0,
     playedAt: new Date().toISOString(),
-    participants: [
-      { playerLabel: '', heroId: 0, healthRemaining: 0, isWinner: false },
-      { playerLabel: '', heroId: 0, healthRemaining: 0, isWinner: false },
-    ],
+    externalLink: '',
+    participants: [{ playerLabel: '' }, { playerLabel: '' }],
+    games: [blankGame(1)],
     bans: [],
   }
 }
@@ -62,15 +77,21 @@ async function loadMatchData() {
     // Convert MatchResultDto to RecordMatchRequest
     form.value = {
       round: matchData.round,
-      mapId: matchData.mapId,
       playedAt: matchData.playedAt,
-      participants: matchData.participants.map(p => ({
-        playerLabel: p.playerLabel ?? '',
-        heroId: p.heroId,
-        healthRemaining: p.healthRemaining,
-        isWinner: p.isWinner
-      })),
-      bans: matchData.bans.map(b => ({ heroId: b.heroId }))
+      externalLink: matchData.externalLink ?? '',
+      participants: [...matchData.participants]
+        .sort((a, b) => a.side - b.side)
+        .map((p) => ({ playerLabel: p.playerLabel ?? '' })),
+      games: [...matchData.games]
+        .sort((a, b) => a.gameNumber - b.gameNumber)
+        .map((g) => ({
+          gameNumber: g.gameNumber,
+          mapId: g.mapId,
+          participants: [...g.participants]
+            .sort((a, b) => a.side - b.side)
+            .map((p) => ({ heroId: p.heroId, healthRemaining: p.healthRemaining, isWinner: p.isWinner })),
+        })),
+      bans: matchData.bans.map((b) => ({ heroId: b.heroId, banType: b.banType })),
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load match data'
@@ -91,16 +112,28 @@ async function loadPools() {
   heroPool.value = heroes
 }
 
+function addGame() {
+  form.value.games.push(blankGame(form.value.games.length + 1))
+}
+
+function removeGame(index: number) {
+  form.value.games.splice(index, 1)
+  // Game numbers are always a dense 1..N sequence, so a removal renumbers the rest.
+  form.value.games.forEach((game, i) => {
+    game.gameNumber = i + 1
+  })
+}
+
 function addBan() {
-  form.value.bans.push({ heroId: 0 })
+  form.value.bans.push({ heroId: 0, banType: 'PRE_BAN' })
 }
 
 function removeBan(index: number) {
   form.value.bans.splice(index, 1)
 }
 
-function setWinner(participantIndex: number) {
-  form.value.participants.forEach((p, i) => {
+function setWinner(gameIndex: number, participantIndex: number) {
+  form.value.games[gameIndex].participants.forEach((p, i) => {
     p.isWinner = i === participantIndex
   })
 }
@@ -111,14 +144,18 @@ async function saveMatch() {
     error.value = 'Tournament ID is required'
     return
   }
-  if (form.value.mapId === 0) {
-    error.value = 'A map is required'
+  if (form.value.games.length === 0) {
+    error.value = 'At least one game is required'
+    return
+  }
+  if (form.value.games.some((g) => g.mapId === 0)) {
+    error.value = 'Every game needs a map selected'
     return
   }
   // The player name is deliberately not required: it is a free-text label, and an
   // unattributed result is still a valid result.
-  if (form.value.participants.some((p) => p.heroId === 0)) {
-    error.value = 'All participants must have a hero selected'
+  if (form.value.games.some((g) => g.participants.some((p) => p.heroId === 0))) {
+    error.value = 'Every game needs a hero selected for both sides'
     return
   }
 
@@ -204,18 +241,6 @@ onMounted(async () => {
         </div>
 
         <div class="flex flex-col gap-2">
-          <label for="match-map" class="label-caps">Map *</label>
-          <select
-            id="match-map"
-            v-model.number="form.mapId"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
-          >
-            <option :value="0" disabled>Select a map…</option>
-            <option v-for="map in mapPool" :key="map.id" :value="map.id">{{ map.name }}</option>
-          </select>
-        </div>
-
-        <div class="flex flex-col gap-2 sm:col-span-2">
           <label for="match-played-at" class="label-caps">Played At (ISO timestamp) *</label>
           <input
             id="match-played-at"
@@ -224,36 +249,88 @@ onMounted(async () => {
             class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
           />
         </div>
+
+        <div class="flex flex-col gap-2 sm:col-span-2">
+          <label for="match-external-link" class="label-caps">External Link (optional)</label>
+          <input
+            id="match-external-link"
+            v-model="form.externalLink"
+            type="text"
+            placeholder="https://…"
+            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+          />
+        </div>
       </div>
 
       <!-- Participants -->
       <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
-        <h4 class="headline text-base text-cyan">Participants (exactly 2 required)</h4>
+        <h4 class="headline text-base text-cyan">Participants (exactly 2 required, for the whole series)</h4>
 
         <div
           v-for="(participant, index) in form.participants"
           :key="index"
-          class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-start"
+          class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-center"
         >
           <div class="flex size-8 shrink-0 items-center justify-center bg-cyan font-display text-xl text-surface-lowest">
             {{ index + 1 }}
           </div>
-          <div class="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-4">
-            <div class="flex flex-col gap-2">
-              <label :for="`player-${index}`" class="label-caps">Player name (optional)</label>
-              <input
-                :id="`player-${index}`"
-                v-model="participant.playerLabel"
-                type="text"
-                class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
-                placeholder="Who piloted this hero"
-              />
-            </div>
+          <div class="flex flex-1 flex-col gap-2">
+            <label :for="`player-${index}`" class="label-caps">Player name (optional)</label>
+            <input
+              :id="`player-${index}`"
+              v-model="participant.playerLabel"
+              type="text"
+              class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+              placeholder="Who piloted this side"
+            />
+          </div>
+        </div>
+      </div>
 
+      <!-- Games -->
+      <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
+        <h4 class="headline text-base text-cyan">Games (best-of-N — at least 1 required)</h4>
+
+        <div
+          v-for="(game, gameIndex) in form.games"
+          :key="gameIndex"
+          class="flex flex-col gap-4 border border-edge bg-surface-low p-4"
+        >
+          <div class="flex items-center justify-between">
+            <h5 class="label-caps text-cyan">Game {{ game.gameNumber }}</h5>
+            <button
+              v-if="form.games.length > 1"
+              type="button"
+              class="btn-ghost px-4 py-2 text-xs"
+              @click="removeGame(gameIndex)"
+            >
+              Remove Game
+            </button>
+          </div>
+
+          <div class="flex flex-col gap-2">
+            <label :for="`game-${gameIndex}-map`" class="label-caps">Map</label>
+            <select
+              :id="`game-${gameIndex}-map`"
+              v-model.number="game.mapId"
+              class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            >
+              <option :value="0" disabled>Select a map…</option>
+              <option v-for="map in mapPool" :key="map.id" :value="map.id">{{ map.name }}</option>
+            </select>
+          </div>
+
+          <div
+            v-for="(participant, participantIndex) in game.participants"
+            :key="participantIndex"
+            class="grid grid-cols-2 gap-4 border border-edge bg-surface-lowest p-3 sm:grid-cols-4"
+          >
             <div class="flex flex-col gap-2">
-              <label :for="`hero-${index}`" class="label-caps">Hero</label>
+              <label :for="`game-${gameIndex}-hero-${participantIndex}`" class="label-caps">
+                Side {{ participantIndex + 1 }} Hero
+              </label>
               <select
-                :id="`hero-${index}`"
+                :id="`game-${gameIndex}-hero-${participantIndex}`"
                 v-model.number="participant.heroId"
                 class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
               >
@@ -263,9 +340,9 @@ onMounted(async () => {
             </div>
 
             <div class="flex flex-col gap-2">
-              <label :for="`health-${index}`" class="label-caps">Health Remaining</label>
+              <label :for="`game-${gameIndex}-health-${participantIndex}`" class="label-caps">Health Remaining</label>
               <input
-                :id="`health-${index}`"
+                :id="`game-${gameIndex}-health-${participantIndex}`"
                 v-model.number="participant.healthRemaining"
                 type="number"
                 min="0"
@@ -278,25 +355,27 @@ onMounted(async () => {
                 <input
                   type="checkbox"
                   :checked="participant.isWinner"
-                  @change="setWinner(index)"
+                  @change="setWinner(gameIndex, participantIndex)"
                 />
                 <span>Winner</span>
               </label>
             </div>
           </div>
         </div>
+
+        <button type="button" class="btn-ghost" @click="addGame">+ Add Game</button>
       </div>
 
       <!-- Bans -->
       <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
-        <h4 class="headline text-base text-cyan">Bans (optional)</h4>
+        <h4 class="headline text-base text-cyan">Bans (optional, once for the whole series)</h4>
 
         <div
           v-for="(ban, index) in form.bans"
           :key="index"
           class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-start"
         >
-          <div class="grid flex-1 grid-cols-2 gap-4 sm:grid-cols-4">
+          <div class="grid flex-1 grid-cols-2 gap-4">
             <div class="flex flex-col gap-2">
               <label :for="`ban-hero-${index}`" class="label-caps">Hero</label>
               <select
@@ -306,6 +385,17 @@ onMounted(async () => {
               >
                 <option :value="0" disabled>Select a hero…</option>
                 <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
+              </select>
+            </div>
+
+            <div class="flex flex-col gap-2">
+              <label :for="`ban-type-${index}`" class="label-caps">Type</label>
+              <select
+                :id="`ban-type-${index}`"
+                v-model="ban.banType"
+                class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+              >
+                <option v-for="type in banTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
               </select>
             </div>
           </div>

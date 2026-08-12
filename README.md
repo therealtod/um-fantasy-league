@@ -139,9 +139,11 @@ Everything hangs off the tournament, because the tournament is what decides it:
 tournament ──< tournament_hero   >── hero            the pool, and its price here
            ──< tournament_map    >── game_map        the legal boards
            ──< scoring_rule_set  ──< scoring_coefficient
-           ──< tournament_match  ──< match_participant >── hero
-                                 └──< match_ban        >── hero
-           ──< tournament_entry  ──< entry_slot        >── hero
+           ──< tournament_match  ──< match_participant              the two humans, per series
+                                 ├──< match_game      >── game_map  one game, one board
+                                 │         └──< match_game_participant >── hero
+                                 └──< hero_ban        >── hero       struck once per series
+           ──< tournament_entry  ──< entry_slot       >── hero
                      │
                   manager
 ```
@@ -179,9 +181,13 @@ matches that produce them, so they cannot drift.
 
 ### Why the ban is its own table
 
-`match_ban`, not a `was_banned` flag on `match_participant`. A banned hero has no health and no
+`hero_ban`, not a `was_banned` flag on a participant row. A banned hero has no health and no
 result. Storing it as a participant forces `health_remaining = 0`, which is indistinguishable
 from "played and was defeated" and silently poisons every `HEALTH_REMAINING` sum and `SHUTOUT` check.
+
+The ban hangs off the match, not off a game: a hero is struck once for the whole series, so it must
+not be multiplied by the number of games played (`MatchResult.heroContexts` yields exactly one
+`Banned` context per banned hero regardless of series length).
 
 Bans are per match, so they never touch `entry_slot`: a hero banned in one round can be played in
 the next, and its manager still scores the `BAN` coefficient for the round it sat out.
@@ -192,10 +198,15 @@ the next, and its manager still scores the `BAN` coefficient for the round it sa
   standard, and quoting them at every call site would be noise.
 - Tables the app loads or writes as aggregates carry a surrogate `bigserial` id, because Spring Data
   JDBC cannot map a composite primary key. The pure link tables (`tournament_hero`, `tournament_map`,
-  `entry_slot`, `match_ban`) are read through `JdbcClient` or mapped as `@MappedCollection` children,
-  so they keep their natural composite key.
-- `tournament_match.map_id` is nullable (a result sheet sometimes omits the board) and constrained by
-  a composite FK onto `tournament_map`, so a match can only name a board that tournament played on.
+  `entry_slot`, `hero_ban`, `match_game_participant`) are read through `JdbcClient` or mapped as
+  `@MappedCollection` children, so they keep their natural composite key.
+- A match is a **series**: the board moved from the match to `match_game.map_id` (not null — each
+  game names its board), constrained by a composite FK onto `tournament_map`, so a game can only be
+  played on a board that tournament uses. `match_game` denormalizes `tournament_id` to carry that
+  FK, and a second composite FK pins the copy to its parent match's tournament.
+- Exactly one side of a game carries `is_winner`. A partial unique index stops two; `MatchResultPolicy`
+  stops zero. **There is no draw** — a losing hero always finishes on 0 or less health, while a winner
+  may finish on any value, including a negative one.
 - Matches are seeded in chronological order, so `id` order and `played_at` order agree. That is what
   lets the ticker poll on `id > :sinceMatchId` — `played_at` is **not** unique, because parallel
   tables in a round share a start time.
@@ -240,10 +251,9 @@ implements:
 
 | Metric | Measures |
 |---|---|
-| `APPEARANCE` | the hero played this match |
+| `APPEARANCE` | the hero played this game |
 | `BAN` | the hero was banned out of this match |
-| `WIN` / `LOSS` | won / lost — a timed draw is neither |
-| `DRAW` | played, and nobody won |
+| `WIN` / `LOSS` | took / dropped this game — exhaustive, since every game has a winner |
 | `HEALTH_REMAINING` | health at the end (0 if defeated) |
 | `HEALTH_DIFFERENTIAL` | this hero's health minus the healthiest opponent's |
 | `SHUTOUT` | every opponent finished on zero |
@@ -256,7 +266,13 @@ that; do not implement it.
 coefficient rewards a clean victory by exactly as much as it penalises a heavy defeat, and neither
 creates nor destroys points across the match as a whole. There is deliberately **no** `DAMAGE_DEALT`:
 `heroes` carries no starting-health column, so damage is not derivable from `health_remaining`. Adding
-it is a schema decision, not a registry one.
+it is a schema decision, not a registry one. There is likewise **no** `DRAW`: a game with no winner
+is not a recordable result, so a `DRAW` column would price something that cannot happen — it is
+reported as an unknown metric like any other key this build cannot measure.
+
+Metrics are measured per *game*, not per series: a hero that takes game 1 and drops game 2 of a Bo3
+collects one `WIN` and one `LOSS`, two `APPEARANCE`s, and each game's own health numbers. The one
+exception is `BAN`, which is struck once for the whole match.
 
 Each metric's contribution is rounded to 2dp *before* it is summed, so a displayed total is exactly
 the sum of its displayed breakdown. Coefficients may be negative — a penalty is a legitimate rule.
@@ -315,10 +331,11 @@ and everything under `/entries` require a verified token.
 `/api/admin/**`, gated by `hasRole("ADMIN")` (backed by `manager.is_admin`, our own data — never an
 identity-provider claim). This is the write path for everything that used to be seed-only: tournaments,
 heroes, maps, a tournament's hero pool and pricing, its board pool, scoring rule sets and coefficients,
-and match results (create/update/delete). It has no UI yet — callers use it directly.
+and match results (create/update/delete). `/admin` in the frontend is the UI over it.
 
-`MatchResultPolicy` validates a match submission before save (map in the tournament's pool, no
-duplicate or unknown hero, at most one winner), returning `422` with every violation on failure, the
+`MatchResultPolicy` validates a match submission before save (each game's map in the tournament's
+pool, no duplicate or unknown hero, dense 1..N game numbers, two sides per game, and exactly one
+winner per game — zero is as invalid as two), returning `422` with every violation on failure, the
 same shape as a roster rule breach. Activating a scoring rule set deactivates any active sibling for
 that tournament in the same transaction — only one rule set may be active per tournament. Submitting
 an unimplemented metric (e.g. `CROWD_FAVOURITE`) is a non-blocking warning on the response, not a

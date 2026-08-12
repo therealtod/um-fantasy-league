@@ -47,9 +47,11 @@ class SchemaAndSeedTest @Autowired constructor(
         assertEquals(12, count("entry_slot"), "4 entries x roster size 3")
         assertEquals(3, count("scoring_rule_set"))
         assertEquals(21, count("scoring_coefficient"), "3 rule sets x 7 metrics")
-        assertEquals(12, count("tournament_match"))
-        assertEquals(24, count("match_participant"), "12 matches x 2 sides")
-        assertEquals(19, count("match_ban"))
+        assertEquals(13, count("tournament_match"), "12 single-game matches + the Bo3 decider")
+        assertEquals(26, count("match_participant"), "13 matches x 2 sides")
+        assertEquals(15, count("match_game"), "12 single-game matches + the Bo3's 3 games")
+        assertEquals(30, count("match_game_participant"), "15 games x 2 sides")
+        assertEquals(22, count("hero_ban"), "19 original + the Bo3's one ban per category")
     }
 
     @Test
@@ -209,17 +211,23 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from match_participant mp
-                    join tournament_match m on m.id = mp.match_id
+                from match_game_participant mgp
+                    join match_game mg on mg.id = mgp.game_id
                     left join tournament_hero th
-                        on th.tournament_id = m.tournament_id and th.hero_id = mp.hero_id
+                        on th.tournament_id = mg.tournament_id and th.hero_id = mgp.hero_id
                 where th.hero_id is null
                 """
             )
             .query(Int::class.java)
             .single()
 
-        assertEquals(0, strays, "a result naming a hero outside the pool would poison every roster's score")
+        assertEquals(
+            0,
+            strays,
+            "a result naming a played hero outside the pool would poison every roster's score -- note " +
+                "this checks who *played*, not who was *banned*: match 13's bans deliberately use " +
+                "heroes outside Summer of Legends' pool, which this query never looks at",
+        )
     }
 
     @Test
@@ -228,9 +236,9 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from tournament_match m
+                from match_game mg
                     left join tournament_map tm
-                        on tm.tournament_id = m.tournament_id and tm.map_id = m.map_id
+                        on tm.tournament_id = mg.tournament_id and tm.map_id = mg.map_id
                 where tm.map_id is null
                 """
             )
@@ -241,32 +249,35 @@ class SchemaAndSeedTest @Autowired constructor(
     }
 
     @Test
-    fun `at most one side wins a match, and one match has no winner at all`() {
-        val winnersPerMatch = jdbcClient
+    fun `at most one side wins a game, and one game has no winner at all`() {
+        // Grouped by (game id, match id): a game's own bigserial id is what the
+        // partial unique index actually constrains, but match_id is what identifies
+        // the timed draw below -- match_game.id isn't guaranteed to line up with it.
+        val winnersPerGame = jdbcClient
             .sql(
                 """
-                select m.id, count(*) filter (where mp.is_winner) as winners
-                from tournament_match m
-                    join match_participant mp on mp.match_id = m.id
-                group by m.id
-                order by m.id
+                select mg.id, mg.match_id, count(*) filter (where mgp.is_winner) as winners
+                from match_game mg
+                    join match_game_participant mgp on mgp.game_id = mg.id
+                group by mg.id, mg.match_id
+                order by mg.id
                 """
             )
-            .query { rs, _ -> rs.getLong("id") to rs.getInt("winners") }
+            .query { rs, _ -> Triple(rs.getLong("id"), rs.getLong("match_id"), rs.getInt("winners")) }
             .list()
 
-        assertTrue(winnersPerMatch.all { it.second <= 1 }, "the partial unique index should make this impossible")
-        assertEquals(listOf(11L), winnersPerMatch.filter { it.second == 0 }.map { it.first }, "the timed draw")
+        assertTrue(winnersPerGame.all { it.third <= 1 }, "the partial unique index should make this impossible")
+        assertEquals(listOf(11L), winnersPerGame.filter { it.third == 0 }.map { it.second }, "the timed draw")
     }
 
     @Test
-    fun `the database rejects a match recorded without a map`() {
+    fun `the database rejects a game recorded without a map`() {
         assertFailsWith<DataIntegrityViolationException> {
             jdbcClient
                 .sql(
                     """
-                    insert into tournament_match (tournament_id, round, map_id, played_at)
-                    values (1, 1, null, now())
+                    insert into match_game (match_id, tournament_id, game_number, map_id)
+                    values (1, 1, 99, null)
                     """
                 )
                 .update()

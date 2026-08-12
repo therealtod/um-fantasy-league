@@ -1,8 +1,11 @@
 package com.umfl.scoring
 
 import com.umfl.match.BanResult
+import com.umfl.match.BanType
+import com.umfl.match.GameParticipantResult
+import com.umfl.match.GameResult
+import com.umfl.match.MatchParticipantResult
 import com.umfl.match.MatchResult
-import com.umfl.match.ParticipantResult
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
@@ -41,14 +44,25 @@ class ScoringEngineTest {
         matchId = 6,
         tournamentId = 1,
         round = 2,
-        mapId = 3,
-        mapName = "Raptor Paddock",
         playedAt = Instant.parse("2026-06-06T11:00:00Z"),
+        externalLink = null,
         participants = listOf(
-            ParticipantResult(1, "Aurelie Blanc", 7, "Bigfoot", 11, isWinner = true),
-            ParticipantResult(2, "Miles Ashworth", 11, "Beowulf", 0, isWinner = false),
+            MatchParticipantResult(side = 0, playerLabel = "Aurelie Blanc"),
+            MatchParticipantResult(side = 1, playerLabel = "Miles Ashworth"),
         ),
-        bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong")),
+        games = listOf(
+            GameResult(
+                gameId = 1,
+                gameNumber = 1,
+                mapId = 3,
+                mapName = "Raptor Paddock",
+                participants = listOf(
+                    GameParticipantResult(side = 0, heroId = 7, heroName = "Bigfoot", healthRemaining = 11, isWinner = true),
+                    GameParticipantResult(side = 1, heroId = 11, heroName = "Beowulf", healthRemaining = 0, isWinner = false),
+                ),
+            ),
+        ),
+        bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.PRE_BAN)),
     )
 
     private fun contextFor(heroId: Long) = match.heroContexts().single { it.heroId == heroId }

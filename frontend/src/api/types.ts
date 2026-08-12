@@ -99,22 +99,31 @@ export interface StandingsBoard {
   rows: StandingsRow[]
 }
 
-export interface TickerSide {
+export interface TickerGameSide {
   /** Free text. Absent when the result was recorded unattributed — render a fallback. */
   playerLabel?: string
   heroName: string
   healthRemaining: number
   isWinner: boolean
+  /** This hero's net score for this game. May be negative. */
   points: number
+}
+
+export interface TickerGame {
+  gameNumber: number
+  mapName: string
+  /** Winner first — every game has exactly one, so this is always winner then loser. */
+  sides: TickerGameSide[]
 }
 
 export interface TickerEntry {
   matchId: number
   round: number
-  mapName: string
   playedAt: string
-  /** Winner first. A timed draw has no winner at all. */
-  sides: TickerSide[]
+  /** Absent when the match has no external link. */
+  externalLink?: string
+  /** Ordered by game number — one entry per game played in the series. */
+  games: TickerGame[]
   bannedHeroNames: string[]
 }
 
@@ -178,49 +187,78 @@ export interface MapAdminDto {
   name: string
 }
 
+export type BanType = 'PRE_BAN' | 'OPPONENT_BAN' | 'SELF_BAN'
+
 export interface MatchParticipantRequest {
-  /** Who piloted the hero, as free text. Optional — there is no `player` entity to reference. */
+  /** Who piloted this side for the whole series, as free text. Optional — there is no `player` entity to reference. */
   playerLabel?: string | null
+}
+
+export interface MatchGameParticipantRequest {
   heroId: number
   healthRemaining: number
   isWinner: boolean
+}
+
+export interface MatchGameRequest {
+  gameNumber: number
+  mapId: number
+  participants: MatchGameParticipantRequest[]
 }
 
 export interface MatchBanRequest {
   heroId: number
+  banType: BanType
 }
 
 export interface RecordMatchRequest {
   round: number
-  mapId: number
   playedAt: string // Instant as ISO string
+  externalLink?: string | null
   participants: MatchParticipantRequest[]
+  games: MatchGameRequest[]
   bans: MatchBanRequest[]
 }
 
-export interface ParticipantResult {
-  participantId: number
+export interface MatchParticipantResult {
+  /** 0 or 1 — a stable ordinal for the whole series. */
+  side: number
   /** Free text. Absent when the result was recorded unattributed. */
   playerLabel?: string
+}
+
+export interface GameParticipantResult {
+  side: number
   heroId: number
   heroName: string
   healthRemaining: number
   isWinner: boolean
+}
+
+export interface GameResult {
+  gameId: number
+  gameNumber: number
+  mapId: number
+  mapName: string
+  participants: GameParticipantResult[]
 }
 
 export interface BanResult {
   heroId: number
   heroName: string
+  banType: BanType
 }
 
 export interface MatchResultDto {
   matchId: number
   tournamentId: number
   round: number
-  mapId: number
-  mapName: string
   playedAt: string
-  participants: ParticipantResult[]
+  /** Absent when the match has no external link. */
+  externalLink?: string
+  participants: MatchParticipantResult[]
+  /** Ordered by game number. */
+  games: GameResult[]
   bans: BanResult[]
 }
 

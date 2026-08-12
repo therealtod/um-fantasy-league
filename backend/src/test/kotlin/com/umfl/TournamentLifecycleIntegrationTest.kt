@@ -4,6 +4,8 @@ import com.umfl.hero.HeroPoolAdminRepository
 import com.umfl.manager.ManagerRepository
 import com.umfl.map.MapPoolAdminRepository
 import com.umfl.match.AdminMatchService
+import com.umfl.match.MatchGameInput
+import com.umfl.match.MatchGameParticipantInput
 import com.umfl.match.MatchParticipantInput
 import com.umfl.scoring.AdminScoringService
 import com.umfl.scoring.ScoringCoefficientInput
@@ -146,11 +148,18 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
             adminMatchService.record(
                 tournamentId = tournamentId,
                 round = round,
-                mapId = mapId(map),
                 playedAt = Instant.now(),
-                participants = listOf(
-                    MatchParticipantInput(winnerPlayer, heroId(winnerHero), winnerHealth, true),
-                    MatchParticipantInput(loserPlayer, heroId(loserHero), loserHealth, false),
+                externalLink = null,
+                participants = listOf(MatchParticipantInput(winnerPlayer), MatchParticipantInput(loserPlayer)),
+                games = listOf(
+                    MatchGameInput(
+                        gameNumber = 1,
+                        mapId = mapId(map),
+                        participants = listOf(
+                            MatchGameParticipantInput(heroId(winnerHero), winnerHealth, true),
+                            MatchGameParticipantInput(heroId(loserHero), loserHealth, false),
+                        ),
+                    ),
                 ),
                 bans = emptyList(),
             )
@@ -160,8 +169,8 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
         record(1, "Baskerville Manor", "Tomas Ferreira" to ("Alice" to 8), "Rina Okafor" to ("Medusa" to 0))
         record(1, "Sherwood Forest", "Hana Sato" to ("Yennenga" to 5), "Dmitri Kovac" to ("Bigfoot" to 0))
         // Round 2.
-        record(2, "Raptor Paddock", "Aurelie Blanc" to ("King Arthur" to 10), "Miles Ashworth" to ("Sun Wukong" to 3))
-        record(2, "Baskerville Manor", "Jonas Lindqvist" to ("Beowulf" to 6), "Priya Raghunathan" to ("Sherlock Holmes" to 2))
+        record(2, "Raptor Paddock", "Aurelie Blanc" to ("King Arthur" to 10), "Miles Ashworth" to ("Sun Wukong" to 0))
+        record(2, "Baskerville Manor", "Jonas Lindqvist" to ("Beowulf" to 6), "Priya Raghunathan" to ("Sherlock Holmes" to 0))
 
         // --- The tournament ends. ---
         adminTournamentService.update(
@@ -185,18 +194,18 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
             listOf(
                 "SherlockMain" to 40.0,
                 "ArthurianLegend" to 33.0,
-                "NeonStrategist" to 5.0,
-                "MythicMind" to 4.0,
+                "MythicMind" to 2.0,
+                "NeonStrategist" to 2.0,
             ),
             board.rows.map { it.handle to it.totalPoints },
             """
             SherlockMain -- Alice (win 10 + health 8 + appearance 1 = 19) + King Arthur (win 10 + health 10 + appearance 1 = 21) = 40
             ArthurianLegend -- Yennenga (10+5+1=16) + Beowulf (10+6+1=17) = 33
-            NeonStrategist -- Bigfoot (0+0+1=1) + Sun Wukong (0+3+1=4) = 5
-            MythicMind -- Medusa (0+0+1=1) + Sherlock Holmes (0+2+1=3) = 4
+            MythicMind -- Medusa (0+0+1=1) + Sherlock Holmes (0+0+1=1) = 2
+            NeonStrategist -- Bigfoot (0+0+1=1) + Sun Wukong (0+0+1=1) = 2
             """.trimIndent(),
         )
-        assertEquals(listOf(1, 2, 3, 4), board.rows.map { it.rank })
+        assertEquals(listOf(1, 2, 3, 3), board.rows.map { it.rank })
 
         val winner = board.rows.single { it.rank == 1 }
         assertEquals("SherlockMain", winner.handle)

@@ -271,20 +271,20 @@ class StandingsIntegrationTest @Autowired constructor(
     fun `the ticker returns every match newest first`() {
         val ticker = standingsService.ticker(summerId(), sinceMatchId = 0, limit = 25)
 
-        assertEquals(12, ticker.size)
+        assertEquals(13, ticker.size)
         assertEquals(
-            listOf(12L, 11L, 10L, 9L, 8L, 7L, 6L, 5L, 4L, 3L, 2L, 1L),
+            listOf(13L, 12L, 11L, 10L, 9L, 8L, 7L, 6L, 5L, 4L, 3L, 2L, 1L),
             ticker.map { it.matchId },
             "ordered by played_at desc, then id desc for the parallel tables",
         )
-        assertEquals(listOf(3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1), ticker.map { it.round })
+        assertEquals(listOf(3, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1), ticker.map { it.round })
     }
 
     @Test
     fun `polling on the match id returns only what is new`() {
         val fresh = standingsService.ticker(summerId(), sinceMatchId = 10, limit = 25)
 
-        assertEquals(listOf(12L, 11L), fresh.map { it.matchId })
+        assertEquals(listOf(13L, 12L, 11L), fresh.map { it.matchId })
         assertTrue(fresh.all { it.matchId > 10 })
     }
 
@@ -292,13 +292,15 @@ class StandingsIntegrationTest @Autowired constructor(
     fun `a ticker entry names both sides, winner first, with their net points`() {
         val shutout = assertNotNull(standingsService.ticker(summerId()).singleOrNull { it.matchId == 6L })
 
-        assertEquals("Raptor Paddock", shutout.mapName)
-        assertEquals(listOf("Bigfoot", "Beowulf"), shutout.sides.map { it.heroName })
-        assertEquals(listOf("Aurelie Blanc", "Miles Ashworth"), shutout.sides.map { it.playerLabel })
-        assertEquals(listOf(true, false), shutout.sides.map { it.isWinner })
-        assertEquals(listOf(11, 0), shutout.sides.map { it.healthRemaining })
+        assertEquals(1, shutout.games.size, "a single-game match has exactly one game entry")
+        val game = shutout.games.single()
+        assertEquals("Raptor Paddock", game.mapName)
+        assertEquals(listOf("Bigfoot", "Beowulf"), game.sides.map { it.heroName })
+        assertEquals(listOf("Aurelie Blanc", "Miles Ashworth"), game.sides.map { it.playerLabel })
+        assertEquals(listOf(true, false), game.sides.map { it.isWinner })
+        assertEquals(listOf(11, 0), game.sides.map { it.healthRemaining })
         // 10 + 8.25 + 5.50 + 3 + 1 = 27.75 against 0 + (-5.50) + 1 = -4.50.
-        assertEquals(listOf(27.75, -4.5), shutout.sides.map { it.points })
+        assertEquals(listOf(27.75, -4.5), game.sides.map { it.points })
         assertEquals(listOf("Sun Wukong"), shutout.bannedHeroNames)
     }
 
@@ -306,12 +308,43 @@ class StandingsIntegrationTest @Autowired constructor(
     fun `a timed draw has no winner and still scores both sides`() {
         val draw = assertNotNull(standingsService.ticker(summerId()).singleOrNull { it.matchId == 11L })
 
-        assertTrue(draw.sides.none { it.isWinner })
-        assertEquals(setOf("Sherlock Holmes", "Dracula"), draw.sides.map { it.heroName }.toSet())
+        val game = draw.games.single()
+        assertTrue(game.sides.none { it.isWinner })
+        assertEquals(setOf("Sherlock Holmes", "Dracula"), game.sides.map { it.heroName }.toSet())
         assertEquals(
             mapOf("Sherlock Holmes" to 7.25, "Dracula" to 3.75),
-            draw.sides.associate { it.heroName to it.points },
+            game.sides.associate { it.heroName to it.points },
         )
         assertEquals(listOf("Medusa", "Yennenga"), draw.bannedHeroNames)
+    }
+
+    /**
+     * Match 13's Bo3 (Medusa vs. Achilles) is the seed's proof that a
+     * multi-game series records and scores correctly end to end -- but
+     * neither hero sits on any manager's roster, so every point it generates
+     * is folded into `appearancesByHero` and never picked up by `board()`.
+     * The totals here must be identical to the single-hand-verified-row
+     * fixture in `the winning row adds up metric by metric`.
+     */
+    @Test
+    fun `match 13, the Bo3 decider, is recorded and scored but changes no roster's total`() {
+        val decider = assertNotNull(standingsService.ticker(summerId()).singleOrNull { it.matchId == 13L })
+
+        assertEquals(3, decider.games.size, "the Bo3 recorded all three games")
+        assertEquals("https://challonge.com/example-bo3-decider", decider.externalLink)
+        assertEquals(listOf(1, 2, 3), decider.games.map { it.gameNumber })
+        assertTrue(decider.games.all { game -> game.sides.map { it.heroName }.toSet() == setOf("Medusa", "Achilles") })
+
+        val board = board()
+        assertTrue(board.rows.all { "Medusa" !in it.roster && "Achilles" !in it.roster })
+        assertEquals(
+            listOf(
+                "ArthurianLegend" to 84.00,
+                "NeonStrategist" to 75.75,
+                "MythicMind" to 63.25,
+                "SherlockMain" to 51.50,
+            ),
+            board.rows.map { it.handle to it.totalPoints },
+        )
     }
 }

@@ -1,14 +1,16 @@
 package com.umfl.scoring
 
+import com.umfl.match.GameParticipantResult
+import com.umfl.match.GameResult
 import com.umfl.match.MatchResult
-import com.umfl.match.ParticipantResult
 
 /**
- * What a hero did in one match: it either played (and there is a participant
- * row) or it was banned out (and there is not).
+ * What a hero did in one match: it either played one of the series' games
+ * (and there is a game + participant row) or it was banned out of the whole
+ * series (and there is not).
  */
 sealed interface HeroRole {
-    data class Played(val participant: ParticipantResult) : HeroRole
+    data class Played(val game: GameResult, val participant: GameParticipantResult) : HeroRole
 
     data object Banned : HeroRole
 }
@@ -17,19 +19,20 @@ sealed interface HeroRole {
  * One hero's role in one match, with the whole match still visible.
  *
  * The extractors need more than a participant row: `HEALTH_DIFFERENTIAL` needs
- * the opponent, `DRAW` needs to know whether *anyone* won, and `BAN` has no
- * participant row at all.
+ * the opponent, and `BAN` has no participant row at all. WIN and LOSS are
+ * scoped per game rather than per series — a hero that takes game 1 and drops
+ * game 2 scores one of each.
  */
 data class MetricContext(
     val match: MatchResult,
     val heroId: Long,
     val role: HeroRole,
 ) {
-    val participant: ParticipantResult?
+    val participant: GameParticipantResult?
         get() = (role as? HeroRole.Played)?.participant
 
-    val opponents: List<ParticipantResult>
-        get() = match.opponentsOf(heroId)
+    val opponents: List<GameParticipantResult>
+        get() = (role as? HeroRole.Played)?.game?.opponentsOf(heroId).orEmpty()
 }
 
 /**
@@ -93,15 +96,19 @@ private fun win(context: MetricContext): Double {
     return if (participant.isWinner) 1.0 else 0.0
 }
 
+/** Whether anyone won the game this hero played -- false for a timed draw. */
+private fun gameHasWinner(context: MetricContext): Boolean =
+    (context.role as? HeroRole.Played)?.game?.participants?.any { it.isWinner } ?: false
+
 /** A loss requires somebody to have won -- a timed draw is not a loss. */
 private fun loss(context: MetricContext): Double {
     val participant = context.participant ?: return 0.0
-    return if (context.match.hasWinner && !participant.isWinner) 1.0 else 0.0
+    return if (gameHasWinner(context) && !participant.isWinner) 1.0 else 0.0
 }
 
 private fun draw(context: MetricContext): Double {
     context.participant ?: return 0.0
-    return if (context.match.hasWinner) 0.0 else 1.0
+    return if (gameHasWinner(context)) 0.0 else 1.0
 }
 
 private fun healthRemaining(context: MetricContext): Double =

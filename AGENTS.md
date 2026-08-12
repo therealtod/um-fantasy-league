@@ -129,10 +129,11 @@ derived-query method when the screen wants a joined projection, and don't add an
 - Reads: `HeroQueryRepository` (`HeroView`), `MatchResultQuery`, `ScoringRuleSetQuery`,
   `StandingsQuery`
 
-`TournamentEntry` is the only aggregate root — it owns `EntrySlot`s via `@MappedCollection` (list
-index → `entry_slot.slot_index`) and is saved as one unit. The only other write is `manager`, on
-JIT-provisioning in `prod`. Everything else — `heroes`, `tournament`, `tournament_hero`, and the
-match/scoring tables — is read-only to this application; those rows come from Flyway seed SQL.
+`TournamentEntry` is the manager-facing aggregate root — it owns `EntrySlot`s via `@MappedCollection`
+(list index → `entry_slot.slot_index`) and is saved as one unit. `manager` is written on
+JIT-provisioning in `prod`. Everything else is written only through the Admin API, whose own
+aggregates (`TournamentMatch`, `ScoringRuleSet`, `Hero`, `GameMap`) are described under Admin API
+below; nothing outside that surface writes reference data or results.
 
 ### Invariants
 
@@ -148,10 +149,18 @@ match/scoring tables — is read-only to this application; those rows come from 
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
   `scoring_coefficient`, the budget is `tournament.credit_grant` — both retuned with an UPDATE. Don't
   reintroduce a tunables block in `application.yml`.
+- **A match is a series, and every game in it has a winner.** `tournament_match` is a best-of-N
+  between two humans; each `match_game` carries its own map and its own two
+  `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
+  two rows is flagged `is_winner` — a partial unique index stops two, and
+  `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw.** A game that runs out
+  of time is decided on health, so the loser is not necessarily on 0 (seed match 11 is that shape).
+  Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side, like every
+  other derived number here.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
-  `match_participant.player_label` — nullable free text with no table, no FK, no repository and
-  deliberately no admin API. An admin records a new competitor by typing their name. It is display
+  `match_participant.player_label` — one row per side for the whole series, nullable free text with
+  no table, no FK, no repository and deliberately no admin API. An admin records a new competitor by typing their name. It is display
   text for the ticker and the admin match list, nothing more, and `MatchResultPolicy` never validates
   it (a blank label normalises to null in `AdminMatchService`). Promote it to a real table only if
   something starts scoring or ranking the humans — until then, a `player` table only buys you CRUD
@@ -167,12 +176,15 @@ Both return *all* violations at once so the UI can highlight every problem in on
 `UNKNOWN_HERO`, `BUDGET_EXCEEDED`.
 
 `MatchMetrics` is a registry keyed by the free-form `scoring_coefficient.metric` string. It
-implements `APPEARANCE`, `BAN`, `WIN`, `LOSS`, `DRAW`, `HEALTH_REMAINING`, `HEALTH_DIFFERENTIAL`,
+implements `APPEARANCE`, `BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`, `HEALTH_DIFFERENTIAL`,
 `SHUTOUT`, and **silently ignores everything else** — unknown keys score zero, are dropped from the
 leaderboard's columns and throw nothing. The seed's `CROWD_FAVOURITE` is the deliberate proof of
-that; leave it unimplemented. Extractors take a `MetricContext` (the hero's role in one whole match),
-not a bare participant row, because `HEALTH_DIFFERENTIAL` needs the opponent, `DRAW` needs "did
-anyone win", and `BAN` has no participant row at all.
+that; leave it unimplemented. There is deliberately no `DRAW`: every game has exactly one winner
+(see the invariant above), so `WIN` and `LOSS` are exhaustive within a game and a `DRAW`
+column would price something that cannot be recorded. Extractors take a `MetricContext` (the hero's
+role in *one game* of one match), not a bare participant row, because `HEALTH_DIFFERENTIAL` needs
+the opponent and `BAN` has no participant row at all. `WIN`/`LOSS` are scored per game, not per
+series, so a hero that takes game 1 and drops game 2 of a Bo3 collects one of each.
 
 `StandingsService` returns a `StandingsBoard` that carries its own `metrics` column definitions —
 the backend cannot know the columns until it reads `scoring_coefficient`. Ranking is standard
@@ -201,9 +213,8 @@ squashed into one file, periodically re-squashed the same way rather than left a
 chain, since there is no production data yet to preserve migration history for. Tables the app loads
 or writes as aggregates carry a surrogate `bigserial` id next to a unique natural key because Spring
 Data JDBC can't map composite primary keys; the pure link tables (`tournament_hero`, `tournament_map`,
-`entry_slot`, `match_ban`) keep natural composite keys. The seed fixture is still the original seed,
-and the integration tests assert on its numbers exactly — changing a seeded price or result means
-updating them. New data past that fixed baseline goes through the Admin API (see below), not another
+`entry_slot`, `hero_ban`, `match_game_participant`) keep natural composite keys. The integration
+tests assert on the seed's numbers exactly — changing a seeded price or result means updating them. New data past that fixed baseline goes through the Admin API (see below), not another
 migration.
 
 ## Frontend architecture
@@ -277,21 +288,28 @@ sets/coefficients, plus create/update/delete for match results. Both pools also 
 the two removals are deliberately asymmetric: dropping a hero from `tournament_hero` is always
 allowed and simply re-prices any roster still holding it to 0 (the "no cost snapshot" invariant
 above, applied to a removal rather than a re-price), while dropping a map from `tournament_map` is
-rejected with a `ConflictException` when the tournament has a recorded match on it, since
-`tournament_match` carries a composite FK onto that row. The `V1__core_schema.sql` seed SQL is
-still what populated the original fixtures — nothing about it changed — but it is no longer the only
-way new reference data or results can enter the system.
+rejected with a `ConflictException` when the tournament has a recorded game on it, since
+`match_game` carries a composite FK onto that row. That FK is `DEFERRABLE INITIALLY DEFERRED` so a
+tournament delete (which cascades to `tournament_map` and, one level deeper, to `match_game`) is not
+tripped by cascade ordering — which is why `AdminMapService.removeFromPool` calls
+`MapPoolAdminRepository.checkMapInPoolNow()` (`set constraints … immediate`) after its DELETE: the
+violation has to surface inside the method that can still name the map, not at commit. The
+`V1__core_schema.sql` seed SQL is still what populated the original fixtures, but it is no longer
+the only way new reference data or results can enter the system.
 
 Tables that were previously read-only (`heroes`, `game_map`, `tournament_match`/`match_participant`/
-`match_ban`, `scoring_rule_set`/`scoring_coefficient`) now have a Spring Data JDBC write side:
-`Hero`, `GameMap`, `TournamentMatch` (owning `participants`/`bans` as `Set`-mapped children — no
-`keyColumn`, unlike `EntrySlot`'s `List`, because neither child has a list-position column) and
-`ScoringRuleSet` (owning `coefficients`). `tournament_hero` and `tournament_map` stay composite-keyed
-link tables with no Kotlin entity — `HeroPoolAdminRepository`/`MapPoolAdminRepository` write them via
-`JdbcClient`, the same read/write split the rest of the app already uses.
+`match_game`/`match_game_participant`/`hero_ban`, `scoring_rule_set`/`scoring_coefficient`) now have
+a Spring Data JDBC write side: `Hero`, `GameMap`, `TournamentMatch` (owning `participants` as a
+`List` keyed by `side`, plus `games` and `bans` as `Set`-mapped children — no `keyColumn` there,
+since neither carries a list-position column; each `MatchGame` in turn owns its own participants)
+and `ScoringRuleSet` (owning `coefficients`). `tournament_hero` and `tournament_map` stay
+composite-keyed link tables with no Kotlin entity — `HeroPoolAdminRepository`/`MapPoolAdminRepository`
+write them via `JdbcClient`, the same read/write split the rest of the app already uses.
 
 `MatchResultPolicy` (pure, mirrors `RosterPolicy`) validates a match submission — map-in-pool,
-duplicate hero, unknown hero, at most one winner — before save, raising `MatchRuleException` (422, same
+duplicate hero within a game, unknown hero, game numbers a dense 1..N, two sides per series and per
+game, no banned hero also played, and exactly one winner per game (`NOT_EXACTLY_ONE_WINNER` — zero
+is as invalid as two, there being no draw) — before save, raising `MatchRuleException` (422, same
 shape as `RosterRuleException`, kept as a separate type rather than merged into it). Activating a
 scoring rule set deactivates any active sibling in the same transaction, since only one may be active
 per tournament. An unknown scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a
@@ -322,7 +340,15 @@ and **renders `ScoringRuleSetDto.warnings` after every save** — without that, 
 clean `201` followed by a column that silently scores zero forever. Its `knownMetrics` array mirrors
 `MatchMetrics`' extractor registry and only drives a hint (an inline flag while typing, normalised
 the same `trim().uppercase()` way); it never blocks a save, because the server deciding what it can
-price is the whole point of the warning. Keep the array in step when adding an extractor.
+price is the whole point of the warning. Keep the array in step when adding an extractor — and note
+`DRAW` is *not* in it, deliberately, so pricing one is flagged like any other metric this build
+cannot measure.
+
+`MatchResultWizard` records a whole series: one map and two heroes per game, "+ Add Game" for a
+best-of-N, and the two player names once for the match. Each game's winner is a **radio**, not a
+checkbox — exactly one side wins, and there is no "neither" to express — with a client-side check
+before save so an untouched winner reads as a prompt instead of a 422. `MatchListAdmin` renders the
+games grouped under their maps and derives the games-won tally per side.
 
 ## Deliberately not built
 

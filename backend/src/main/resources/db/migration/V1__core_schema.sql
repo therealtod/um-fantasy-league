@@ -14,9 +14,12 @@
 -- Note on surrogate keys: tables that Spring Data JDBC loads or writes as
 -- aggregates carry a bigserial id, because Spring Data JDBC cannot map a
 -- composite primary key. The pure link tables (`tournament_hero`,
--- `tournament_map`, `entry_slot`, `match_ban`) are read through JdbcClient or
--- mapped as @MappedCollection children, so they keep their natural composite
--- key with no surrogate.
+-- `tournament_map`, `entry_slot`, `match_participant`, `match_game_participant`,
+-- `hero_ban`) are read through JdbcClient or mapped as @MappedCollection
+-- children keyed by list position or by their own natural key, so they keep
+-- their natural composite key with no surrogate. `match_game` is the one
+-- exception among the match tables: it is itself the parent of
+-- `match_game_participant`, so it needs a surrogate id to be referenced by.
 --
 -- The seed data below is a fixture: three tournaments in three lifecycle
 -- states, one of them with a complete recorded result set. Hero and map names
@@ -205,14 +208,11 @@ create table scoring_coefficient (
         check (metric ~ '^[A-Z][A-Z0-9_]*$')
 );
 
--- One recorded match.
---
--- `map_id` is required -- no match happens without a board, so a result cannot
--- be recorded until the board is noted. The composite foreign key constrains
--- it to that tournament's own `tournament_map` pool; because `map_id` is
--- `not null`, that FK is always checked (no MATCH SIMPLE nuance to reason
--- about). There is no separate FK onto `game_map` -- the composite one
--- already implies a `tournament_map` row, which references it.
+-- One recorded match -- a series of one or more games between the same two
+-- human players. `map_id` moved to `match_game`: each game in a series can be
+-- played on a different board. `played_at` stays here (when the series
+-- happened), not derived from its games, so the existing played_at-based
+-- ticker sort/index below is undisturbed by adding games.
 --
 -- Rows are seeded in chronological order, so `id` order and `played_at` order
 -- agree. That is what lets the ticker poll on `id > :sinceMatchId` (monotonic,
@@ -222,65 +222,134 @@ create table tournament_match (
     id            bigserial   primary key,
     tournament_id bigint      not null references tournament (id) on delete cascade,
     round         integer     not null check (round > 0),
-    map_id        bigint      not null,
     played_at     timestamptz not null,
-    constraint tournament_match_map_in_pool
-        foreign key (tournament_id, map_id) references tournament_map (tournament_id, map_id)
+    external_link text,
+    -- Redundant against the primary key, and here only so `match_game` can
+    -- point a composite FK at (id, tournament_id) -- see that table's comment.
+    unique (id, tournament_id)
 );
 
--- One side of a match: which hero was brought, by whom, and how it ended.
+comment on column tournament_match.external_link is
+    'Optional link to another platform''s record of this match (bracket site, VOD, etc). Same '
+    'shape as heroes.image_url: plain nullable text, no validation beyond nullability.';
+
+-- One side of the series: which human played it, for the whole series. Hero,
+-- map, health and winner all moved to match_game/match_game_participant,
+-- because in a best-of-N series a side can pilot a different hero per game --
+-- only the two human competitors are fixed for the series.
+--
+-- No surrogate id: `side` (0 or 1) is a stable ordinal with no data of its
+-- own, exactly like `entry_slot.slot_index` -- Spring Data JDBC maps this as
+-- a List<MatchParticipant> child keyed by list position, so the Kotlin class
+-- carries no explicit `side` field.
+create table match_participant (
+    match_id     bigint  not null references tournament_match (id) on delete cascade,
+    side         integer not null check (side in (0, 1)),
+    player_label text,
+    primary key (match_id, side)
+);
+
+comment on column match_participant.player_label is
+    'Who piloted this side for the whole series, as free text. Deliberately not a `player` '
+    'table: every point in this application is scored per hero -- no metric extractor, no '
+    'scoring coefficient and no standings query reads the human behind the hero, so the name is '
+    'display text for the ticker and the admin match list and nothing more. Nullable: an '
+    'unattributed result is still a valid result.';
+
+-- One game within a series. `tournament_id` is denormalized from
+-- `tournament_match` purely so this table can carry the same composite
+-- "map is in this tournament's pool" foreign key `tournament_match` used to
+-- carry directly -- Spring Data JDBC needs it as a real field to build that
+-- FK; nothing besides construction reads it otherwise.
+-- Being a copy, it can in principle drift from the parent match's own
+-- `tournament_id`, and a game filed under the wrong tournament is invisible
+-- to MapPoolAdminRepository.hasRecordedMatch (which filters on this column)
+-- while its pool FK points at some other tournament's pool row -- so
+-- `match_game_of_match` pins the copy to its parent instead of leaving the
+-- two in step by AdminMatchService's construction alone.
+-- `match_game_map_in_pool` is DEFERRABLE INITIALLY DEFERRED: deleting a
+-- tournament cascades to `tournament_map` (a direct child) and to `match_game`
+-- (a grandchild, via `tournament_match`) in the same statement, and Postgres
+-- does not guarantee the grandchild is fully cascaded away before the direct
+-- child's rows are removed. Deferring the check to commit, by which point
+-- both cascades have finished, avoids a spurious FK violation on a delete
+-- that is actually consistent. `tournament_match_map_in_pool` never needed
+-- this because `tournament_match` and `tournament_map` are both direct
+-- children of `tournament`, one level removed either way.
+create table match_game (
+    id            bigserial primary key,
+    match_id      bigint  not null references tournament_match (id) on delete cascade,
+    tournament_id bigint  not null,
+    game_number   integer not null check (game_number > 0),
+    map_id        bigint  not null,
+    unique (match_id, game_number),
+    constraint match_game_of_match
+        foreign key (match_id, tournament_id) references tournament_match (id, tournament_id)
+        on delete cascade,
+    constraint match_game_map_in_pool
+        foreign key (tournament_id, map_id) references tournament_map (tournament_id, map_id)
+        deferrable initially deferred
+);
+
+-- One side's result in one game: the hero it brought and how it ended.
 --
 -- `health_remaining` is the survivor's health at the end, 0 for a defeated
 -- hero. A timed draw is represented by no participant having `is_winner` --
 -- both sides can be alive with unequal health.
 --
--- `unique (match_id, hero_id)` is unambiguous here precisely because banned
--- heroes live in `match_ban` and never appear as a participant.
-create table match_participant (
-    id               bigserial primary key,
-    match_id         bigint    not null references tournament_match (id) on delete cascade,
-    player_label     text,
-    hero_id          bigint    not null references heroes (id),
-    health_remaining integer   not null check (health_remaining >= 0),
-    is_winner        boolean   not null default false,
-    unique (match_id, hero_id)
+-- `unique (game_id, hero_id)` is unambiguous here precisely because banned
+-- heroes live in `hero_ban` and never appear as a game participant.
+--
+-- `side` here is NOT declared as an FK back to match_participant.side --
+-- doing that would require denormalizing match_id onto this table too, one
+-- level further down. The side-pairing between match_participant and
+-- match_game_participant (side 0 of a game is played by side 0 of the
+-- series) is an APPLICATION-level invariant, enforced by MatchResultPolicy /
+-- AdminMatchService always building both lists in the same order -- the same
+-- tier of guarantee "exactly 2 participants" already was before this change.
+create table match_game_participant (
+    game_id          bigint  not null references match_game (id) on delete cascade,
+    side             integer not null check (side in (0, 1)),
+    hero_id          bigint  not null references heroes (id),
+    health_remaining integer not null check (health_remaining >= 0),
+    is_winner        boolean not null default false,
+    primary key (game_id, side),
+    unique (game_id, hero_id)
 );
 
-comment on column match_participant.player_label is
-    'Who piloted this hero, as free text. Deliberately not a `player` table: every point in '
-    'this application is scored per hero -- no metric extractor, no scoring coefficient and no '
-    'standings query reads the human behind the hero, so the name is display text for the '
-    'ticker and the admin match list and nothing more. Keeping it as a label means an admin can '
-    'record a new competitor by typing their name, with no reference-data entity, no admin CRUD '
-    'and no foreign key to violate. Nullable: an unattributed result is still a valid result. '
-    'Promote it to a real table only if something starts scoring or ranking the humans.';
-
-create unique index uq_match_participant_winner
-    on match_participant (match_id)
+create unique index uq_match_game_participant_winner
+    on match_game_participant (game_id)
     where is_winner;
 
--- A hero banned out of one match. Modelled as its own table rather than a
--- `was_banned` flag on match_participant: a banned hero has no health and no
--- result, so storing it as a participant would force health_remaining = 0,
--- which is indistinguishable from "played and was defeated" and would poison
--- every HEALTH_REMAINING sum and SHUTOUT check.
+-- A hero banned out of the series. Modelled as its own table rather than a
+-- `was_banned` flag on match_game_participant: a banned hero has no health
+-- and no result, so storing it as a participant would force
+-- health_remaining = 0, which is indistinguishable from "played and was
+-- defeated" and would poison every HEALTH_REMAINING sum and SHUTOUT check.
 --
--- Bans are per match, not per tournament -- a hero banned in one round can be
--- played in the next, so this never touches `entry_slot`.
+-- Bans happen once, before the series starts -- not per game -- which is why
+-- this references tournament_match, not match_game. `ban_type` follows this
+-- file's existing check-constrained text + Kotlin enum convention (see
+-- manager.rank_tier / tournament.status).
 --
--- Who struck the ban is not recorded: the BAN metric prices the banned hero,
--- never the person who banned it. Natural composite key, no surrogate.
-create table match_ban (
+-- Who struck the ban is not recorded beyond its category: the BAN metric
+-- prices the banned hero, never the person who banned it. Natural composite
+-- key, no surrogate.
+--
+-- A parallel `map_ban (match_id, map_id, ban_type)` table is a plausible
+-- future extension for board draft/bans -- not built now.
+create table hero_ban (
     match_id bigint not null references tournament_match (id) on delete cascade,
     hero_id  bigint not null references heroes (id),
+    ban_type text   not null check (ban_type in ('PRE_BAN', 'OPPONENT_BAN', 'SELF_BAN')),
     primary key (match_id, hero_id)
 );
 
 create index idx_scoring_coefficient_rule_set on scoring_coefficient (rule_set_id, sort_order);
 create index idx_tournament_match_tournament on tournament_match (tournament_id, id desc);
 create index idx_tournament_match_played_at on tournament_match (tournament_id, played_at desc);
-create index idx_match_participant_hero on match_participant (hero_id);
-create index idx_match_ban_hero on match_ban (hero_id);
+create index idx_match_game_participant_hero on match_game_participant (hero_id);
+create index idx_hero_ban_hero on hero_ban (hero_id);
 
 -- ===========================================================================
 -- Seed fixtures.
@@ -532,107 +601,187 @@ from scoring_rule_set rs
     ) as v(metric, coefficient, sort_order);
 
 -- ---------------------------------------------------------------------------
--- Summer of Legends: the recorded results. Twelve matches over three rounds,
--- eight players, three matches each; every one of the twelve heroes is played
--- at least twice.
+-- Summer of Legends: the recorded results. Thirteen matches over three
+-- rounds, eight players who each play three matches -- plus a Bo3 decider
+-- (match 13) shared by Rina Okafor and Dmitri Kovac, their fourth match
+-- apiece; every one of the twelve pooled heroes is played at least twice.
 --
 -- Match ids are given explicitly, which is the one place this file does not
--- key off a natural column: `tournament_match` has none, and the participant
--- and ban rows below have to point at a specific match. Writing the ids out
--- also makes the invariant checkable by eye -- ids ascend with played_at, so
--- the ticker can filter on `id` while sorting on `played_at`. `played_at` is
--- itself NOT unique: parallel tables (ids 1/2, 3/4, 5/6, 7/8, 9/10) share a
--- start time, which is exactly why the polling key is the id.
+-- key off a natural column: `tournament_match` has none, and the game/
+-- participant/ban rows below have to point at a specific match. Writing the
+-- ids out also makes the invariant checkable by eye -- ids ascend with
+-- played_at, so the ticker can filter on `id` while sorting on `played_at`.
+-- `played_at` is itself NOT unique: parallel tables (ids 1/2, 3/4, 5/6, 7/8,
+-- 9/10) share a start time, which is exactly why the polling key is the id.
 --
+-- Match 13 is the one multi-game series in the seed, proving Bo3 works end to
+-- end without disturbing any of the twelve hand-verified single-game matches
+-- above. Medusa and Achilles are deliberately reused here because the
+-- `entry_slot` comment below already calls them out as "on nobody's roster",
+-- so every point this match generates -- game results AND its bans -- lands
+-- on zero fantasy totals, leaving every existing standings assertion exact.
+-- Its three bans (Bruce Lee, Deadpool, Invisible Man) are outside Summer of
+-- Legends' own `tournament_hero` pool for the same reason -- nothing in the
+-- schema requires a banned or played hero to be pool-priced, only that maps
+-- come from `tournament_map` (see `MatchResultPolicy.UNKNOWN_HERO`, which
+-- validates against `heroes`, never `tournament_hero`). `external_link` is
+-- exercised only here -- every other match leaves it null.
 -- ---------------------------------------------------------------------------
 
-insert into tournament_match (id, tournament_id, round, map_id, played_at)
-select v.id, t.id, v.round, m.id, v.played_at
+insert into tournament_match (id, tournament_id, round, played_at, external_link)
+select v.id, t.id, v.round, v.played_at, v.external_link
 from (values
-    ( 1, 1, 'Baskerville Manor', timestamptz '2026-06-05 12:00:00+00'),
-    ( 2, 1, 'Sherwood Forest',   timestamptz '2026-06-05 12:00:00+00'),
-    ( 3, 1, 'Raptor Paddock',    timestamptz '2026-06-05 14:30:00+00'),
-    ( 4, 1, 'Baskerville Manor', timestamptz '2026-06-05 14:30:00+00'),
-    ( 5, 2, 'Sherwood Forest',   timestamptz '2026-06-06 11:00:00+00'),
-    ( 6, 2, 'Raptor Paddock',    timestamptz '2026-06-06 11:00:00+00'),
-    ( 7, 2, 'Baskerville Manor', timestamptz '2026-06-06 13:30:00+00'),
-    ( 8, 2, 'Sherwood Forest',   timestamptz '2026-06-06 13:30:00+00'),
-    ( 9, 3, 'Raptor Paddock',    timestamptz '2026-06-07 10:00:00+00'),
-    (10, 3, 'Baskerville Manor', timestamptz '2026-06-07 10:00:00+00'),
-    (11, 3, 'Sherwood Forest',   timestamptz '2026-06-07 12:30:00+00'),
-    (12, 3, 'Raptor Paddock',    timestamptz '2026-06-07 15:00:00+00')
-) as v(id, round, map_name, played_at)
-    join tournament t on t.name = 'Summer of Legends'
-    join game_map m on m.name = v.map_name;
+    ( 1, 1, timestamptz '2026-06-05 12:00:00+00', null),
+    ( 2, 1, timestamptz '2026-06-05 12:00:00+00', null),
+    ( 3, 1, timestamptz '2026-06-05 14:30:00+00', null),
+    ( 4, 1, timestamptz '2026-06-05 14:30:00+00', null),
+    ( 5, 2, timestamptz '2026-06-06 11:00:00+00', null),
+    ( 6, 2, timestamptz '2026-06-06 11:00:00+00', null),
+    ( 7, 2, timestamptz '2026-06-06 13:30:00+00', null),
+    ( 8, 2, timestamptz '2026-06-06 13:30:00+00', null),
+    ( 9, 3, timestamptz '2026-06-07 10:00:00+00', null),
+    (10, 3, timestamptz '2026-06-07 10:00:00+00', null),
+    (11, 3, timestamptz '2026-06-07 12:30:00+00', null),
+    (12, 3, timestamptz '2026-06-07 15:00:00+00', null),
+    (13, 3, timestamptz '2026-06-07 16:30:00+00', 'https://challonge.com/example-bo3-decider')
+) as v(id, round, played_at, external_link)
+    join tournament t on t.name = 'Summer of Legends';
 
 select setval('tournament_match_id_seq', (select max(id) from tournament_match));
 
--- Two participants per match. Eight named competitors, each playing three
--- matches -- names carried as labels, not rows in a table (see the comment on
--- `match_participant.player_label`).
---
+-- Two sides per match, for the whole series. Eight named competitors, each
+-- playing three matches (Rina Okafor and Dmitri Kovac also play the match 13
+-- decider) -- names carried as labels, not rows in a table (see the comment
+-- on `match_participant.player_label`).
+insert into match_participant (match_id, side, player_label)
+select v.match_id, v.side, v.player_label
+from (values
+    ( 1, 0, 'Tomas Ferreira'),    ( 1, 1, 'Hana Sato'),
+    ( 2, 0, 'Rina Okafor'),       ( 2, 1, 'Jonas Lindqvist'),
+    ( 3, 0, 'Aurelie Blanc'),     ( 3, 1, 'Dmitri Kovac'),
+    ( 4, 0, 'Miles Ashworth'),    ( 4, 1, 'Priya Raghunathan'),
+    ( 5, 0, 'Rina Okafor'),       ( 5, 1, 'Tomas Ferreira'),
+    ( 6, 0, 'Aurelie Blanc'),     ( 6, 1, 'Miles Ashworth'),
+    ( 7, 0, 'Hana Sato'),         ( 7, 1, 'Priya Raghunathan'),
+    ( 8, 0, 'Dmitri Kovac'),      ( 8, 1, 'Jonas Lindqvist'),
+    ( 9, 0, 'Rina Okafor'),       ( 9, 1, 'Dmitri Kovac'),
+    (10, 0, 'Hana Sato'),         (10, 1, 'Aurelie Blanc'),
+    (11, 0, 'Miles Ashworth'),    (11, 1, 'Tomas Ferreira'),
+    (12, 0, 'Jonas Lindqvist'),   (12, 1, 'Priya Raghunathan'),
+    (13, 0, 'Rina Okafor'),       (13, 1, 'Dmitri Kovac')
+) as v(match_id, side, player_label);
+
+-- One game per match for the twelve original single-game matches (same board
+-- each carried before this split), plus three games for match 13's Bo3.
+insert into match_game (match_id, tournament_id, game_number, map_id)
+select v.match_id, t.id, 1, m.id
+from (values
+    ( 1, 'Baskerville Manor'),
+    ( 2, 'Sherwood Forest'),
+    ( 3, 'Raptor Paddock'),
+    ( 4, 'Baskerville Manor'),
+    ( 5, 'Sherwood Forest'),
+    ( 6, 'Raptor Paddock'),
+    ( 7, 'Baskerville Manor'),
+    ( 8, 'Sherwood Forest'),
+    ( 9, 'Raptor Paddock'),
+    (10, 'Baskerville Manor'),
+    (11, 'Sherwood Forest'),
+    (12, 'Raptor Paddock')
+) as v(match_id, map_name)
+    join tournament t on t.name = 'Summer of Legends'
+    join game_map m on m.name = v.map_name;
+
+insert into match_game (match_id, tournament_id, game_number, map_id)
+select 13, t.id, v.game_number, m.id
+from (values
+    (1, 'Sherwood Forest'),
+    (2, 'Raptor Paddock'),
+    (3, 'Baskerville Manor')
+) as v(game_number, map_name)
+    join tournament t on t.name = 'Summer of Legends'
+    join game_map m on m.name = v.map_name;
+
 -- Match 6 is the SHUTOUT: Bigfoot finishes on 11 health, Beowulf on 0.
 -- Match 11 is the TIMED DRAW: neither side is_winner, both still alive on
 -- unequal health (7 vs 5), so HEALTH_DIFFERENTIAL is non-zero with no WIN.
-insert into match_participant (match_id, player_label, hero_id, health_remaining, is_winner)
-select v.match_id, v.player_label, h.id, v.health_remaining, v.is_winner
+insert into match_game_participant (game_id, side, hero_id, health_remaining, is_winner)
+select mg.id, v.side, h.id, v.health_remaining, v.is_winner
 from (values
-    ( 1, 'Tomas Ferreira',    'Sun Wukong',       9, true),
-    ( 1, 'Hana Sato',         'Alice',            3, false),
-    ( 2, 'Rina Okafor',       'Robin Hood',       6, true),
-    ( 2, 'Jonas Lindqvist',   'Achilles',         2, false),
-    ( 3, 'Aurelie Blanc',     'Yennenga',         5, true),
-    ( 3, 'Dmitri Kovac',      'King Arthur',      4, false),
-    ( 4, 'Miles Ashworth',    'Sherlock Holmes',  7, true),
-    ( 4, 'Priya Raghunathan', 'Dracula',          1, false),
-    ( 5, 'Rina Okafor',       'Medusa',           8, true),
-    ( 5, 'Tomas Ferreira',    'Sun Wukong',       2, false),
+    ( 1, 0, 'Sun Wukong',       9, true),
+    ( 1, 1, 'Alice',            3, false),
+    ( 2, 0, 'Robin Hood',       6, true),
+    ( 2, 1, 'Achilles',         2, false),
+    ( 3, 0, 'Yennenga',         5, true),
+    ( 3, 1, 'King Arthur',      4, false),
+    ( 4, 0, 'Sherlock Holmes',  7, true),
+    ( 4, 1, 'Dracula',          1, false),
+    ( 5, 0, 'Medusa',           8, true),
+    ( 5, 1, 'Sun Wukong',       2, false),
     -- shutout
-    ( 6, 'Aurelie Blanc',     'Bigfoot',         11, true),
-    ( 6, 'Miles Ashworth',    'Beowulf',          0, false),
-    ( 7, 'Hana Sato',         'Alice',            6, true),
-    ( 7, 'Priya Raghunathan', 'Sinbad',           4, false),
-    ( 8, 'Dmitri Kovac',      'King Arthur',     10, true),
-    ( 8, 'Jonas Lindqvist',   'Robin Hood',       3, false),
-    ( 9, 'Rina Okafor',       'Medusa',           7, true),
-    ( 9, 'Dmitri Kovac',      'Achilles',         5, false),
-    (10, 'Hana Sato',         'Beowulf',          8, true),
-    (10, 'Aurelie Blanc',     'Bigfoot',          4, false),
+    ( 6, 0, 'Bigfoot',         11, true),
+    ( 6, 1, 'Beowulf',          0, false),
+    ( 7, 0, 'Alice',            6, true),
+    ( 7, 1, 'Sinbad',           4, false),
+    ( 8, 0, 'King Arthur',     10, true),
+    ( 8, 1, 'Robin Hood',       3, false),
+    ( 9, 0, 'Medusa',           7, true),
+    ( 9, 1, 'Achilles',         5, false),
+    (10, 0, 'Beowulf',          8, true),
+    (10, 1, 'Bigfoot',          4, false),
     -- timed draw
-    (11, 'Miles Ashworth',    'Sherlock Holmes',  7, false),
-    (11, 'Tomas Ferreira',    'Dracula',          5, false),
-    (12, 'Jonas Lindqvist',   'Yennenga',         9, true),
-    (12, 'Priya Raghunathan', 'Sinbad',           3, false)
-) as v(match_id, player_label, hero_name, health_remaining, is_winner)
+    (11, 0, 'Sherlock Holmes',  7, false),
+    (11, 1, 'Dracula',          5, false),
+    (12, 0, 'Yennenga',         9, true),
+    (12, 1, 'Sinbad',           3, false)
+) as v(match_id, side, hero_name, health_remaining, is_winner)
+    join match_game mg on mg.match_id = v.match_id and mg.game_number = 1
     join heroes h on h.name = v.hero_name;
 
--- One or two bans per match, never naming a hero that then played it. Heroes on
--- the seeded rosters (Bigfoot, Beowulf, Alice, Robin Hood, Sherlock Holmes,
--- Dracula, King Arthur, Yennenga, Sun Wukong) are all banned somewhere, so the
--- BAN metric has real work to do.
-insert into match_ban (match_id, hero_id)
-select v.match_id, h.id
+-- Match 13: Medusa wins game 1, Achilles ties the series in game 2, Medusa
+-- takes the decider in game 3.
+insert into match_game_participant (game_id, side, hero_id, health_remaining, is_winner)
+select mg.id, v.side, h.id, v.health_remaining, v.is_winner
 from (values
-    ( 1, 'Medusa'),
-    ( 1, 'Bigfoot'),
-    ( 2, 'Sun Wukong'),
-    ( 3, 'Beowulf'),
-    ( 3, 'Dracula'),
-    ( 4, 'Medusa'),
-    ( 5, 'Alice'),
-    ( 5, 'Robin Hood'),
-    ( 6, 'Sun Wukong'),
-    ( 7, 'Medusa'),
-    ( 7, 'Sherlock Holmes'),
-    ( 8, 'Beowulf'),
-    ( 9, 'Bigfoot'),
-    ( 9, 'Sun Wukong'),
-    (10, 'Alice'),
-    (11, 'Medusa'),
-    (11, 'Yennenga'),
-    (12, 'King Arthur'),
-    (12, 'Alice')
-) as v(match_id, hero_name)
+    (1, 0, 'Medusa',   6, true),  (1, 1, 'Achilles', 0, false),
+    (2, 0, 'Medusa',   0, false), (2, 1, 'Achilles', 5, true),
+    (3, 0, 'Medusa',   3, true),  (3, 1, 'Achilles', 0, false)
+) as v(game_number, side, hero_name, health_remaining, is_winner)
+    join match_game mg on mg.match_id = 13 and mg.game_number = v.game_number
+    join heroes h on h.name = v.hero_name;
+
+-- One or two bans per match, never naming a hero that then played it. Heroes
+-- on the seeded rosters (Bigfoot, Beowulf, Alice, Robin Hood, Sherlock
+-- Holmes, Dracula, King Arthur, Yennenga, Sun Wukong) are all banned
+-- somewhere, so the BAN metric has real work to do. `ban_type` here is
+-- illustrative fixture data, not a rule the schema enforces -- nothing links
+-- the category distribution to `tournament.format`.
+insert into hero_ban (match_id, hero_id, ban_type)
+select v.match_id, h.id, v.ban_type
+from (values
+    ( 1, 'Medusa',          'PRE_BAN'),
+    ( 1, 'Bigfoot',         'OPPONENT_BAN'),
+    ( 2, 'Sun Wukong',      'PRE_BAN'),
+    ( 3, 'Beowulf',         'PRE_BAN'),
+    ( 3, 'Dracula',         'OPPONENT_BAN'),
+    ( 4, 'Medusa',          'PRE_BAN'),
+    ( 5, 'Alice',           'PRE_BAN'),
+    ( 5, 'Robin Hood',      'OPPONENT_BAN'),
+    ( 6, 'Sun Wukong',      'PRE_BAN'),
+    ( 7, 'Medusa',          'PRE_BAN'),
+    ( 7, 'Sherlock Holmes', 'OPPONENT_BAN'),
+    ( 8, 'Beowulf',         'PRE_BAN'),
+    ( 9, 'Bigfoot',         'PRE_BAN'),
+    ( 9, 'Sun Wukong',      'OPPONENT_BAN'),
+    (10, 'Alice',           'PRE_BAN'),
+    (11, 'Medusa',          'PRE_BAN'),
+    (11, 'Yennenga',        'OPPONENT_BAN'),
+    (12, 'King Arthur',     'PRE_BAN'),
+    (12, 'Alice',           'OPPONENT_BAN'),
+    (13, 'Bruce Lee',       'PRE_BAN'),
+    (13, 'Deadpool',        'OPPONENT_BAN'),
+    (13, 'Invisible Man',   'SELF_BAN')
+) as v(match_id, hero_name, ban_type)
     join heroes h on h.name = v.hero_name;
 
 -- ---------------------------------------------------------------------------

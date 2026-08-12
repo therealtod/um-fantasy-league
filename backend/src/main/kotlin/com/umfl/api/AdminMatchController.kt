@@ -5,6 +5,8 @@ import com.umfl.common.NotFoundException
 import com.umfl.manager.Manager
 import com.umfl.match.AdminMatchService
 import com.umfl.match.MatchBanInput
+import com.umfl.match.MatchGameInput
+import com.umfl.match.MatchGameParticipantInput
 import com.umfl.match.MatchParticipantInput
 import com.umfl.match.MatchResultQuery
 import com.umfl.tournament.TournamentService
@@ -75,9 +77,10 @@ class AdminMatchController(
         adminMatchService.record(
             tournamentId = tournamentId,
             round = requireNotNull(request.round),
-            mapId = requireNotNull(request.mapId),
             playedAt = requireNotNull(request.playedAt),
+            externalLink = request.externalLink,
             participants = request.participants.orEmpty().map { it.toInput() },
+            games = request.games.orEmpty().map { it.toInput() },
             bans = request.bans.map { it.toInput() },
         )
     )
@@ -93,9 +96,10 @@ class AdminMatchController(
             tournamentId = tournamentId,
             matchId = matchId,
             round = requireNotNull(request.round),
-            mapId = requireNotNull(request.mapId),
             playedAt = requireNotNull(request.playedAt),
+            externalLink = request.externalLink,
             participants = request.participants.orEmpty().map { it.toInput() },
+            games = request.games.orEmpty().map { it.toInput() },
             bans = request.bans.map { it.toInput() },
         )
     )
@@ -111,11 +115,21 @@ class AdminMatchController(
     }
 }
 
-private fun MatchParticipantRequest.toInput() = MatchParticipantInput(
-    playerLabel = playerLabel,
+private fun MatchParticipantRequest.toInput() = MatchParticipantInput(playerLabel = playerLabel)
+
+private fun MatchGameParticipantRequest.toInput() = MatchGameParticipantInput(
     heroId = requireNotNull(heroId),
     healthRemaining = requireNotNull(healthRemaining),
     isWinner = isWinner,
 )
 
-private fun MatchBanRequest.toInput() = MatchBanInput(heroId = requireNotNull(heroId))
+private fun MatchGameRequest.toInput() = MatchGameInput(
+    gameNumber = requireNotNull(gameNumber),
+    mapId = requireNotNull(mapId),
+    participants = participants.orEmpty().map { it.toInput() },
+)
+
+private fun MatchBanRequest.toInput() = MatchBanInput(
+    heroId = requireNotNull(heroId),
+    banType = requireNotNull(banType),
+)

@@ -19,12 +19,19 @@ const matches: MatchResultDto[] = [
     matchId: 1,
     tournamentId: 1,
     round: 1,
-    mapId: 5,
-    mapName: 'Center Square',
     playedAt: '2026-08-01T12:00:00Z',
-    participants: [
-      { participantId: 1, heroId: 10, heroName: 'Sherlock Holmes', healthRemaining: 8, isWinner: true },
-      { participantId: 2, heroId: 11, heroName: 'Dracula', healthRemaining: 0, isWinner: false },
+    participants: [{ side: 0 }, { side: 1 }],
+    games: [
+      {
+        gameId: 100,
+        gameNumber: 1,
+        mapId: 5,
+        mapName: 'Center Square',
+        participants: [
+          { side: 0, heroId: 10, heroName: 'Sherlock Holmes', healthRemaining: 8, isWinner: true },
+          { side: 1, heroId: 11, heroName: 'Dracula', healthRemaining: 0, isWinner: false },
+        ],
+      },
     ],
     bans: [],
   },
@@ -32,14 +39,21 @@ const matches: MatchResultDto[] = [
     matchId: 2,
     tournamentId: 1,
     round: 2,
-    mapId: 6,
-    mapName: 'Baskerville Manor',
     playedAt: '2026-08-02T12:00:00Z',
-    participants: [
-      { participantId: 3, heroId: 12, heroName: 'Medusa', healthRemaining: 5, isWinner: false },
-      { participantId: 4, heroId: 13, heroName: 'King Arthur', healthRemaining: 5, isWinner: false },
+    participants: [{ side: 0 }, { side: 1 }],
+    games: [
+      {
+        gameId: 200,
+        gameNumber: 1,
+        mapId: 6,
+        mapName: 'Baskerville Manor',
+        participants: [
+          { side: 0, heroId: 12, heroName: 'Medusa', healthRemaining: 6, isWinner: true },
+          { side: 1, heroId: 13, heroName: 'King Arthur', healthRemaining: 0, isWinner: false },
+        ],
+      },
     ],
-    bans: [{ heroId: 14, heroName: 'Achilles' }],
+    bans: [{ heroId: 14, heroName: 'Achilles', banType: 'PRE_BAN' }],
   },
 ]
 
@@ -111,20 +125,44 @@ describe('MatchListAdmin', () => {
     expect(wrapper.text()).toContain('Baskerville Manor')
   })
 
-  it('shows the winning hero, falling back to the player label when recorded', async () => {
+  it('derives a games-won tally per side, falling back to a generic label when unattributed', async () => {
     const withPlayer: MatchResultDto = {
       ...matches[0]!,
-      participants: [
-        { ...matches[0]!.participants[0]!, playerLabel: 'Alice' },
-        matches[0]!.participants[1]!,
-      ],
+      participants: [{ side: 0, playerLabel: 'Alice' }, { side: 1, playerLabel: 'Bob' }],
     }
     listMatches.mockResolvedValue([withPlayer, matches[1]!])
     const wrapper = await mountList()
 
-    expect(wrapper.text()).toContain('Sherlock Holmes (Alice)')
-    // A match with no winner reports a draw rather than a blank cell.
-    expect(wrapper.text()).toContain('Draw')
+    // Alice's side won the only game, so her tally reads 1 against Bob's 0.
+    expect(wrapper.text()).toContain('Alice')
+    expect(wrapper.text()).toContain('Bob')
+    // Match 2 is unattributed, so both sides fall back to a generic label.
+    expect(wrapper.text()).toContain('Side 1')
+    expect(wrapper.text()).toContain('Side 2')
+  })
+
+  it('shows each game\'s hero, health and winner badge, grouped under its own map', async () => {
+    const wrapper = await mountList()
+
+    expect(wrapper.text()).toContain('G1 · Center Square')
+    expect(wrapper.text()).toContain('Sherlock Holmes')
+    expect(wrapper.text()).toContain('WIN')
+  })
+
+  it('groups bans by category', async () => {
+    const wrapper = await mountList()
+
+    expect(wrapper.text()).toContain('Achilles')
+    expect(wrapper.text()).toContain('Pre-ban')
+  })
+
+  it('renders an external link when present, and a dash otherwise', async () => {
+    const withLink: MatchResultDto = { ...matches[0]!, externalLink: 'https://example.com/bracket/1' }
+    listMatches.mockResolvedValue([withLink, matches[1]!])
+    const wrapper = await mountList()
+
+    const link = wrapper.find('a[href="https://example.com/bracket/1"]')
+    expect(link.exists()).toBe(true)
   })
 
   it('emits create when asked to record a new match', async () => {

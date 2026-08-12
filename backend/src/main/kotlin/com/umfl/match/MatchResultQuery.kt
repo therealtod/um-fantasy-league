@@ -7,9 +7,10 @@ import java.sql.ResultSet
 /**
  * Reads recorded matches back out as whole [MatchResult]s.
  *
- * Three flat queries — matches, participants, bans — grouped in Kotlin, rather
- * than one join. A match has N participants *and* M bans, so a single join
- * would fan out to N×M ragged rows that then have to be de-duplicated anyway.
+ * Five flat queries — matches, participants, games, game-participants, bans —
+ * grouped in Kotlin, rather than one join. A match has N participants, M
+ * games each with their own participants, and K bans, so a single join would
+ * fan out to a ragged cross product that then has to be de-duplicated anyway.
  *
  * Read-only by design: the admin API (`com.umfl.match.AdminMatchService`) is
  * the sole write path, via the `TournamentMatch` aggregate — this class never
@@ -75,18 +76,43 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
                 .list()
         )
 
-    /** Attaches participants and bans to a page of match headers, preserving its order. */
+    /** Attaches participants, games (with their own participants) and bans to a page of match headers. */
     private fun assemble(headers: List<MatchHeader>): List<MatchResult> {
         if (headers.isEmpty()) return emptyList()
         val matchIds = headers.map { it.matchId }
 
-        val participants = jdbcClient
+        val participantsByMatch = jdbcClient
             .sql(SELECT_PARTICIPANTS)
             .param("matchIds", matchIds)
             .query { rs, _ ->
-                rs.getLong("match_id") to ParticipantResult(
-                    participantId = rs.getLong("id"),
+                rs.getLong("match_id") to MatchParticipantResult(
+                    side = rs.getInt("side"),
                     playerLabel = rs.getString("player_label"),
+                )
+            }
+            .list()
+            .groupBy({ it.first }, { it.second })
+
+        val gameHeadersByMatch = jdbcClient
+            .sql(SELECT_GAMES)
+            .param("matchIds", matchIds)
+            .query { rs, _ ->
+                rs.getLong("match_id") to GameHeader(
+                    gameId = rs.getLong("id"),
+                    gameNumber = rs.getInt("game_number"),
+                    mapId = rs.getLong("map_id"),
+                    mapName = rs.getString("map_name"),
+                )
+            }
+            .list()
+            .groupBy({ it.first }, { it.second })
+
+        val gameParticipantsByGame = jdbcClient
+            .sql(SELECT_GAME_PARTICIPANTS)
+            .param("matchIds", matchIds)
+            .query { rs, _ ->
+                rs.getLong("game_id") to GameParticipantResult(
+                    side = rs.getInt("side"),
                     heroId = rs.getLong("hero_id"),
                     heroName = rs.getString("hero_name"),
                     healthRemaining = rs.getInt("health_remaining"),
@@ -96,56 +122,83 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
             .list()
             .groupBy({ it.first }, { it.second })
 
-        val bans = jdbcClient
+        val bansByMatch = jdbcClient
             .sql(SELECT_BANS)
             .param("matchIds", matchIds)
             .query { rs, _ ->
                 rs.getLong("match_id") to BanResult(
                     heroId = rs.getLong("hero_id"),
                     heroName = rs.getString("hero_name"),
+                    banType = BanType.valueOf(rs.getString("ban_type")),
                 )
             }
             .list()
             .groupBy({ it.first }, { it.second })
 
         return headers.map { header ->
+            val games = gameHeadersByMatch[header.matchId].orEmpty()
+                .sortedBy { it.gameNumber }
+                .map { game ->
+                    GameResult(
+                        gameId = game.gameId,
+                        gameNumber = game.gameNumber,
+                        mapId = game.mapId,
+                        mapName = game.mapName,
+                        participants = gameParticipantsByGame[game.gameId].orEmpty(),
+                    )
+                }
             MatchResult(
                 matchId = header.matchId,
                 tournamentId = header.tournamentId,
                 round = header.round,
-                mapId = header.mapId,
-                mapName = header.mapName,
                 playedAt = header.playedAt,
-                participants = participants[header.matchId].orEmpty(),
-                bans = bans[header.matchId].orEmpty(),
+                externalLink = header.externalLink,
+                participants = participantsByMatch[header.matchId].orEmpty(),
+                games = games,
+                bans = bansByMatch[header.matchId].orEmpty(),
             )
         }
     }
 
     private companion object {
         const val SELECT_MATCH = """
-            select m.id, m.tournament_id, m.round, m.map_id, gm.name as map_name, m.played_at
+            select m.id, m.tournament_id, m.round, m.played_at, m.external_link
             from tournament_match m
-            join game_map gm on gm.id = m.map_id
         """
 
-        // Ordered by id so a match's sides come back in the order they were recorded;
-        // the ticker then floats the winner to the front.
         const val SELECT_PARTICIPANTS = """
-            select mp.id, mp.match_id, mp.player_label,
-                   mp.hero_id, h.name as hero_name, mp.health_remaining, mp.is_winner
+            select mp.match_id, mp.side, mp.player_label
             from match_participant mp
-            join heroes h on h.id = mp.hero_id
             where mp.match_id in (:matchIds)
-            order by mp.match_id, mp.id
+            order by mp.match_id, mp.side
+        """
+
+        const val SELECT_GAMES = """
+            select mg.id, mg.match_id, mg.game_number, mg.map_id, gm.name as map_name
+            from match_game mg
+            join game_map gm on gm.id = mg.map_id
+            where mg.match_id in (:matchIds)
+            order by mg.match_id, mg.game_number
+        """
+
+        // Joined through match_game to recover match_id, which match_game_participant
+        // does not itself carry -- see the mapping note on MatchGameParticipant.
+        const val SELECT_GAME_PARTICIPANTS = """
+            select mgp.game_id, mg.match_id, mgp.side,
+                   mgp.hero_id, h.name as hero_name, mgp.health_remaining, mgp.is_winner
+            from match_game_participant mgp
+            join match_game mg on mg.id = mgp.game_id
+            join heroes h on h.id = mgp.hero_id
+            where mg.match_id in (:matchIds)
+            order by mgp.game_id, mgp.side
         """
 
         const val SELECT_BANS = """
-            select mb.match_id, mb.hero_id, h.name as hero_name
-            from match_ban mb
-            join heroes h on h.id = mb.hero_id
-            where mb.match_id in (:matchIds)
-            order by mb.match_id, h.name
+            select hb.match_id, hb.hero_id, h.name as hero_name, hb.ban_type
+            from hero_ban hb
+            join heroes h on h.id = hb.hero_id
+            where hb.match_id in (:matchIds)
+            order by hb.match_id, h.name
         """
     }
 }
@@ -155,9 +208,16 @@ private data class MatchHeader(
     val matchId: Long,
     val tournamentId: Long,
     val round: Int,
+    val playedAt: java.time.Instant,
+    val externalLink: String?,
+)
+
+/** A `match_game` row before its own participants are attached. */
+private data class GameHeader(
+    val gameId: Long,
+    val gameNumber: Int,
     val mapId: Long,
     val mapName: String,
-    val playedAt: java.time.Instant,
 )
 
 private fun mapMatchRow(rs: ResultSet, @Suppress("UNUSED_PARAMETER") rowNum: Int) =
@@ -165,7 +225,6 @@ private fun mapMatchRow(rs: ResultSet, @Suppress("UNUSED_PARAMETER") rowNum: Int
         matchId = rs.getLong("id"),
         tournamentId = rs.getLong("tournament_id"),
         round = rs.getInt("round"),
-        mapId = rs.getLong("map_id"),
-        mapName = rs.getString("map_name"),
         playedAt = rs.getTimestamp("played_at").toInstant(),
+        externalLink = rs.getString("external_link"),
     )

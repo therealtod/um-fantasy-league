@@ -1,6 +1,7 @@
 package com.umfl.standings
 
 import com.umfl.match.MatchResultQuery
+import com.umfl.scoring.HeroRole
 import com.umfl.scoring.MatchMetrics
 import com.umfl.scoring.ScoringEngine
 import com.umfl.scoring.ScoringRuleSetQuery
@@ -46,23 +47,30 @@ data class StandingsBoard(
     val rows: List<StandingsRow>,
 )
 
-data class TickerSide(
+data class TickerGameSide(
     /** Free text, absent from the JSON when the result was recorded unattributed. */
     val playerLabel: String?,
     val heroName: String,
     val healthRemaining: Int,
     val isWinner: Boolean,
-    /** This hero's net score for this match. May be negative. */
+    /** This hero's net score for this game. May be negative. */
     val points: Double,
+)
+
+data class TickerGame(
+    val gameNumber: Int,
+    val mapName: String,
+    /** Winner first. A timed draw has no winner at all. */
+    val sides: List<TickerGameSide>,
 )
 
 data class TickerEntry(
     val matchId: Long,
     val round: Int,
-    val mapName: String,
     val playedAt: Instant,
-    /** Winner first. A timed draw has no winner at all. */
-    val sides: List<TickerSide>,
+    val externalLink: String?,
+    /** Ordered by game number — one entry per game played in the series. */
+    val games: List<TickerGame>,
     val bannedHeroNames: List<String>,
 )
 
@@ -156,22 +164,32 @@ class StandingsService(
     fun ticker(tournamentId: Long, sinceMatchId: Long = 0, limit: Int = 25): List<TickerEntry> {
         val rules = resolveRules(tournamentId)
         return matchResultQuery.findByTournamentSince(tournamentId, sinceMatchId, limit).map { match ->
-            val contextsByHero = match.heroContexts().associateBy { it.heroId }
+            // Keyed by (game, hero), not hero alone: the same hero can appear in two
+            // different games of a series with two different scores.
+            val contextsByGameAndHero = match.heroContexts()
+                .filter { it.role is HeroRole.Played }
+                .associateBy { context -> (context.role as HeroRole.Played).game.gameId to context.heroId }
             TickerEntry(
                 matchId = match.matchId,
                 round = match.round,
-                mapName = match.mapName,
                 playedAt = match.playedAt,
-                // Stable sort: the winner floats up, the rest keep recorded order.
-                sides = match.participants.sortedByDescending { it.isWinner }.map { participant ->
-                    TickerSide(
-                        playerLabel = participant.playerLabel,
-                        heroName = participant.heroName,
-                        healthRemaining = participant.healthRemaining,
-                        isWinner = participant.isWinner,
-                        points = contextsByHero[participant.heroId]
-                            ?.let { ScoringEngine.score(it, rules) }
-                            ?: 0.0,
+                externalLink = match.externalLink,
+                games = match.games.map { game ->
+                    TickerGame(
+                        gameNumber = game.gameNumber,
+                        mapName = game.mapName,
+                        // Stable sort: the winner floats up, the rest keep recorded order.
+                        sides = game.participants.sortedByDescending { it.isWinner }.map { participant ->
+                            TickerGameSide(
+                                playerLabel = match.playerLabelForSide(participant.side),
+                                heroName = participant.heroName,
+                                healthRemaining = participant.healthRemaining,
+                                isWinner = participant.isWinner,
+                                points = contextsByGameAndHero[game.gameId to participant.heroId]
+                                    ?.let { ScoringEngine.score(it, rules) }
+                                    ?: 0.0,
+                            )
+                        },
                     )
                 },
                 bannedHeroNames = match.bans.map { it.heroName },

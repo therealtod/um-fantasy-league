@@ -51,6 +51,10 @@ class AdminMapService(
      * window is narrow but real, so the violation is translated into the same
      * [ConflictException] rather than left to `GlobalExceptionHandler`'s
      * catch-all, which would render it as the generic "should never fire" 409.
+     * The FK is deferred to commit, which is past the point where this method
+     * could still say *which* map — hence the explicit
+     * [MapPoolAdminRepository.checkMapInPoolNow] that pulls the check back
+     * inside the `try`.
      */
     @Transactional
     fun removeFromPool(tournamentId: Long, mapId: Long) {
@@ -61,7 +65,9 @@ class AdminMapService(
         }
 
         val removed = try {
-            mapPoolAdminRepository.removeFromPool(tournamentId, mapId)
+            mapPoolAdminRepository.removeFromPool(tournamentId, mapId).also {
+                mapPoolAdminRepository.checkMapInPoolNow()
+            }
         } catch (e: DataIntegrityViolationException) {
             throw recordedMatchConflict(tournamentId, mapId)
         }

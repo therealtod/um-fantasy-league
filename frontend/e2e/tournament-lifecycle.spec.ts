@@ -82,6 +82,12 @@ test.describe('tournament lifecycle', () => {
     expect(response.ok(), await response.text()).toBeTruthy()
   }
 
+  /**
+   * Records a one-game series. A match is a best-of-N, so the humans sit on the
+   * match and the heroes sit on each game; side 0 of the games is played by side
+   * 0 of the series, which is the pairing AdminMatchService relies on — so the
+   * winner stays first in both lists.
+   */
   async function recordMatch(
     round: number,
     mapName: string,
@@ -91,11 +97,17 @@ test.describe('tournament lifecycle', () => {
     const response = await adminApi.post(`/api/admin/tournaments/${tournamentId}/matches`, {
       data: {
         round,
-        mapId: mapIdOf[mapName],
         playedAt: new Date().toISOString(),
-        participants: [
-          { playerLabel: winner.player, heroId: heroIdOf[winner.hero], healthRemaining: winner.health, isWinner: true },
-          { playerLabel: loser.player, heroId: heroIdOf[loser.hero], healthRemaining: loser.health, isWinner: false },
+        participants: [{ playerLabel: winner.player }, { playerLabel: loser.player }],
+        games: [
+          {
+            gameNumber: 1,
+            mapId: mapIdOf[mapName],
+            participants: [
+              { heroId: heroIdOf[winner.hero], healthRemaining: winner.health, isWinner: true },
+              { heroId: heroIdOf[loser.hero], healthRemaining: loser.health, isWinner: false },
+            ],
+          },
         ],
         bans: [],
       },

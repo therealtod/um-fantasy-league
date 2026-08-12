@@ -3,8 +3,10 @@ package com.umfl.api
 import com.umfl.hero.Hero
 import com.umfl.map.GameMap
 import com.umfl.match.BanResult
+import com.umfl.match.BanType
+import com.umfl.match.GameResult
+import com.umfl.match.MatchParticipantResult
 import com.umfl.match.MatchResult
-import com.umfl.match.ParticipantResult
 import com.umfl.scoring.ScoringRuleSet
 import com.umfl.tournament.TournamentFormat
 import com.umfl.tournament.TournamentStatus
@@ -95,8 +97,11 @@ data class MapAdminDto(
 // ---------------------------------------------------------------------------
 
 data class MatchParticipantRequest(
-    /** Who piloted the hero. Free text, optional — there is no `player` table to validate against. */
+    /** Who piloted this side for the whole series. Free text, optional — there is no `player` table to validate against. */
     val playerLabel: String? = null,
+)
+
+data class MatchGameParticipantRequest(
     @field:NotNull(message = "heroId is required")
     val heroId: Long?,
     @field:NotNull(message = "healthRemaining is required")
@@ -105,22 +110,37 @@ data class MatchParticipantRequest(
     val isWinner: Boolean = false,
 )
 
+data class MatchGameRequest(
+    @field:NotNull(message = "gameNumber is required")
+    @field:Positive(message = "gameNumber must be positive")
+    val gameNumber: Int?,
+    @field:NotNull(message = "mapId is required")
+    val mapId: Long?,
+    @field:Valid
+    @field:Size(min = 2, max = 2, message = "exactly two sides are required")
+    val participants: List<MatchGameParticipantRequest>?,
+)
+
 data class MatchBanRequest(
     @field:NotNull(message = "heroId is required")
     val heroId: Long?,
+    @field:NotNull(message = "banType is required")
+    val banType: BanType?,
 )
 
 data class RecordMatchRequest(
     @field:NotNull(message = "round is required")
     @field:Positive(message = "round must be positive")
     val round: Int?,
-    @field:NotNull(message = "mapId is required")
-    val mapId: Long?,
     @field:NotNull(message = "playedAt is required")
     val playedAt: Instant?,
+    val externalLink: String? = null,
     @field:Valid
     @field:Size(min = 2, max = 2, message = "exactly two participants are required")
     val participants: List<MatchParticipantRequest>?,
+    @field:Valid
+    @field:Size(min = 1, message = "at least one game is required")
+    val games: List<MatchGameRequest>?,
     @field:Valid
     val bans: List<MatchBanRequest> = emptyList(),
 )
@@ -129,10 +149,10 @@ data class MatchResultDto(
     val matchId: Long,
     val tournamentId: Long,
     val round: Int,
-    val mapId: Long,
-    val mapName: String,
     val playedAt: Instant,
-    val participants: List<ParticipantResult>,
+    val externalLink: String?,
+    val participants: List<MatchParticipantResult>,
+    val games: List<GameResult>,
     val bans: List<BanResult>,
 ) {
     companion object {
@@ -140,10 +160,10 @@ data class MatchResultDto(
             matchId = result.matchId,
             tournamentId = result.tournamentId,
             round = result.round,
-            mapId = result.mapId,
-            mapName = result.mapName,
             playedAt = result.playedAt,
+            externalLink = result.externalLink,
             participants = result.participants,
+            games = result.games,
             bans = result.bans,
         )
     }

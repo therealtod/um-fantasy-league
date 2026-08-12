@@ -27,10 +27,13 @@ function entry(matchId: number, points: number): TickerEntry {
   return {
     matchId,
     round: 1,
-    mapName: 'Camelot',
     playedAt: '2026-08-01T00:00:00Z',
-    sides: [
-      { playerLabel: 'Alice', heroName: 'Alice', healthRemaining: 10, isWinner: true, points },
+    games: [
+      {
+        gameNumber: 1,
+        mapName: 'Camelot',
+        sides: [{ playerLabel: 'Alice', heroName: 'Alice', healthRemaining: 10, isWinner: true, points }],
+      },
     ],
     bannedHeroNames: [],
   }
@@ -68,7 +71,7 @@ describe('standings store', () => {
 
     onUpdate()
     await vi.waitFor(() =>
-      expect(standings.ticker.find((e) => e.matchId === 1)?.sides[0].points).toBe(99),
+      expect(standings.ticker.find((e) => e.matchId === 1)?.games[0]?.sides[0]?.points).toBe(99),
     )
   })
 

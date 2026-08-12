@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import type { MatchResultDto } from '@/api/types'
+import type { BanType, MatchResultDto } from '@/api/types'
 import { api } from '@/api/client'
 
 interface Props {
@@ -15,6 +15,12 @@ const error = ref<string | null>(null)
 const selectedRound = ref<number | null>(null)
 const deletingMatch = ref<MatchResultDto | null>(null)
 const isDeleting = ref(false)
+
+const banTypeLabels: Record<BanType, string> = {
+  PRE_BAN: 'Pre-ban',
+  OPPONENT_BAN: 'Opponent ban',
+  SELF_BAN: 'Self ban',
+}
 
 const rounds = computed(() => {
   const roundsSet = new Set<number>()
@@ -46,11 +52,25 @@ function formatDateTime(isoString: string): string {
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-// The hero is what scores, so it leads; the player label is appended only when recorded.
-function getWinner(match: MatchResultDto): string {
-  const winner = match.participants.find(p => p.isWinner)
-  if (!winner) return 'Draw'
-  return winner.playerLabel ? `${winner.heroName} (${winner.playerLabel})` : winner.heroName
+function sideLabel(match: MatchResultDto, side: number): string {
+  return match.participants.find(p => p.side === side)?.playerLabel || `Side ${side + 1}`
+}
+
+/**
+ * Games won per side, derived client-side from each game's own `isWinner`
+ * flags — there is no stored series winner (nothing about "best of N" is
+ * tracked), consistent with this app's rule that anything derivable is
+ * derived at read time rather than stored.
+ */
+function gamesWon(match: MatchResultDto): [number, number] {
+  let side0 = 0
+  let side1 = 0
+  for (const game of match.games) {
+    const winner = game.participants.find(p => p.isWinner)
+    if (winner?.side === 0) side0++
+    else if (winner?.side === 1) side1++
+  }
+  return [side0, side1]
 }
 
 function handleEdit(matchId: number) {
@@ -137,9 +157,10 @@ watch(
     <div v-if="deletingMatch" class="panel mb-4 flex flex-col gap-5 border-magenta p-6">
       <h3 class="headline text-lg text-magenta">Delete Match</h3>
       <p class="font-mono text-sm leading-relaxed text-ink-dim">
-        Are you sure you want to delete the round {{ deletingMatch.round }} match on
-        <strong>{{ deletingMatch.mapName ?? '—' }}</strong>? Its participants and bans go with it,
-        and every standing derived from it is recomputed. This cannot be undone.
+        Are you sure you want to delete the round {{ deletingMatch.round }} match between
+        <strong>{{ sideLabel(deletingMatch, 0) }}</strong> and <strong>{{ sideLabel(deletingMatch, 1) }}</strong>
+        ({{ deletingMatch.games.length }} game{{ deletingMatch.games.length === 1 ? '' : 's' }})? Its participants,
+        games and bans go with it, and every standing derived from it is recomputed. This cannot be undone.
       </p>
       <div class="flex justify-end gap-3 pt-2">
         <button class="btn-ghost" :disabled="isDeleting" @click="cancelDelete">Cancel</button>
@@ -165,15 +186,15 @@ watch(
     </div>
 
     <div v-else class="overflow-x-auto">
-      <table class="w-full min-w-[44rem] border-collapse">
+      <table class="w-full min-w-[64rem] border-collapse">
         <thead>
           <tr>
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Round</th>
-            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Map</th>
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Played At</th>
-            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Participants</th>
-            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Winner</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Series</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Games</th>
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Bans</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Link</th>
             <th class="w-[180px] border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Actions</th>
           </tr>
         </thead>
@@ -188,34 +209,58 @@ watch(
                 Rd {{ match.round }}
               </span>
             </td>
-            <td class="px-3 py-3 align-top md:px-4">{{ match.mapName || '—' }}</td>
-            <td class="px-3 py-3 align-top md:px-4">{{ formatDateTime(match.playedAt) }}</td>
+            <td class="px-3 py-3 align-top font-mono text-sm md:px-4">{{ formatDateTime(match.playedAt) }}</td>
             <td class="px-3 py-3 align-top md:px-4">
-              <div class="flex flex-col gap-2">
-                <div
-                  v-for="participant in match.participants"
-                  :key="participant.participantId"
-                  class="flex items-center gap-2 font-mono text-sm"
-                >
-                  {{ participant.heroName }}
-                  <span v-if="participant.playerLabel">({{ participant.playerLabel }})</span>
-                  <span class="text-xs text-danger">❤️ {{ participant.healthRemaining }}</span>
-                  <span
-                    v-if="participant.isWinner"
-                    class="bg-lime px-1.5 py-0.5 font-mono text-[10px] text-surface-lowest uppercase tracking-wide"
+              <div class="flex flex-col gap-1 font-mono text-sm">
+                <span :class="gamesWon(match)[0] > gamesWon(match)[1] ? 'font-bold text-lime' : 'text-ink-dim'">
+                  {{ sideLabel(match, 0) }} — {{ gamesWon(match)[0] }}
+                </span>
+                <span :class="gamesWon(match)[1] > gamesWon(match)[0] ? 'font-bold text-lime' : 'text-ink-dim'">
+                  {{ sideLabel(match, 1) }} — {{ gamesWon(match)[1] }}
+                </span>
+              </div>
+            </td>
+            <td class="px-3 py-3 align-top md:px-4">
+              <div class="flex flex-col gap-3">
+                <div v-for="game in match.games" :key="game.gameId" class="flex flex-col gap-1">
+                  <div class="font-mono text-xs text-ink-dim uppercase tracking-wide">
+                    G{{ game.gameNumber }} · {{ game.mapName }}
+                  </div>
+                  <div
+                    v-for="participant in game.participants"
+                    :key="participant.side"
+                    class="flex items-center gap-2 font-mono text-sm"
                   >
-                    WIN
-                  </span>
+                    {{ participant.heroName }}
+                    <span class="text-xs text-danger">❤️ {{ participant.healthRemaining }}</span>
+                    <span
+                      v-if="participant.isWinner"
+                      class="bg-lime px-1.5 py-0.5 font-mono text-[10px] text-surface-lowest uppercase tracking-wide"
+                    >
+                      WIN
+                    </span>
+                  </div>
                 </div>
               </div>
             </td>
-            <td class="px-3 py-3 align-top md:px-4">{{ getWinner(match) }}</td>
             <td class="px-3 py-3 align-top md:px-4">
               <div v-if="match.bans.length > 0" class="flex flex-col gap-1">
                 <div v-for="ban in match.bans" :key="ban.heroId" class="font-mono text-sm text-ink-dim">
-                  {{ ban.heroName }}
+                  {{ ban.heroName }} <span class="text-xs">({{ banTypeLabels[ban.banType] }})</span>
                 </div>
               </div>
+              <span v-else class="text-ink-dim italic">—</span>
+            </td>
+            <td class="px-3 py-3 align-top md:px-4">
+              <a
+                v-if="match.externalLink"
+                :href="match.externalLink"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-sm text-cyan underline hover:opacity-80"
+              >
+                View
+              </a>
               <span v-else class="text-ink-dim italic">—</span>
             </td>
             <td class="px-3 py-3 align-top md:px-4">

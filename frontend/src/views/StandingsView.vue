@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useManagerStore } from '@/stores/manager'
 import { useStandingsStore } from '@/stores/standings'
 import { useTournamentsStore } from '@/stores/tournaments'
-import type { MetricColumn, TickerEntry } from '@/api/types'
+import type { MetricColumn, TickerGame } from '@/api/types'
 
 const standings = useStandingsStore()
 const tournaments = useTournamentsStore()
@@ -55,9 +55,9 @@ function metricClass(value: number, column: MetricColumn) {
   return 'text-lime'
 }
 
-/** A match with no winner is a timed draw. */
-function separator(entry: TickerEntry) {
-  return entry.sides.some((side) => side.isWinner) ? 'def' : 'vs'
+/** A game with no winner is a timed draw. */
+function separator(game: TickerGame) {
+  return game.sides.some((side) => side.isWinner) ? 'def' : 'vs'
 }
 
 const currentTournament = computed(() =>
@@ -81,19 +81,23 @@ const currentTournament = computed(() =>
               class="font-mono text-xs text-ink-muted"
             >
               <span class="text-ink-dim">R{{ entry.round }}:</span>
-              <template v-for="(side, index) in entry.sides" :key="side.heroName">
-                <span v-if="index > 0" class="mx-1 text-ink-dim">{{ separator(entry) }}</span>
-                <span
-                  class="font-bold uppercase"
-                  :class="side.isWinner ? 'text-ink' : 'text-ink-muted'"
-                >{{ side.heroName }}</span>
-                <span v-if="side.playerLabel" class="ml-1 text-ink-dim">({{ side.playerLabel }})</span>
-                <span
-                  class="ml-1 font-bold"
-                  :class="side.points < 0 ? 'text-magenta' : 'text-lime'"
-                >{{ points(side.points) }}</span>
+              <template v-for="(game, gameIndex) in entry.games" :key="game.gameNumber">
+                <span v-if="gameIndex > 0" class="mx-1.5 text-ink-dim">|</span>
+                <span v-if="entry.games.length > 1" class="text-ink-dim">G{{ game.gameNumber }}</span>
+                <template v-for="(side, sideIndex) in game.sides" :key="side.heroName">
+                  <span v-if="sideIndex > 0" class="mx-1 text-ink-dim">{{ separator(game) }}</span>
+                  <span
+                    class="font-bold uppercase"
+                    :class="side.isWinner ? 'text-ink' : 'text-ink-muted'"
+                  >{{ side.heroName }}</span>
+                  <span v-if="side.playerLabel" class="ml-1 text-ink-dim">({{ side.playerLabel }})</span>
+                  <span
+                    class="ml-1 font-bold"
+                    :class="side.points < 0 ? 'text-magenta' : 'text-lime'"
+                  >{{ points(side.points) }}</span>
+                </template>
+                <span class="ml-1.5 text-ink-dim">· {{ game.mapName }}</span>
               </template>
-              <span class="ml-1.5 text-ink-dim">· {{ entry.mapName }}</span>
               <span v-if="entry.bannedHeroNames.length" class="ml-1.5 text-ink-dim">
                 · Banned: {{ entry.bannedHeroNames.join(', ') }}
               </span>

@@ -31,21 +31,23 @@ class AdminMatchService(
     fun record(
         tournamentId: Long,
         round: Int,
-        mapId: Long,
         playedAt: Instant,
+        externalLink: String?,
         participants: List<MatchParticipantInput>,
+        games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
     ): MatchResult {
         tournamentService.requireTournament(tournamentId)
-        validate(tournamentId, mapId, participants, bans)
+        validate(tournamentId, participants, games, bans)
 
         val saved = tournamentMatchRepository.save(
             TournamentMatch(
                 tournamentId = tournamentId,
                 round = round,
-                mapId = mapId,
                 playedAt = playedAt,
+                externalLink = blankToNull(externalLink),
                 participants = toParticipants(participants),
+                games = toGames(tournamentId, games),
                 bans = toBans(bans),
             )
         )
@@ -58,20 +60,22 @@ class AdminMatchService(
         tournamentId: Long,
         matchId: Long,
         round: Int,
-        mapId: Long,
         playedAt: Instant,
+        externalLink: String?,
         participants: List<MatchParticipantInput>,
+        games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
     ): MatchResult {
         val existing = requireMatch(tournamentId, matchId)
-        validate(tournamentId, mapId, participants, bans)
+        validate(tournamentId, participants, games, bans)
 
         tournamentMatchRepository.save(
             existing.copy(
                 round = round,
-                mapId = mapId,
                 playedAt = playedAt,
+                externalLink = blankToNull(externalLink),
                 participants = toParticipants(participants),
+                games = toGames(tournamentId, games),
                 bans = toBans(bans),
             )
         )
@@ -93,31 +97,49 @@ class AdminMatchService(
 
     private fun validate(
         tournamentId: Long,
-        mapId: Long,
         participants: List<MatchParticipantInput>,
+        games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
     ) {
-        val referencedHeroIds = participants.map { it.heroId } + bans.map { it.heroId }
+        val referencedHeroIds = games.flatMap { it.participants.map { p -> p.heroId } } + bans.map { it.heroId }
         val violations = MatchResultPolicy.validate(
-            mapId = mapId,
             validMapIds = mapPoolAdminRepository.poolMapIds(tournamentId),
             validHeroIds = heroRepository.findAllById(referencedHeroIds).mapNotNull { it.id }.toSet(),
             participants = participants,
+            games = games,
             bans = bans,
         )
         if (violations.isNotEmpty()) throw MatchRuleException(violations)
     }
 
-    private fun toParticipants(participants: List<MatchParticipantInput>): Set<MatchParticipant> =
-        participants.map {
-            MatchParticipant(
-                playerLabel = it.playerLabel?.trim()?.ifEmpty { null },
-                heroId = it.heroId,
-                healthRemaining = it.healthRemaining,
-                isWinner = it.isWinner,
+    /**
+     * "Absent" for optional free text is null, never `""`. An admin form posts
+     * an untouched text input as an empty string, and Jackson's `non_null`
+     * inclusion only drops nulls — so without this a blank box comes back out
+     * of the API as `""` and a consumer testing for null sees a link, or a
+     * player, that was never entered.
+     */
+    private fun blankToNull(text: String?): String? = text?.trim()?.ifEmpty { null }
+
+    private fun toParticipants(participants: List<MatchParticipantInput>): List<MatchParticipant> =
+        participants.map { MatchParticipant(playerLabel = blankToNull(it.playerLabel)) }
+
+    private fun toGames(tournamentId: Long, games: List<MatchGameInput>): Set<MatchGame> =
+        games.map { game ->
+            MatchGame(
+                tournamentId = tournamentId,
+                gameNumber = game.gameNumber,
+                mapId = game.mapId,
+                participants = game.participants.map {
+                    MatchGameParticipant(
+                        heroId = it.heroId,
+                        healthRemaining = it.healthRemaining,
+                        isWinner = it.isWinner,
+                    )
+                },
             )
         }.toSet()
 
-    private fun toBans(bans: List<MatchBanInput>): Set<MatchBan> =
-        bans.map { MatchBan(heroId = it.heroId) }.toSet()
+    private fun toBans(bans: List<MatchBanInput>): Set<HeroBan> =
+        bans.map { HeroBan(heroId = it.heroId, banType = it.banType) }.toSet()
 }

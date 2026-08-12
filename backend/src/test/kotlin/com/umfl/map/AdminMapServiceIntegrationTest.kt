@@ -6,6 +6,7 @@ import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.dao.DataIntegrityViolationException
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
@@ -106,5 +107,20 @@ class AdminMapServiceIntegrationTest @Autowired constructor(
             adminMapService.removeFromPool(tournamentId, baskervilleManor)
         }
         assertTrue(baskervilleManor in mapPoolAdminRepository.poolMapIds(tournamentId), "the pool row must survive the rejected removal")
+    }
+
+    @Test
+    fun `the pool FK is checked on the spot despite being deferrable, so the race past the pre-check still fails inside the service`() {
+        val tournamentId = summerOfLegendsId()
+        val baskervilleManor = requireNotNull(gameMapRepository.findByName("Baskerville Manor")?.id)
+
+        // Going straight at the repository is what a match recorded between the
+        // service's pre-check and its delete looks like from here: the delete
+        // itself succeeds, and only the FK stands between it and an orphaned
+        // game. Deferred, that FK would not speak up until commit -- past the
+        // catch in AdminMapService.removeFromPool that names the map.
+        mapPoolAdminRepository.removeFromPool(tournamentId, baskervilleManor)
+
+        assertFailsWith<DataIntegrityViolationException> { mapPoolAdminRepository.checkMapInPoolNow() }
     }
 }

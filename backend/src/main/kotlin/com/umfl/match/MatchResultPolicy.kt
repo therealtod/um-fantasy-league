@@ -1,37 +1,60 @@
 package com.umfl.match
 
 enum class MatchRule {
-    /** The map is not in this tournament's board pool. */
+    /** One or more games use a map outside this tournament's board pool. */
     MAP_NOT_IN_POOL,
 
-    /** The match does not have exactly the expected number of sides. */
+    /** The series has no games at all — at least one is required. */
+    INVALID_GAME_COUNT,
+
+    /** Game numbers aren't exactly 1..N with no gaps or repeats. */
+    GAME_NUMBERS_NOT_SEQUENTIAL,
+
+    /** The series does not have exactly the expected number of sides. */
     INVALID_PARTICIPANT_COUNT,
 
-    /** The same hero appears more than once — twice on the table, twice in the bans, or both played and banned. */
+    /** One or more games don't have exactly the expected number of sides. */
+    INVALID_GAME_PARTICIPANT_COUNT,
+
+    /** The same hero appears on both sides within one game. */
     DUPLICATE_HERO,
 
-    /** More than one side is flagged as the winner. */
+    /** The same hero is banned more than once. */
+    DUPLICATE_BAN,
+
+    /** A banned hero was also played, somewhere in the series. */
+    BANNED_HERO_PLAYED,
+
+    /** More than one side of a game is flagged as the winner. */
     MULTIPLE_WINNERS,
 
-    /** A `heroId` referenced by a participant or ban does not exist. */
+    /** A `heroId` referenced by a game participant or a ban does not exist. */
     UNKNOWN_HERO,
 }
 
 data class MatchViolation(val rule: MatchRule, val message: String)
 
 /**
- * [playerLabel] is who piloted the hero, as free text — there is no `player`
- * table to check it against, and nothing scores it. Nothing validates it here
- * for the same reason: any string, including none at all, is a legal answer.
+ * [playerLabel] is who piloted this side for the whole series, as free text —
+ * there is no `player` table to check it against, and nothing scores it.
+ * Nothing validates it here for the same reason: any string, including none
+ * at all, is a legal answer.
  */
-data class MatchParticipantInput(
-    val playerLabel: String?,
+data class MatchParticipantInput(val playerLabel: String?)
+
+data class MatchGameParticipantInput(
     val heroId: Long,
     val healthRemaining: Int,
     val isWinner: Boolean,
 )
 
-data class MatchBanInput(val heroId: Long)
+data class MatchGameInput(
+    val gameNumber: Int,
+    val mapId: Long,
+    val participants: List<MatchGameParticipantInput>,
+)
+
+data class MatchBanInput(val heroId: Long, val banType: BanType)
 
 /**
  * Pre-validates a match result before the service attempts to save it, so a
@@ -47,29 +70,13 @@ data class MatchBanInput(val heroId: Long)
 object MatchResultPolicy {
 
     fun validate(
-        mapId: Long,
         validMapIds: Set<Long>,
         validHeroIds: Set<Long>,
         participants: List<MatchParticipantInput>,
+        games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
         expectedParticipantCount: Int = 2,
     ): List<MatchViolation> = buildList {
-        if (mapId !in validMapIds) {
-            add(MatchViolation(MatchRule.MAP_NOT_IN_POOL, "Map $mapId is not in this tournament's board pool."))
-        }
-
-        val unknownHeroes = (participants.map { it.heroId } + bans.map { it.heroId })
-            .filter { it !in validHeroIds }
-            .toSortedSet()
-        if (unknownHeroes.isNotEmpty()) {
-            add(
-                MatchViolation(
-                    MatchRule.UNKNOWN_HERO,
-                    "Hero(es) do not exist: ${unknownHeroes.joinToString()}.",
-                )
-            )
-        }
-
         if (participants.size != expectedParticipantCount) {
             add(
                 MatchViolation(
@@ -79,27 +86,91 @@ object MatchResultPolicy {
             )
         }
 
-        // Across participants *and* bans: a hero cannot be picked twice, banned twice, or
-        // banned and then played. The last case is what keeps MatchResult.heroContexts()'
-        // "playing wins" tie-break a backstop for bad data rather than a supported input.
-        val duplicateHeroes = (participants.map { it.heroId } + bans.map { it.heroId })
-            .groupingBy { it }.eachCount().filterValues { it > 1 }.keys
-        if (duplicateHeroes.isNotEmpty()) {
+        if (games.isEmpty()) {
+            add(MatchViolation(MatchRule.INVALID_GAME_COUNT, "At least one game is required."))
+        } else if (games.map { it.gameNumber }.sorted() != (1..games.size).toList()) {
+            add(
+                MatchViolation(
+                    MatchRule.GAME_NUMBERS_NOT_SEQUENTIAL,
+                    "Game numbers must be exactly 1..${games.size} with no gaps or repeats.",
+                )
+            )
+        }
+
+        val badMapGames = games.filter { it.mapId !in validMapIds }.map { it.gameNumber }.sorted()
+        if (badMapGames.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.MAP_NOT_IN_POOL,
+                    "Game(s) $badMapGames use a map that is not in this tournament's board pool.",
+                )
+            )
+        }
+
+        val badCountGames = games.filter { it.participants.size != expectedParticipantCount }
+            .map { it.gameNumber }.sorted()
+        if (badCountGames.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.INVALID_GAME_PARTICIPANT_COUNT,
+                    "Game(s) $badCountGames don't have exactly $expectedParticipantCount sides.",
+                )
+            )
+        }
+
+        val sameHeroGames = games
+            .filter { game -> game.participants.map { it.heroId }.distinct().size != game.participants.size }
+            .map { it.gameNumber }.sorted()
+        if (sameHeroGames.isNotEmpty()) {
             add(
                 MatchViolation(
                     MatchRule.DUPLICATE_HERO,
-                    "Hero(es) appear more than once: ${duplicateHeroes.sorted().joinToString()}.",
+                    "Game(s) $sameHeroGames have the same hero on both sides.",
+                )
+            )
+        }
+
+        val duplicateBans = bans.map { it.heroId }.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        if (duplicateBans.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.DUPLICATE_BAN,
+                    "Hero(es) banned more than once: ${duplicateBans.sorted().joinToString()}.",
+                )
+            )
+        }
+
+        val playedHeroIds = games.flatMapTo(mutableSetOf()) { game -> game.participants.map { it.heroId } }
+        val bannedButPlayed = bans.map { it.heroId }.filter { it in playedHeroIds }.toSortedSet()
+        if (bannedButPlayed.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.BANNED_HERO_PLAYED,
+                    "Hero(es) both banned and played somewhere in this series: ${bannedButPlayed.joinToString()}.",
                 )
             )
         }
 
         // Zero winners is the legitimate timed-draw case — only more than one is a violation.
-        val winners = participants.count { it.isWinner }
-        if (winners > 1) {
+        val multiWinnerGames = games.filter { game -> game.participants.count { it.isWinner } > 1 }
+            .map { it.gameNumber }.sorted()
+        if (multiWinnerGames.isNotEmpty()) {
             add(
                 MatchViolation(
                     MatchRule.MULTIPLE_WINNERS,
-                    "Only one side may be recorded as the winner (a timed draw has zero).",
+                    "Game(s) $multiWinnerGames have more than one side flagged as the winner " +
+                        "(a timed draw has zero).",
+                )
+            )
+        }
+
+        val allHeroIds = games.flatMap { game -> game.participants.map { it.heroId } } + bans.map { it.heroId }
+        val unknownHeroes = allHeroIds.filter { it !in validHeroIds }.toSortedSet()
+        if (unknownHeroes.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.UNKNOWN_HERO,
+                    "Hero(es) do not exist: ${unknownHeroes.joinToString()}.",
                 )
             )
         }

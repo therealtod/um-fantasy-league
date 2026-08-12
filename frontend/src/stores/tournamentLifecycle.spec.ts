@@ -150,11 +150,16 @@ describe('tournament lifecycle (frontend stores)', () => {
       {
         matchId: 4,
         round: 2,
-        mapName: 'Raptor Paddock',
         playedAt: '2026-10-02T00:00:00Z',
-        sides: [
-          { playerLabel: 'Aurelie Blanc', heroName: 'King Arthur', healthRemaining: 10, isWinner: true, points: 21 },
-          { playerLabel: 'Miles Ashworth', heroName: 'Sherlock Holmes', healthRemaining: 2, isWinner: false, points: 3 },
+        games: [
+          {
+            gameNumber: 1,
+            mapName: 'Raptor Paddock',
+            sides: [
+              { playerLabel: 'Aurelie Blanc', heroName: 'King Arthur', healthRemaining: 10, isWinner: true, points: 21 },
+              { playerLabel: 'Miles Ashworth', heroName: 'Sherlock Holmes', healthRemaining: 2, isWinner: false, points: 3 },
+            ],
+          },
         ],
         bannedHeroNames: [],
       },
