@@ -17,6 +17,11 @@ import org.springframework.web.filter.OncePerRequestFilter
  * non-prod profile too — the whole point of this class. Without it, dev's
  * permissive security chain has no Spring Security principal at all, so an
  * admin-only route could never be matcher-gated the same way it is in prod.
+ *
+ * Omitting the header impersonates *some* admin manager
+ * ([ManagerRepository.findFirstByIsAdminTrueOrderById]) rather than a
+ * hardcoded handle, so this filter carries no opinion about what dev/test
+ * data seeds — it only needs one manager flagged admin, if any exist at all.
  */
 @Component
 @Profile("!prod")
@@ -35,8 +40,10 @@ class DevManagerAuthenticationFilter(
                 NotFoundException("No manager with id $headerId")
             }
         } else {
-            managerRepository.findByHandle(DevManagerProvider.DEFAULT_HANDLE)
-                ?: throw NotFoundException("Default manager '${DevManagerProvider.DEFAULT_HANDLE}' is not seeded")
+            managerRepository.findFirstByIsAdminTrueOrderById()
+                ?: throw NotFoundException(
+                    "No admin manager to fall back to — pass X-Manager-Id, or seed a manager with is_admin = true",
+                )
         }
         SecurityContextHolder.getContext().authentication =
             ManagerAuthenticationToken(manager, null, ManagerAuthorities.of(manager))

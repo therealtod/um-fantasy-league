@@ -1,8 +1,10 @@
 package com.umfl.config
 
+import com.umfl.common.NotFoundException
 import com.umfl.manager.ManagerRepository
 import com.umfl.support.PostgresIntegrationTest
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
@@ -41,7 +43,24 @@ class AdminSecurityDevTest @Autowired constructor(
     }
 
     @Test
-    fun `omitting the header falls back to NeonStrategist, which is seeded as admin`() {
+    fun `omitting the header falls back to the seeded admin manager`() {
         createHero(null, "Dev Default Hero").andExpect { status { isCreated() } }
+    }
+
+    @Test
+    fun `omitting the header with no admin manager at all fails loudly instead of impersonating a fixed handle`() {
+        managerRepository.findAll().forEach {
+            managerRepository.save(it.copy(isAdmin = false))
+        }
+
+        // Thrown from inside the security filter chain, ahead of DispatcherServlet, so
+        // GlobalExceptionHandler never sees it -- MockMvc surfaces it as a raw exception
+        // rather than a mapped 404. The behaviour under test is *what* fails (no manager
+        // resolved, no assumption about who "the" admin is), not the transport shape of
+        // that failure.
+        val ex = assertThrows<NotFoundException> {
+            createHero(null, "Dev Default Hero")
+        }
+        assert(ex.message?.contains("No admin manager") == true) { "unexpected message: ${ex.message}" }
     }
 }

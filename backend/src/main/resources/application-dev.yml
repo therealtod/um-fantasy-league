@@ -1,3 +1,12 @@
+spring:
+  flyway:
+    # Base `application.yml` points Flyway at `classpath:db/migration` only
+    # (schema, no data). `db/seed` layers demo fixtures on top -- three
+    # tournaments, seeded managers (NeonStrategist et al.), a full recorded
+    # result set -- so local dev has something to click through. See
+    # `V1__core_schema.sql` / `V2__demo_fixtures.sql` for the split.
+    locations: classpath:db/migration,classpath:db/seed
+
 logging:
   level:
     com.umfl: DEBUG

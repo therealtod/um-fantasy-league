@@ -9,10 +9,11 @@ import org.springframework.stereotype.Component
  * Development stand-in for real authentication.
  *
  * Reads the [Manager] that [DevManagerAuthenticationFilter] already resolved
- * from the `X-Manager-Id` header (or the seeded default) and set on the
- * security context — one resolution path, so this and any `hasRole("ADMIN")`
- * route matcher can never disagree about who the request is. Active for every
- * profile except `prod`, where [SupabaseManagerProvider] takes over.
+ * from the `X-Manager-Id` header (or, absent that, some admin manager) and set
+ * on the security context — one resolution path, so this and any
+ * `hasRole("ADMIN")` route matcher can never disagree about who the request
+ * is. Active for every profile except `prod`, where [SupabaseManagerProvider]
+ * takes over.
  *
  * NOT SUITABLE FOR ANY DEPLOYED ENVIRONMENT: it trusts a client-supplied header.
  */
@@ -26,6 +27,5 @@ class DevManagerProvider : CurrentManagerProvider {
 
     companion object {
         const val MANAGER_ID_HEADER = "X-Manager-Id"
-        const val DEFAULT_HANDLE = "NeonStrategist"
     }
 }
