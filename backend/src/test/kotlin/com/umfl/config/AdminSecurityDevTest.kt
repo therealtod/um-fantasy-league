@@ -13,7 +13,8 @@ import org.springframework.test.web.servlet.post
  * Proves admin routes are role-gated in dev/test too, purely via
  * `X-Manager-Id` — no JWT mocking needed, because
  * [com.umfl.auth.DevManagerAuthenticationFilter] resolves the same header
- * [com.umfl.auth.DevManagerProvider] always read, once, at the filter level.
+ * [com.umfl.auth.DevManagerProvider] reads, once, at the filter level. See
+ * [DevSecurityConfigTest] for the route-level half of the dev chain.
  */
 @AutoConfigureMockMvc
 class AdminSecurityDevTest @Autowired constructor(
@@ -41,25 +42,24 @@ class AdminSecurityDevTest @Autowired constructor(
     }
 
     @Test
-    fun `omitting the header falls back to the seeded admin manager`() {
-        createHero(null, "Dev Default Hero").andExpect { status { isCreated() } }
-    }
-
-    @Test
-    fun `omitting the header with no admin manager at all is a clean 401, not a raw 500`() {
-        managerRepository.findAll().forEach {
-            managerRepository.save(it.copy(isAdmin = false))
-        }
-
-        createHero(null, "Dev Default Hero").andExpect {
+    fun `omitting the header is anonymous, so an admin route is a 401`() {
+        createHero(null, "Dev Anonymous Hero").andExpect {
             status { isUnauthorized() }
             content { contentType(MediaType.APPLICATION_PROBLEM_JSON) }
         }
     }
 
     @Test
-    fun `an id naming no manager at all is also a clean 401`() {
+    fun `an id naming no manager at all is a clean 401`() {
         createHero("999999", "Dev Unknown Manager Hero").andExpect {
+            status { isUnauthorized() }
+            content { contentType(MediaType.APPLICATION_PROBLEM_JSON) }
+        }
+    }
+
+    @Test
+    fun `a malformed id is rejected rather than treated as anonymous`() {
+        createHero("not-a-number", "Dev Malformed Header Hero").andExpect {
             status { isUnauthorized() }
             content { contentType(MediaType.APPLICATION_PROBLEM_JSON) }
         }

@@ -12,21 +12,31 @@ import org.springframework.web.filter.OncePerRequestFilter
 
 /**
  * Dev/test equivalent of [SupabaseAuthenticationConverter]: resolves the same
- * `X-Manager-Id` header [DevManagerProvider] always read, but does it once at
- * the filter level so `hasRole("ADMIN")` route matchers work in every
- * non-prod profile too — the whole point of this class. Without it, dev's
- * permissive security chain has no Spring Security principal at all, so an
- * admin-only route could never be matcher-gated the same way it is in prod.
+ * `X-Manager-Id` header [DevManagerProvider] reads, but does it once at the
+ * filter level so `hasRole("ADMIN")` route matchers work in every non-prod
+ * profile too — the whole point of this class. Without it, dev's chain has no
+ * Spring Security principal at all, so an admin-only route could never be
+ * matcher-gated the same way it is in prod.
  *
- * Omitting the header impersonates *some* admin manager
- * ([ManagerRepository.findFirstByIsAdminTrueOrderById]) rather than a
- * hardcoded handle, so this filter carries no opinion about what dev/test
- * data seeds — it only needs one manager flagged admin, if any exist at all.
+ * Resolution is conditional on a credential being *offered*, never on the
+ * route, exactly like prod: there, [SupabaseAuthenticationConverter] runs only
+ * because `BearerTokenAuthenticationFilter` found a bearer token, so an
+ * anonymous request to a public route costs no database query and no
+ * authentication at all. A request with no `X-Manager-Id` is that same
+ * anonymous request here — it passes straight through with an empty security
+ * context, and [com.umfl.config.DevSecurityConfig]'s authorization rules (the
+ * same ones prod uses) decide whether the route actually needed an identity.
+ * This filter deliberately knows nothing about which routes those are.
  *
- * Both failure modes below throw a Spring Security [BadCredentialsException]
- * rather than a domain [com.umfl.common.NotFoundException]: this filter runs
- * ahead of `DispatcherServlet`, so [com.umfl.common.GlobalExceptionHandler]
- * (a `@RestControllerAdvice`) never sees an exception thrown here — only
+ * A header that is present but unusable is a different case from an absent
+ * one: a credential was offered and it is bad, so it is rejected rather than
+ * silently downgraded to anonymous — the same way prod treats a malformed
+ * bearer token.
+ *
+ * Both rejections throw a Spring Security [BadCredentialsException] rather
+ * than a domain [com.umfl.common.NotFoundException]: this filter runs ahead of
+ * `DispatcherServlet`, so [com.umfl.common.GlobalExceptionHandler] (a
+ * `@RestControllerAdvice`) never sees an exception thrown here — only
  * `ExceptionTranslationFilter` does, and only for a genuine
  * `AuthenticationException`. [DevSecurityConfig][com.umfl.config.DevSecurityConfig]
  * wires the same `ProblemDetailAuthenticationEntryPoint` prod uses to catch
@@ -44,16 +54,16 @@ class DevManagerAuthenticationFilter(
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        val headerId = request.getHeader(DevManagerProvider.MANAGER_ID_HEADER)?.toLongOrNull()
-        val manager = if (headerId != null) {
-            managerRepository.findById(headerId).orElseThrow {
-                BadCredentialsException("No manager with id $headerId")
-            }
-        } else {
-            managerRepository.findFirstByIsAdminTrueOrderById()
-                ?: throw BadCredentialsException(
-                    "No admin manager to fall back to — pass X-Manager-Id, or seed a manager with is_admin = true",
-                )
+        val header = request.getHeader(DevManagerProvider.MANAGER_ID_HEADER)
+        if (header == null) {
+            filterChain.doFilter(request, response)
+            return
+        }
+
+        val managerId = header.toLongOrNull()
+            ?: throw BadCredentialsException("Malformed ${DevManagerProvider.MANAGER_ID_HEADER}: $header")
+        val manager = managerRepository.findById(managerId).orElseThrow {
+            BadCredentialsException("No manager with id $managerId")
         }
         SecurityContextHolder.getContext().authentication =
             ManagerAuthenticationToken(manager, null, ManagerAuthorities.of(manager))

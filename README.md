@@ -78,6 +78,11 @@ backend. Seeded manager IDs are 1 through 4; change the value and restart Vite t
 manager. This mode is unavailable in production builds and the `X-Manager-Id` header is accepted
 only by the non-production backend profile.
 
+Setting it is effectively required for anything past the public screens. Without it the frontend
+sends a Supabase bearer token instead, which the dev backend does not read, so the lobby and
+standings still load but the roster and admin screens answer 401 — a dev backend treats a request
+with no `X-Manager-Id` as anonymous rather than guessing at an identity for it.
+
 There is no background process. The Standings screen loads once, because nothing writes results
 while the app is running.
 
@@ -354,8 +359,14 @@ rejection.
 
 `CurrentManagerProvider` is the seam, with two implementations selected by Spring profile:
 
-- **`dev` / `test` / no profile** — `DevManagerProvider` reads an `X-Manager-Id` header and
-  otherwise falls back to the seeded *NeonStrategist*. NOT SUITABLE FOR ANY DEPLOYED ENVIRONMENT.
+- **`dev` / `test` / no profile** — `DevManagerAuthenticationFilter` resolves an `X-Manager-Id`
+  header into the manager, and `DevManagerProvider` reads it back off the security context. NOT
+  SUITABLE FOR ANY DEPLOYED ENVIRONMENT.
+
+  A request with no header is simply anonymous — the same thing a request with no bearer token is
+  under `prod` — so public routes serve it without touching the database and gated routes answer
+  401. A header that is present but names no manager, or is not a number at all, is a 401 rather
+  than a silent downgrade to anonymous.
 
   The Vite frontend can supply this header automatically when its development-only
   `VITE_DEV_MANAGER_ID` setting is present; this skips Discord so local end-to-end workflow tests
@@ -363,6 +374,8 @@ rejection.
 
   ```bash
   curl -s localhost:8080/api/me -H 'X-Manager-Id: 3'
+  curl -is localhost:8080/api/me | head -1          # 401: no header, no identity
+  curl -is localhost:8080/api/tournaments | head -1 # 200: public either way
   ```
 
 - **`prod`** — `SupabaseManagerProvider` verifies a Supabase-issued JWT (Spring Security's OAuth2

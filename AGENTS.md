@@ -86,7 +86,7 @@ version before downgrading Spring Boot back toward the 3.5.x/Testcontainers 1.21
 
 | Profile | Auth | Notes |
 |---|---|---|
-| `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` (falls back to `ManagerRepository.findFirstByIsAdminTrueOrderById()` — *some* admin manager, not a hardcoded handle) once at the filter level; `DevManagerProvider` just reads it back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
+| `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` once at the filter level, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `DevManagerProvider` just reads the result back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
 | `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection`; same `db/seed` addition, since every integration test asserts against the fixtures |
 | `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `manager.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through `_redirects`) |
 
@@ -96,17 +96,26 @@ There are no scheduled tasks and no background workers in any profile, with one 
 standings feed below, not a business-logic worker — it has no DB access and does nothing but write
 SSE comment lines to already-open connections.
 
-`SecurityConfig` (prod) is a stateless resource server whose public-GET allowlist covers
-`/api/tournaments`, `/api/tournaments/*`, `/api/tournaments/*/heroes`, `/api/tournaments/*/standings`,
-`/api/tournaments/*/standings/stream` and `/api/tournaments/*/matches`; keep it in step with
-`SecurityConfigTest`. Admin routes
-(`/api/admin/**`) require `hasRole("ADMIN")` in both `SecurityConfig` and `DevSecurityConfig` — the
-role comes from `manager.is_admin`, our own data, resolved once per request by
+**Which routes need an identity is decided in exactly one place, for every profile**: the private
+`apiAuthorizationRules` function in `SecurityConfig.kt`, passed to `authorizeHttpRequests` by both
+chains. Its public-GET allowlist covers `/api/tournaments`, `/api/tournaments/*`,
+`/api/tournaments/*/heroes`, `/api/tournaments/*/standings`, `/api/tournaments/*/standings/stream`
+and `/api/tournaments/*/matches`; everything else under `/api/**` is `authenticated()`, and
+`anyRequest()` is `denyAll()`. Keep it in step with `SecurityConfigTest` and `DevSecurityConfigTest`,
+which assert it from either side. Don't re-inline it into one chain: the two chains are meant to
+differ only in how a credential is *verified* (a Supabase JWT vs. an `X-Manager-Id` header), never in
+which routes require one — which is also why neither `SupabaseAuthenticationConverter` nor
+`DevManagerAuthenticationFilter` carries any route knowledge of its own. Each resolves an identity
+only when the request actually offered a credential; a request without one stays anonymous and lets
+the rules above decide, so no public GET pays a JWT verification or a manager lookup.
+
+Admin routes (`/api/admin/**`) therefore require `hasRole("ADMIN")` in both profiles — the role comes
+from `manager.is_admin`, our own data, resolved once per request by
 `SupabaseAuthenticationConverter`/`DevManagerAuthenticationFilter` via the shared, provider-agnostic
 `ManagerAuthorities` — never from an identity-provider claim, so swapping auth providers later never
-touches the role logic. `DevSecurityConfig` (`!prod`) is otherwise a deliberate permit-all chain that
-exists only to stop Spring Security's autoconfiguration from securing everything the moment the
-oauth2 starter is on the classpath. Don't delete it.
+touches the role logic. `DevSecurityConfig` (`!prod`) is also what stops Spring Security's
+autoconfiguration from securing everything the moment the oauth2 starter is on the classpath. Don't
+delete it.
 
 Those matcher lists are the first layer, not the only one: `MethodSecurityConfig` turns on
 `@EnableMethodSecurity`, and every admin controller (plus `TournamentController.delete`, the one
