@@ -9,10 +9,12 @@ import org.springframework.stereotype.Component
  * Development stand-in for real authentication.
  *
  * Reads the [Manager] that [DevManagerAuthenticationFilter] already resolved
- * from the `X-Manager-Id` header (or the seeded default) and set on the
- * security context — one resolution path, so this and any `hasRole("ADMIN")`
- * route matcher can never disagree about who the request is. Active for every
- * profile except `prod`, where [SupabaseManagerProvider] takes over.
+ * from the `X-Manager-Id` header and set on the security context — one
+ * resolution path, so this and any `hasRole("ADMIN")` route matcher can never
+ * disagree about who the request is. A request that carried no header is
+ * anonymous, and [currentOrNull] returns null for it exactly as
+ * [SupabaseManagerProvider] does for a request with no bearer token. Active
+ * for every profile except `prod`, where that provider takes over.
  *
  * NOT SUITABLE FOR ANY DEPLOYED ENVIRONMENT: it trusts a client-supplied header.
  */
@@ -21,11 +23,12 @@ import org.springframework.stereotype.Component
 class DevManagerProvider : CurrentManagerProvider {
 
     override fun current(): Manager =
+        currentOrNull() ?: error("No authenticated manager for this request")
+
+    override fun currentOrNull(): Manager? =
         (SecurityContextHolder.getContext().authentication as? ManagerAuthenticationToken)?.principal
-            ?: error("No authenticated manager for this request")
 
     companion object {
         const val MANAGER_ID_HEADER = "X-Manager-Id"
-        const val DEFAULT_HANDLE = "NeonStrategist"
     }
 }

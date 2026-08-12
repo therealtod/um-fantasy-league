@@ -20,7 +20,7 @@ why scoring is data, seed-data tuning). Read it before making design-level chang
 # Database (Postgres 17 on host port 5433)
 docker compose up -d db
 
-# Backend — Flyway migrates and seeds on first start
+# Backend — Flyway migrates the schema and, in dev/test only, seeds demo fixtures on first start
 ./gradlew :backend:bootRun --args='--spring.profiles.active=dev'
 
 # Frontend (separate shell) — Vite proxies /api to localhost:8080
@@ -28,9 +28,11 @@ cd frontend && npm install && npm run dev
 ```
 
 Migrations are periodically squashed back into a single `V1__core_schema.sql` baseline (schema +
-seed fixtures + admin authorization all in one file), so an older local database fails Flyway
-checksum validation. There is no production data: `docker compose down -v && docker compose up -d
-db`.
+admin authorization, no data), so an older local database fails Flyway checksum validation. There is
+no production data: `docker compose down -v && docker compose up -d db`. Demo/dev fixtures — three
+tournaments, seeded managers, a full recorded result set — live in a second Flyway location,
+`db/seed/V2__demo_fixtures.sql`, that only `dev` and `test` add to `spring.flyway.locations` (see
+Profiles below). A default start or the `prod` profile migrates schema only and writes no mock data.
 
 Tests:
 
@@ -84,8 +86,8 @@ version before downgrading Spring Boot back toward the 3.5.x/Testcontainers 1.21
 
 | Profile | Auth | Notes |
 |---|---|---|
-| `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` (falls back to seeded *NeonStrategist*) once at the filter level; `DevManagerProvider` just reads it back off `SecurityContextHolder` | Just DEBUG logging on top of the defaults |
-| `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection` |
+| `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` once at the filter level, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `DevManagerProvider` just reads the result back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
+| `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection`; same `db/seed` addition, since every integration test asserts against the fixtures |
 | `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `manager.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through `_redirects`) |
 
 There are no scheduled tasks and no background workers in any profile, with one narrow exception:
@@ -94,17 +96,26 @@ There are no scheduled tasks and no background workers in any profile, with one 
 standings feed below, not a business-logic worker — it has no DB access and does nothing but write
 SSE comment lines to already-open connections.
 
-`SecurityConfig` (prod) is a stateless resource server whose public-GET allowlist covers
-`/api/tournaments`, `/api/tournaments/*`, `/api/tournaments/*/heroes`, `/api/tournaments/*/standings`,
-`/api/tournaments/*/standings/stream` and `/api/tournaments/*/matches`; keep it in step with
-`SecurityConfigTest`. Admin routes
-(`/api/admin/**`) require `hasRole("ADMIN")` in both `SecurityConfig` and `DevSecurityConfig` — the
-role comes from `manager.is_admin`, our own data, resolved once per request by
+**Which routes need an identity is decided in exactly one place, for every profile**: the private
+`apiAuthorizationRules` function in `SecurityConfig.kt`, passed to `authorizeHttpRequests` by both
+chains. Its public-GET allowlist covers `/api/tournaments`, `/api/tournaments/*`,
+`/api/tournaments/*/heroes`, `/api/tournaments/*/standings`, `/api/tournaments/*/standings/stream`
+and `/api/tournaments/*/matches`; everything else under `/api/**` is `authenticated()`, and
+`anyRequest()` is `denyAll()`. Keep it in step with `SecurityConfigTest` and `DevSecurityConfigTest`,
+which assert it from either side. Don't re-inline it into one chain: the two chains are meant to
+differ only in how a credential is *verified* (a Supabase JWT vs. an `X-Manager-Id` header), never in
+which routes require one — which is also why neither `SupabaseAuthenticationConverter` nor
+`DevManagerAuthenticationFilter` carries any route knowledge of its own. Each resolves an identity
+only when the request actually offered a credential; a request without one stays anonymous and lets
+the rules above decide, so no public GET pays a JWT verification or a manager lookup.
+
+Admin routes (`/api/admin/**`) therefore require `hasRole("ADMIN")` in both profiles — the role comes
+from `manager.is_admin`, our own data, resolved once per request by
 `SupabaseAuthenticationConverter`/`DevManagerAuthenticationFilter` via the shared, provider-agnostic
 `ManagerAuthorities` — never from an identity-provider claim, so swapping auth providers later never
-touches the role logic. `DevSecurityConfig` (`!prod`) is otherwise a deliberate permit-all chain that
-exists only to stop Spring Security's autoconfiguration from securing everything the moment the
-oauth2 starter is on the classpath. Don't delete it.
+touches the role logic. `DevSecurityConfig` (`!prod`) is also what stops Spring Security's
+autoconfiguration from securing everything the moment the oauth2 starter is on the classpath. Don't
+delete it.
 
 Those matcher lists are the first layer, not the only one: `MethodSecurityConfig` turns on
 `@EnableMethodSecurity`, and every admin controller (plus `TournamentController.delete`, the one
@@ -212,14 +223,18 @@ through `GlobalExceptionHandler` as RFC 7807 problem details — `NotFoundExcept
 keep new sorts inside that enum.
 
 Migrations are `backend/src/main/resources/db/migration/V*__*.sql`, forward-only. There is a single
-`V1__core_schema.sql` baseline — schema, seed fixtures, and the admin-authorization column all
-squashed into one file, periodically re-squashed the same way rather than left as an accumulating
-chain, since there is no production data yet to preserve migration history for. Tables the app loads
-or writes as aggregates carry a surrogate `bigserial` id next to a unique natural key because Spring
-Data JDBC can't map composite primary keys; the pure link tables (`tournament_hero`, `tournament_map`,
-`entry_slot`, `hero_ban`, `match_game_participant`) keep natural composite keys. The integration
-tests assert on the seed's numbers exactly — changing a seeded price or result means updating them. New data past that fixed baseline goes through the Admin API (see below), not another
-migration.
+`V1__core_schema.sql` baseline — schema and the admin-authorization column squashed into one file,
+periodically re-squashed the same way rather than left as an accumulating chain, since there is no
+production data yet to preserve migration history for. It carries no seed data: demo fixtures live
+in a second Flyway location, `backend/src/main/resources/db/seed/V2__demo_fixtures.sql`, which is
+only on `spring.flyway.locations` for the `dev` and `test` profiles (see Profiles above) — a default
+start or the `prod` profile migrates schema only and writes no mock tournaments, managers or results.
+Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a unique natural
+key because Spring Data JDBC can't map composite primary keys; the pure link tables (`tournament_hero`,
+`tournament_map`, `entry_slot`, `hero_ban`, `match_game_participant`) keep natural composite keys. The
+integration tests assert on the seed's numbers exactly — changing a seeded price or result means
+updating `V2__demo_fixtures.sql` and the tests together. New data past that fixed baseline goes
+through the Admin API (see below), not another migration.
 
 ## Frontend architecture
 
@@ -298,8 +313,9 @@ tournament delete (which cascades to `tournament_map` and, one level deeper, to 
 tripped by cascade ordering — which is why `AdminMapService.removeFromPool` calls
 `MapPoolAdminRepository.checkMapInPoolNow()` (`set constraints … immediate`) after its DELETE: the
 violation has to surface inside the method that can still name the map, not at commit. The
-`V1__core_schema.sql` seed SQL is still what populated the original fixtures, but it is no longer
-the only way new reference data or results can enter the system.
+`db/seed/V2__demo_fixtures.sql` seed SQL is still what populated the original dev/test fixtures, but
+it is no longer the only way new reference data or results can enter the system, and it never runs
+outside `dev`/`test` in the first place.
 
 Tables that were previously read-only (`heroes`, `game_map`, `tournament_match`/`match_participant`/
 `match_game`/`match_game_participant`/`hero_ban`, `scoring_rule_set`/`scoring_coefficient`) now have

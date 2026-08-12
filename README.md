@@ -58,18 +58,30 @@ cd frontend && npm install && npm run dev
 Then open <http://localhost:5173>. The Vite dev server proxies `/api` to `localhost:8080`.
 
 > **Pulling this schema onto an existing local database?** The migrations were rewritten in place as
-> a fresh V1–V3 baseline, so Flyway's checksum validation will fail against a database migrated from
-> the old files. There is no production data to preserve — drop the volume and start over:
+> a fresh baseline, so Flyway's checksum validation will fail against a database migrated from the
+> old files. There is no production data to preserve — drop the volume and start over:
 >
 > ```bash
 > docker compose down -v && docker compose up -d db
 > ```
+
+`V1__core_schema.sql` is schema only — no mock data. The three demo tournaments, the seeded
+managers, and the recorded Summer of Legends result set are a second migration,
+`db/seed/V2__demo_fixtures.sql`, that only the `dev` and `test` profiles add to
+`spring.flyway.locations`. A plain start with no profile, or `--spring.profiles.active=prod`, migrates
+schema only and boots with an empty database — nothing to delete before pointing this at a real
+tournament.
 
 For the local workflow, set `VITE_DEV_MANAGER_ID=1` in `frontend/.env.local` (the supplied example
 does this). Vite development builds then skip Supabase Auth and send that manager ID to the dev
 backend. Seeded manager IDs are 1 through 4; change the value and restart Vite to exercise another
 manager. This mode is unavailable in production builds and the `X-Manager-Id` header is accepted
 only by the non-production backend profile.
+
+Setting it is effectively required for anything past the public screens. Without it the frontend
+sends a Supabase bearer token instead, which the dev backend does not read, so the lobby and
+standings still load but the roster and admin screens answer 401 — a dev backend treats a request
+with no `X-Manager-Id` as anonymous rather than guessing at an identity for it.
 
 There is no background process. The Standings screen loads once, because nothing writes results
 while the app is running.
@@ -347,8 +359,14 @@ rejection.
 
 `CurrentManagerProvider` is the seam, with two implementations selected by Spring profile:
 
-- **`dev` / `test` / no profile** — `DevManagerProvider` reads an `X-Manager-Id` header and
-  otherwise falls back to the seeded *NeonStrategist*. NOT SUITABLE FOR ANY DEPLOYED ENVIRONMENT.
+- **`dev` / `test` / no profile** — `DevManagerAuthenticationFilter` resolves an `X-Manager-Id`
+  header into the manager, and `DevManagerProvider` reads it back off the security context. NOT
+  SUITABLE FOR ANY DEPLOYED ENVIRONMENT.
+
+  A request with no header is simply anonymous — the same thing a request with no bearer token is
+  under `prod` — so public routes serve it without touching the database and gated routes answer
+  401. A header that is present but names no manager, or is not a number at all, is a 401 rather
+  than a silent downgrade to anonymous.
 
   The Vite frontend can supply this header automatically when its development-only
   `VITE_DEV_MANAGER_ID` setting is present; this skips Discord so local end-to-end workflow tests
@@ -356,6 +374,8 @@ rejection.
 
   ```bash
   curl -s localhost:8080/api/me -H 'X-Manager-Id: 3'
+  curl -is localhost:8080/api/me | head -1          # 401: no header, no identity
+  curl -is localhost:8080/api/tournaments | head -1 # 200: public either way
   ```
 
 - **`prod`** — `SupabaseManagerProvider` verifies a Supabase-issued JWT (Spring Security's OAuth2

@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpMethod
 import org.springframework.security.config.Customizer
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
+import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer
 import org.springframework.security.config.http.SessionCreationPolicy
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm
 import org.springframework.security.oauth2.jwt.JwtDecoder
@@ -17,6 +18,39 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.access.intercept.AuthorizationFilter
+
+/**
+ * The one place that says which routes need an identity, shared by both filter
+ * chains below so `prod` and every other profile can never disagree about it.
+ * The chains differ only in how a credential is *verified* — a Supabase JWT in
+ * prod, an `X-Manager-Id` header in dev/test — never in which routes require
+ * one, which is also why neither
+ * [com.umfl.auth.SupabaseAuthenticationConverter] nor
+ * [com.umfl.auth.DevManagerAuthenticationFilter] has any route knowledge of its
+ * own. Keep this in step with [com.umfl.config.SecurityConfigTest] and
+ * [com.umfl.config.DevSecurityConfigTest], which assert it from either side.
+ */
+private fun apiAuthorizationRules(
+    registry: AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry,
+) {
+    registry.requestMatchers("/actuator/health", "/actuator/info").permitAll()
+    // Viewing tournaments, hero pools and standings needs no account — only
+    // entering a tournament and drafting a roster does.
+    registry.requestMatchers(
+        HttpMethod.GET,
+        "/api/tournaments/*/heroes",
+        "/api/tournaments",
+        "/api/tournaments/*",
+        "/api/tournaments/*/standings",
+        "/api/tournaments/*/standings/stream",
+        "/api/tournaments/*/matches",
+    ).permitAll()
+    // Must precede the general "/api/**" rule below — first match wins.
+    registry.requestMatchers("/api/admin/**").hasRole("ADMIN")
+    registry.requestMatchers(HttpMethod.DELETE, "/api/tournaments/*").hasRole("ADMIN")
+    registry.requestMatchers("/api/**").authenticated()
+    registry.anyRequest().denyAll()
+}
 
 /**
  * Production security: a stateless JWT resource server verifying Supabase-issued
@@ -49,25 +83,7 @@ class SecurityConfig(
             .cors(Customizer.withDefaults())
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-            .authorizeHttpRequests {
-                it.requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                // Viewing tournaments, hero pools and standings needs no account — only
-                // entering a tournament and drafting a roster does.
-                it.requestMatchers(
-                    HttpMethod.GET,
-                    "/api/tournaments/*/heroes",
-                    "/api/tournaments",
-                    "/api/tournaments/*",
-                    "/api/tournaments/*/standings",
-                    "/api/tournaments/*/standings/stream",
-                    "/api/tournaments/*/matches",
-                ).permitAll()
-                // Must precede the general "/api/**" rule below — first match wins.
-                it.requestMatchers("/api/admin/**").hasRole("ADMIN")
-                it.requestMatchers(HttpMethod.DELETE, "/api/tournaments/*").hasRole("ADMIN")
-                it.requestMatchers("/api/**").authenticated()
-                it.anyRequest().denyAll()
-            }
+            .authorizeHttpRequests(::apiAuthorizationRules)
             .exceptionHandling {
                 it.accessDeniedHandler(problemDetailAccessDeniedHandler)
                 it.authenticationEntryPoint(problemDetailAuthenticationEntryPoint)
@@ -88,32 +104,36 @@ class SecurityConfig(
  * Adding `spring-boot-starter-oauth2-resource-server` pulls Spring Security onto
  * the classpath, whose autoconfiguration secures every endpoint by default
  * (generated user + HTTP Basic) unless a [SecurityFilterChain] bean is present.
- * [SecurityConfig] above supplies that bean only for `prod`; this permissive
- * chain is the explicit equivalent of "no security" for every other profile,
- * except for admin routes, which stay role-gated even in dev/test so the
- * admin API is actually testable without mocking a JWT — see
- * [DevManagerAuthenticationFilter], which resolves the same `X-Manager-Id`
- * header [com.umfl.auth.DevManagerProvider] always read, but does it once at
- * the filter level so `hasRole("ADMIN")` has an authority to check.
+ * [SecurityConfig] above supplies that bean only for `prod`; this is that bean
+ * for every other profile — and it enforces the very same
+ * [apiAuthorizationRules], so dev and prod agree on which routes need an
+ * identity and differ only in how a credential is verified. Here that
+ * credential is an `X-Manager-Id` header rather than a Supabase JWT, resolved
+ * by [DevManagerAuthenticationFilter] once at the filter level so
+ * `hasRole("ADMIN")` has an authority to check and the admin API is testable
+ * without mocking a JWT.
  */
 @Configuration
 @Profile("!prod")
 class DevSecurityConfig(
     private val devManagerAuthenticationFilter: DevManagerAuthenticationFilter,
     private val problemDetailAccessDeniedHandler: ProblemDetailAccessDeniedHandler,
+    private val problemDetailAuthenticationEntryPoint: ProblemDetailAuthenticationEntryPoint,
     private val rateLimitFilter: RateLimitFilter,
 ) {
 
     @Bean
-    fun permissiveFilterChain(http: HttpSecurity): SecurityFilterChain {
+    fun devFilterChain(http: HttpSecurity): SecurityFilterChain {
         http
             .csrf { it.disable() }
-            .authorizeHttpRequests {
-                it.requestMatchers("/api/admin/**").hasRole("ADMIN")
-                it.requestMatchers(HttpMethod.DELETE, "/api/tournaments/*").hasRole("ADMIN")
-                it.anyRequest().permitAll()
+            .authorizeHttpRequests(::apiAuthorizationRules)
+            .exceptionHandling {
+                it.accessDeniedHandler(problemDetailAccessDeniedHandler)
+                // Reached both by an unresolvable X-Manager-Id (which
+                // devManagerAuthenticationFilter throws on) and by an anonymous
+                // request to a route apiAuthorizationRules marks authenticated().
+                it.authenticationEntryPoint(problemDetailAuthenticationEntryPoint)
             }
-            .exceptionHandling { it.accessDeniedHandler(problemDetailAccessDeniedHandler) }
             // rateLimitFilter added first so it also runs ahead of the manager lookup
             // devManagerAuthenticationFilter does — both anchored on AuthorizationFilter,
             // and filters sharing an anchor run in the order they were added.

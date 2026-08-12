@@ -1,6 +1,9 @@
 spring:
   flyway:
     enabled: true
+    # Every integration test asserts against the demo fixtures (seeded
+    # tournaments, managers, recorded matches) -- see V2__demo_fixtures.sql.
+    locations: classpath:db/migration,classpath:db/seed
 
 logging:
   level:
