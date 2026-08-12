@@ -1,10 +1,8 @@
 package com.umfl.config
 
-import com.umfl.common.NotFoundException
 import com.umfl.manager.ManagerRepository
 import com.umfl.support.PostgresIntegrationTest
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
@@ -48,19 +46,22 @@ class AdminSecurityDevTest @Autowired constructor(
     }
 
     @Test
-    fun `omitting the header with no admin manager at all fails loudly instead of impersonating a fixed handle`() {
+    fun `omitting the header with no admin manager at all is a clean 401, not a raw 500`() {
         managerRepository.findAll().forEach {
             managerRepository.save(it.copy(isAdmin = false))
         }
 
-        // Thrown from inside the security filter chain, ahead of DispatcherServlet, so
-        // GlobalExceptionHandler never sees it -- MockMvc surfaces it as a raw exception
-        // rather than a mapped 404. The behaviour under test is *what* fails (no manager
-        // resolved, no assumption about who "the" admin is), not the transport shape of
-        // that failure.
-        val ex = assertThrows<NotFoundException> {
-            createHero(null, "Dev Default Hero")
+        createHero(null, "Dev Default Hero").andExpect {
+            status { isUnauthorized() }
+            content { contentType(MediaType.APPLICATION_PROBLEM_JSON) }
         }
-        assert(ex.message?.contains("No admin manager") == true) { "unexpected message: ${ex.message}" }
+    }
+
+    @Test
+    fun `an id naming no manager at all is also a clean 401`() {
+        createHero("999999", "Dev Unknown Manager Hero").andExpect {
+            status { isUnauthorized() }
+            content { contentType(MediaType.APPLICATION_PROBLEM_JSON) }
+        }
     }
 }

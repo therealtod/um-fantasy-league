@@ -101,6 +101,7 @@ class SecurityConfig(
 class DevSecurityConfig(
     private val devManagerAuthenticationFilter: DevManagerAuthenticationFilter,
     private val problemDetailAccessDeniedHandler: ProblemDetailAccessDeniedHandler,
+    private val problemDetailAuthenticationEntryPoint: ProblemDetailAuthenticationEntryPoint,
     private val rateLimitFilter: RateLimitFilter,
 ) {
 
@@ -113,7 +114,14 @@ class DevSecurityConfig(
                 it.requestMatchers(HttpMethod.DELETE, "/api/tournaments/*").hasRole("ADMIN")
                 it.anyRequest().permitAll()
             }
-            .exceptionHandling { it.accessDeniedHandler(problemDetailAccessDeniedHandler) }
+            .exceptionHandling {
+                it.accessDeniedHandler(problemDetailAccessDeniedHandler)
+                // Only reached if devManagerAuthenticationFilter itself throws (an
+                // unresolvable X-Manager-Id, or no admin manager to fall back to) --
+                // every route here is otherwise permitAll(), so nothing else raises
+                // an AuthenticationException for ExceptionTranslationFilter to catch.
+                it.authenticationEntryPoint(problemDetailAuthenticationEntryPoint)
+            }
             // rateLimitFilter added first so it also runs ahead of the manager lookup
             // devManagerAuthenticationFilter does — both anchored on AuthorizationFilter,
             // and filters sharing an anchor run in the order they were added.
