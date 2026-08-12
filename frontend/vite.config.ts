@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // Keeps the browser on a single origin in development.
       '/api': {
-        target: 'https://cord-mountain-venice-fever.trycloudflare.com',
+        target: 'https://lucky-said-degree-reporter.trycloudflare.com',
         changeOrigin: true,
       },
     },
