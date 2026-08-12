@@ -18,9 +18,10 @@ import kotlin.test.assertTrue
  * A per-metric truth table over hand-built matches.
  *
  * The fixtures mirror the shapes the seed data actually contains — a decided
- * match, the round-2 shutout, the round-3 timed draw, and (in [Games]) the
- * round-3 best-of-three — so a metric that disagrees with reality fails here
- * rather than three layers up in the leaderboard.
+ * match, the round-2 shutout, the round-3 game won on health with both heroes
+ * alive, and (in [Games]) the round-3 best-of-three — so a metric that
+ * disagrees with reality fails here rather than three layers up in the
+ * leaderboard.
  */
 class MatchMetricsTest {
 
@@ -66,10 +67,10 @@ class MatchMetricsTest {
         bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.PRE_BAN)),
     )
 
-    /** Match 11 of the seed: nobody wins, both sides alive on 7 and 5. */
-    private val timedDraw = match(
+    /** Match 11 of the seed: Sherlock Holmes wins 7 to Dracula's 5, both still alive. */
+    private val decisiveMatch = match(
         listOf(
-            gameParticipant(side = 0, heroId = 5, heroName = "Sherlock Holmes", health = 7),
+            gameParticipant(side = 0, heroId = 5, heroName = "Sherlock Holmes", health = 7, isWinner = true),
             gameParticipant(side = 1, heroId = 6, heroName = "Dracula", health = 5),
         ),
     )
@@ -89,7 +90,7 @@ class MatchMetricsTest {
         fun `every advertised metric resolves to an extractor`() {
             assertEquals(
                 setOf(
-                    "APPEARANCE", "BAN", "WIN", "LOSS", "DRAW",
+                    "APPEARANCE", "BAN", "WIN", "LOSS",
                     "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT",
                 ),
                 MatchMetrics.known,
@@ -111,6 +112,14 @@ class MatchMetricsTest {
         }
 
         @Test
+        fun `DRAW is not a metric - a game with no winner is not a recordable result`() {
+            // Pricing DRAW would be pricing something MatchResultPolicy rejects, so
+            // it is warned about like any other metric this build cannot measure.
+            assertNull(MatchMetrics["DRAW"])
+            assertEquals(listOf("DRAW"), MatchMetrics.unknown(listOf("WIN", "DRAW", "LOSS")))
+        }
+
+        @Test
         fun `an unimplemented metric resolves to nothing rather than throwing`() {
             assertNull(MatchMetrics["CROWD_FAVOURITE"])
         }
@@ -127,12 +136,11 @@ class MatchMetricsTest {
     inner class Outcomes {
 
         @Test
-        fun `the winner takes WIN and neither LOSS nor DRAW`() {
+        fun `the winner takes WIN and not LOSS`() {
             val bigfoot = contextFor(shutoutMatch, heroId = 7)
 
             assertEquals(1.0, measure("WIN", bigfoot))
             assertEquals(0.0, measure("LOSS", bigfoot))
-            assertEquals(0.0, measure("DRAW", bigfoot))
         }
 
         @Test
@@ -141,17 +149,17 @@ class MatchMetricsTest {
 
             assertEquals(0.0, measure("WIN", beowulf))
             assertEquals(1.0, measure("LOSS", beowulf))
-            assertEquals(0.0, measure("DRAW", beowulf))
         }
 
         @Test
-        fun `a timed draw is a DRAW for both sides and a LOSS for neither`() {
-            for (heroId in listOf(5L, 6L)) {
-                val side = contextFor(timedDraw, heroId)
-                assertEquals(0.0, measure("WIN", side), "hero $heroId")
-                assertEquals(0.0, measure("LOSS", side), "hero $heroId")
-                assertEquals(1.0, measure("DRAW", side), "hero $heroId")
-            }
+        fun `WIN and LOSS are exhaustive within a decided game`() {
+            val sherlock = contextFor(decisiveMatch, heroId = 5)
+            val dracula = contextFor(decisiveMatch, heroId = 6)
+
+            assertEquals(1.0, measure("WIN", sherlock))
+            assertEquals(0.0, measure("LOSS", sherlock))
+            assertEquals(0.0, measure("WIN", dracula))
+            assertEquals(1.0, measure("LOSS", dracula))
         }
     }
 
@@ -162,13 +170,13 @@ class MatchMetricsTest {
         fun `HEALTH_REMAINING is the hero's own end-of-game health`() {
             assertEquals(11.0, measure("HEALTH_REMAINING", contextFor(shutoutMatch, 7)))
             assertEquals(0.0, measure("HEALTH_REMAINING", contextFor(shutoutMatch, 11)))
-            assertEquals(5.0, measure("HEALTH_REMAINING", contextFor(timedDraw, 6)))
+            assertEquals(5.0, measure("HEALTH_REMAINING", contextFor(decisiveMatch, 6)))
         }
 
         @Test
         fun `HEALTH_DIFFERENTIAL is symmetric across the two sides`() {
-            val sherlock = measure("HEALTH_DIFFERENTIAL", contextFor(timedDraw, 5))
-            val dracula = measure("HEALTH_DIFFERENTIAL", contextFor(timedDraw, 6))
+            val sherlock = measure("HEALTH_DIFFERENTIAL", contextFor(decisiveMatch, 5))
+            val dracula = measure("HEALTH_DIFFERENTIAL", contextFor(decisiveMatch, 6))
 
             assertEquals(2.0, sherlock)
             assertEquals(-2.0, dracula)
@@ -241,7 +249,6 @@ class MatchMetricsTest {
             assertEquals(0.0, measure("APPEARANCE", sunWukong))
             assertEquals(0.0, measure("WIN", sunWukong))
             assertEquals(0.0, measure("LOSS", sunWukong))
-            assertEquals(0.0, measure("DRAW", sunWukong))
             assertEquals(0.0, measure("HEALTH_REMAINING", sunWukong))
             assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", sunWukong))
             assertEquals(0.0, measure("SHUTOUT", sunWukong))

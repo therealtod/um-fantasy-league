@@ -36,8 +36,9 @@ data class GameResult(
     val participants: List<GameParticipantResult>,
 ) {
     /**
-     * The side that took this game, if any. Null for a timed draw: nobody is
-     * flagged as the winner, yet both sides may still be alive.
+     * The side that took this game. Never null for a recorded game:
+     * [MatchResultPolicy] rejects a submission whose game has anything other
+     * than exactly one winner, so there is no drawn game to represent.
      */
     val winner: GameParticipantResult?
         get() = participants.firstOrNull { it.isWinner }

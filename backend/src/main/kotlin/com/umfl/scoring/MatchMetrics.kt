@@ -54,7 +54,6 @@ object MatchMetrics {
         "BAN" to ::ban,
         "WIN" to ::win,
         "LOSS" to ::loss,
-        "DRAW" to ::draw,
         "HEALTH_REMAINING" to ::healthRemaining,
         "HEALTH_DIFFERENTIAL" to ::healthDifferential,
         "SHUTOUT" to ::shutout,
@@ -96,19 +95,17 @@ private fun win(context: MetricContext): Double {
     return if (participant.isWinner) 1.0 else 0.0
 }
 
-/** Whether anyone won the game this hero played -- false for a timed draw. */
-private fun gameHasWinner(context: MetricContext): Boolean =
-    (context.role as? HeroRole.Played)?.game?.participants?.any { it.isWinner } ?: false
-
-/** A loss requires somebody to have won -- a timed draw is not a loss. */
+/**
+ * The other side of [win], and exhaustive with it: every game has exactly one
+ * winner ([com.umfl.match.MatchRule.NOT_EXACTLY_ONE_WINNER]), so within a game
+ * a hero that did not win, lost. There is deliberately no `DRAW` extractor to
+ * pair with these -- a drawn game is not a recordable result, so pricing one
+ * would be pricing something that cannot happen, and the registry surfaces
+ * `DRAW` as an unknown-metric warning instead.
+ */
 private fun loss(context: MetricContext): Double {
     val participant = context.participant ?: return 0.0
-    return if (gameHasWinner(context) && !participant.isWinner) 1.0 else 0.0
-}
-
-private fun draw(context: MetricContext): Double {
-    context.participant ?: return 0.0
-    return if (gameHasWinner(context)) 0.0 else 1.0
+    return if (participant.isWinner) 0.0 else 1.0
 }
 
 private fun healthRemaining(context: MetricContext): Double =

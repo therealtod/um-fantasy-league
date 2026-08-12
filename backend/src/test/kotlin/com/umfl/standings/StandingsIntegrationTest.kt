@@ -98,7 +98,7 @@ class StandingsIntegrationTest @Autowired constructor(
                 "ArthurianLegend" to 84.00,
                 "NeonStrategist" to 75.75,
                 "MythicMind" to 63.25,
-                "SherlockMain" to 51.50,
+                "SherlockMain" to 61.50,
             ),
             board.rows.map { it.handle to it.totalPoints },
         )
@@ -179,7 +179,7 @@ class StandingsIntegrationTest @Autowired constructor(
                 "ArthurianLegend" to 43.75,
                 "NeonStrategist" to 8.00,
                 "MythicMind" to 6.25,
-                "SherlockMain" to 30.00,
+                "SherlockMain" to 40.00,
             ),
             board.rows.map { it.handle to it.roundPoints },
         )
@@ -305,17 +305,19 @@ class StandingsIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `a timed draw has no winner and still scores both sides`() {
-        val draw = assertNotNull(standingsService.ticker(summerId()).singleOrNull { it.matchId == 11L })
+    fun `a recorded game shows the defeated hero at zero health`() {
+        val decisiveMatch = assertNotNull(standingsService.ticker(summerId()).singleOrNull { it.matchId == 11L })
 
-        val game = draw.games.single()
-        assertTrue(game.sides.none { it.isWinner })
-        assertEquals(setOf("Sherlock Holmes", "Dracula"), game.sides.map { it.heroName }.toSet())
+        val game = decisiveMatch.games.single()
+        assertEquals(listOf("Sherlock Holmes", "Dracula"), game.sides.map { it.heroName })
+        assertEquals(listOf(true, false), game.sides.map { it.isWinner })
+        assertEquals(listOf(7, 5), game.sides.map { it.healthRemaining })
+        // 10 + 5.25 + 1 + 1 = 17.25 against 3.75, LOSS being unpriced in the seed.
         assertEquals(
-            mapOf("Sherlock Holmes" to 7.25, "Dracula" to 3.75),
+            mapOf("Sherlock Holmes" to 17.25, "Dracula" to 3.75),
             game.sides.associate { it.heroName to it.points },
         )
-        assertEquals(listOf("Medusa", "Yennenga"), draw.bannedHeroNames)
+        assertEquals(listOf("Medusa", "Yennenga"), decisiveMatch.bannedHeroNames)
     }
 
     /**
@@ -342,7 +344,7 @@ class StandingsIntegrationTest @Autowired constructor(
                 "ArthurianLegend" to 84.00,
                 "NeonStrategist" to 75.75,
                 "MythicMind" to 63.25,
-                "SherlockMain" to 51.50,
+                "SherlockMain" to 61.50,
             ),
             board.rows.map { it.handle to it.totalPoints },
         )

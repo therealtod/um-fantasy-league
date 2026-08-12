@@ -167,7 +167,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 bans = emptyList(),
             )
         }
-        assertEquals(listOf(MatchRule.MULTIPLE_WINNERS), error.violations.map { it.rule })
+        assertEquals(listOf(MatchRule.NOT_EXACTLY_ONE_WINNER), error.violations.map { it.rule })
     }
 
     @Test
@@ -254,21 +254,22 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `a timed draw records with no winner`() {
+    fun `a game with no winner at all is rejected, not stored as a draw`() {
         val tournamentId = winterOfChampionsId()
         val mapId = id("game_map", "Baskerville Manor")
 
-        val recorded = adminMatchService.record(
-            tournamentId,
-            round = 1,
-            playedAt = Instant.now(),
-            externalLink = null,
-            participants = participants(),
-            games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, winnerA = false, healthB = 5),
-            bans = emptyList(),
-        )
-
-        assertTrue(recorded.games.none { game -> game.participants.any { it.isWinner } })
+        val error = assertFailsWith<MatchRuleException> {
+            adminMatchService.record(
+                tournamentId,
+                round = 1,
+                playedAt = Instant.now(),
+                externalLink = null,
+                participants = participants(),
+                games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, winnerA = false, healthB = 5),
+                bans = emptyList(),
+            )
+        }
+        assertEquals(listOf(MatchRule.NOT_EXACTLY_ONE_WINNER), error.violations.map { it.rule })
     }
 
     @Test

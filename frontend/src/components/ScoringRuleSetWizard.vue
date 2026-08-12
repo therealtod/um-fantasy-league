@@ -38,7 +38,6 @@ const knownMetrics = [
   'BAN',
   'WIN',
   'LOSS',
-  'DRAW',
   'HEALTH_REMAINING',
   'HEALTH_DIFFERENTIAL',
   'SHUTOUT',

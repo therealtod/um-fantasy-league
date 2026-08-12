@@ -132,6 +132,10 @@ function removeBan(index: number) {
   form.value.bans.splice(index, 1)
 }
 
+// Picking a side makes it the sole winner of that game and clears the other.
+// There is no way to pick *neither*, and that is deliberate: every game is
+// played to a decision, so the server rejects a game with no winner
+// (NOT_EXACTLY_ONE_WINNER).
 function setWinner(gameIndex: number, participantIndex: number) {
   form.value.games[gameIndex].participants.forEach((p, i) => {
     p.isWinner = i === participantIndex
@@ -156,6 +160,12 @@ async function saveMatch() {
   // unattributed result is still a valid result.
   if (form.value.games.some((g) => g.participants.some((p) => p.heroId === 0))) {
     error.value = 'Every game needs a hero selected for both sides'
+    return
+  }
+  // The server rejects this too (NOT_EXACTLY_ONE_WINNER) — caught here so an
+  // untouched winner radio reads as a prompt rather than a 422.
+  if (form.value.games.some((g) => g.participants.filter((p) => p.isWinner).length !== 1)) {
+    error.value = 'Every game needs exactly one winner — a game cannot end in a draw'
     return
   }
 
@@ -351,9 +361,12 @@ onMounted(async () => {
             </div>
 
             <div class="flex flex-col gap-2">
+              <!-- A radio, not a checkbox: exactly one side wins each game, and
+                   there is no "neither" to express. -->
               <label class="flex cursor-pointer items-center gap-2 pt-5 font-mono text-xs text-ink">
                 <input
-                  type="checkbox"
+                  type="radio"
+                  :name="`game-${gameIndex}-winner`"
                   :checked="participant.isWinner"
                   @change="setWinner(gameIndex, participantIndex)"
                 />

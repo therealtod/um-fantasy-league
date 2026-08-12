@@ -66,7 +66,7 @@ describe('MatchResultWizard', () => {
     await wrapper.find('#game-0-hero-1').setValue('11')
     await wrapper.find('#game-0-health-0').setValue('12')
     await wrapper.find('#game-0-health-1').setValue('0')
-    await wrapper.findAll('input[type=checkbox]')[0]!.setValue()
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
 
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
@@ -81,6 +81,51 @@ describe('MatchResultWizard', () => {
             participants: [
               expect.objectContaining({ heroId: 10, healthRemaining: 12, isWinner: true }),
               expect.objectContaining({ heroId: 11, healthRemaining: 0, isWinner: false }),
+            ],
+          }),
+        ],
+      }),
+    )
+  })
+
+  it('refuses to save a game with no winner picked, rather than posting a draw', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    // Winner left untouched — the server would reject this as NOT_EXACTLY_ONE_WINNER.
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('cannot end in a draw')
+  })
+
+  it('moves the winner to the other side instead of ever having two', async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+
+    const winnerRadios = () => wrapper.findAll('input[type=radio]')
+    await winnerRadios()[0]!.setValue()
+    await winnerRadios()[1]!.setValue()
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        games: [
+          expect.objectContaining({
+            participants: [
+              expect.objectContaining({ heroId: 10, isWinner: false }),
+              expect.objectContaining({ heroId: 11, isWinner: true }),
             ],
           }),
         ],

@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useManagerStore } from '@/stores/manager'
 import { useStandingsStore } from '@/stores/standings'
 import { useTournamentsStore } from '@/stores/tournaments'
-import type { MetricColumn, TickerGame } from '@/api/types'
+import type { MetricColumn } from '@/api/types'
 
 const standings = useStandingsStore()
 const tournaments = useTournamentsStore()
@@ -55,11 +55,6 @@ function metricClass(value: number, column: MetricColumn) {
   return 'text-lime'
 }
 
-/** A game with no winner is a timed draw. */
-function separator(game: TickerGame) {
-  return game.sides.some((side) => side.isWinner) ? 'def' : 'vs'
-}
-
 const currentTournament = computed(() =>
   standings.tournamentId === null ? null : tournaments.byId(standings.tournamentId),
 )
@@ -85,7 +80,8 @@ const currentTournament = computed(() =>
                 <span v-if="gameIndex > 0" class="mx-1.5 text-ink-dim">|</span>
                 <span v-if="entry.games.length > 1" class="text-ink-dim">G{{ game.gameNumber }}</span>
                 <template v-for="(side, sideIndex) in game.sides" :key="side.heroName">
-                  <span v-if="sideIndex > 0" class="mx-1 text-ink-dim">{{ separator(game) }}</span>
+                  <!-- Sides come winner-first and every game has one, so this always reads "winner def loser". -->
+                  <span v-if="sideIndex > 0" class="mx-1 text-ink-dim">def</span>
                   <span
                     class="font-bold uppercase"
                     :class="side.isWinner ? 'text-ink' : 'text-ink-muted'"

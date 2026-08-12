@@ -25,8 +25,12 @@ enum class MatchRule {
     /** A banned hero was also played, somewhere in the series. */
     BANNED_HERO_PLAYED,
 
-    /** More than one side of a game is flagged as the winner. */
-    MULTIPLE_WINNERS,
+    /**
+     * One or more games are not flagged with exactly one winner. Every game is
+     * played to a decision — there is no draw in this league, so zero winners
+     * is as wrong as two.
+     */
+    NOT_EXACTLY_ONE_WINNER,
 
     /** A `heroId` referenced by a game participant or a ban does not exist. */
     UNKNOWN_HERO,
@@ -151,15 +155,14 @@ object MatchResultPolicy {
             )
         }
 
-        // Zero winners is the legitimate timed-draw case — only more than one is a violation.
-        val multiWinnerGames = games.filter { game -> game.participants.count { it.isWinner } > 1 }
+        val undecidedGames = games.filter { game -> game.participants.count { it.isWinner } != 1 }
             .map { it.gameNumber }.sorted()
-        if (multiWinnerGames.isNotEmpty()) {
+        if (undecidedGames.isNotEmpty()) {
             add(
                 MatchViolation(
-                    MatchRule.MULTIPLE_WINNERS,
-                    "Game(s) $multiWinnerGames have more than one side flagged as the winner " +
-                        "(a timed draw has zero).",
+                    MatchRule.NOT_EXACTLY_ONE_WINNER,
+                    "Game(s) $undecidedGames do not have exactly one winner. Every game is " +
+                        "played to a decision, so a game with no winner is as invalid as one with two.",
                 )
             )
         }

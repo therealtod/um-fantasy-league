@@ -151,13 +151,13 @@ describe('ScoringRuleSetWizard', () => {
     await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Coefficient')!.trigger('click')
     await wrapper.find('#metric-0').setValue('WIN')
     await wrapper.find('#metric-1').setValue('LOSS')
-    await wrapper.find('#metric-2').setValue('DRAW')
+    await wrapper.find('#metric-2').setValue('SHUTOUT')
     expect((wrapper.find('#sort-2').element as HTMLInputElement).value).toBe('2')
 
     // Removing the middle row closes the gap rather than leaving 0, 2.
     await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === 'Remove')[1]!.trigger('click')
 
-    expect((wrapper.find('#metric-1').element as HTMLInputElement).value).toBe('DRAW')
+    expect((wrapper.find('#metric-1').element as HTMLInputElement).value).toBe('SHUTOUT')
     expect((wrapper.find('#sort-1').element as HTMLInputElement).value).toBe('1')
     expect(wrapper.find('#metric-2').exists()).toBe(false)
 
@@ -168,7 +168,7 @@ describe('ScoringRuleSetWizard', () => {
       name: 'Three Rows',
       coefficients: [
         { metric: 'WIN', coefficient: 1, sortOrder: 0 },
-        { metric: 'DRAW', coefficient: 1, sortOrder: 1 },
+        { metric: 'SHUTOUT', coefficient: 1, sortOrder: 1 },
       ],
       activate: false,
     })

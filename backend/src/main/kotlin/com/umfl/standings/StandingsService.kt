@@ -60,7 +60,7 @@ data class TickerGameSide(
 data class TickerGame(
     val gameNumber: Int,
     val mapName: String,
-    /** Winner first. A timed draw has no winner at all. */
+    /** Winner first — every game has one, so this is always winner then loser. */
     val sides: List<TickerGameSide>,
 )
 

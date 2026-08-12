@@ -38,7 +38,7 @@ class MatchResultPolicyTest {
     }
 
     @Test
-    fun `a game with no winner is legal - a timed draw has zero, not more than one`() {
+    fun `a game with no winner is rejected - every game is played to a decision`() {
         val violations = MatchResultPolicy.validate(
             validMapIds = validMaps,
             validHeroIds = validHeroes,
@@ -47,7 +47,8 @@ class MatchResultPolicyTest {
             bans = emptyList(),
         )
 
-        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+        assertEquals(listOf(MatchRule.NOT_EXACTLY_ONE_WINNER), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("[1]"))
     }
 
     @Test
@@ -245,7 +246,7 @@ class MatchResultPolicyTest {
             bans = emptyList(),
         )
 
-        assertEquals(listOf(MatchRule.MULTIPLE_WINNERS), violations.map { it.rule })
+        assertEquals(listOf(MatchRule.NOT_EXACTLY_ONE_WINNER), violations.map { it.rule })
         assertTrue(violations.single().message.contains("[1]"))
     }
 
@@ -317,7 +318,7 @@ class MatchResultPolicyTest {
             setOf(
                 MatchRule.MAP_NOT_IN_POOL,
                 MatchRule.DUPLICATE_HERO,
-                MatchRule.MULTIPLE_WINNERS,
+                MatchRule.NOT_EXACTLY_ONE_WINNER,
             ),
             violations.map { it.rule }.toSet(),
         )

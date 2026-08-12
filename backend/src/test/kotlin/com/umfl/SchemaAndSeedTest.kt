@@ -249,25 +249,29 @@ class SchemaAndSeedTest @Autowired constructor(
     }
 
     @Test
-    fun `at most one side wins a game, and one game has no winner at all`() {
-        // Grouped by (game id, match id): a game's own bigserial id is what the
-        // partial unique index actually constrains, but match_id is what identifies
-        // the timed draw below -- match_game.id isn't guaranteed to line up with it.
+    fun `exactly one side wins every seeded game`() {
         val winnersPerGame = jdbcClient
             .sql(
                 """
-                select mg.id, mg.match_id, count(*) filter (where mgp.is_winner) as winners
+                select mg.id, count(*) filter (where mgp.is_winner) as winners
                 from match_game mg
                     join match_game_participant mgp on mgp.game_id = mg.id
-                group by mg.id, mg.match_id
+                group by mg.id
                 order by mg.id
                 """
             )
-            .query { rs, _ -> Triple(rs.getLong("id"), rs.getLong("match_id"), rs.getInt("winners")) }
+            .query { rs, _ -> rs.getLong("id") to rs.getInt("winners") }
             .list()
 
-        assertTrue(winnersPerGame.all { it.third <= 1 }, "the partial unique index should make this impossible")
-        assertEquals(listOf(11L), winnersPerGame.filter { it.third == 0 }.map { it.second }, "the timed draw")
+        // Two winners is stopped by the partial unique index; zero is stopped only
+        // by MatchResultPolicy, which the seed SQL bypasses -- so the seed's own
+        // conformance to "every game is played to a decision" is asserted here.
+        assertTrue(winnersPerGame.all { it.second <= 1 }, "the partial unique index should make this impossible")
+        assertEquals(
+            emptyList(),
+            winnersPerGame.filter { it.second != 1 }.map { it.first },
+            "every game has exactly one winner",
+        )
     }
 
     @Test

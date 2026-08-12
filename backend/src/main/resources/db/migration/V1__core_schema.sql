@@ -294,8 +294,10 @@ create table match_game (
 -- One side's result in one game: the hero it brought and how it ended.
 --
 -- `health_remaining` is the survivor's health at the end, 0 for a defeated
--- hero. A timed draw is represented by no participant having `is_winner` --
--- both sides can be alive with unequal health.
+-- hero. Exactly one side of a game carries `is_winner` -- a game always has
+-- a winner, enforced in MatchResultPolicy (NOT_EXACTLY_ONE_WINNER) rather
+-- than here, since a partial unique index could pin "at most one" but not
+-- "at least one".
 --
 -- `unique (game_id, hero_id)` is unambiguous here precisely because banned
 -- heroes live in `hero_ban` and never appear as a game participant.
@@ -703,8 +705,8 @@ from (values
     join game_map m on m.name = v.map_name;
 
 -- Match 6 is the SHUTOUT: Bigfoot finishes on 11 health, Beowulf on 0.
--- Match 11 is the TIMED DRAW: neither side is_winner, both still alive on
--- unequal health (7 vs 5), so HEALTH_DIFFERENTIAL is non-zero with no WIN.
+-- Match 11 is won on health with both heroes still alive (7 vs 5) -- there is
+-- no drawn result to seed, see match_game_participant's comment.
 insert into match_game_participant (game_id, side, hero_id, health_remaining, is_winner)
 select mg.id, v.side, h.id, v.health_remaining, v.is_winner
 from (values
@@ -729,8 +731,7 @@ from (values
     ( 9, 1, 'Achilles',         5, false),
     (10, 0, 'Beowulf',          8, true),
     (10, 1, 'Bigfoot',          4, false),
-    -- timed draw
-    (11, 0, 'Sherlock Holmes',  7, false),
+    (11, 0, 'Sherlock Holmes',  7, true),
     (11, 1, 'Dracula',          5, false),
     (12, 0, 'Yennenga',         9, true),
     (12, 1, 'Sinbad',           3, false)
