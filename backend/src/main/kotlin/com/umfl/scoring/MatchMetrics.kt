@@ -1,5 +1,6 @@
 package com.umfl.scoring
 
+import com.umfl.match.BanType
 import com.umfl.match.GameParticipantResult
 import com.umfl.match.GameResult
 import com.umfl.match.MatchResult
@@ -19,9 +20,9 @@ sealed interface HeroRole {
  * One hero's role in one match, with the whole match still visible.
  *
  * The extractors need more than a participant row: `HEALTH_DIFFERENTIAL` needs
- * the opponent, and `BAN` has no participant row at all. WIN and LOSS are
- * scoped per game rather than per series — a hero that takes game 1 and drops
- * game 2 scores one of each.
+ * the opponent, and `SELF_BAN`/`OPPONENT_BAN` have no participant row at all --
+ * they read `match.bans` instead. WIN and LOSS are scoped per game rather than
+ * per series — a hero that takes game 1 and drops game 2 scores one of each.
  */
 data class MetricContext(
     val match: MatchResult,
@@ -51,7 +52,8 @@ object MatchMetrics {
 
     private val extractors: Map<String, (MetricContext) -> Double> = linkedMapOf(
         "APPEARANCE" to ::appearance,
-        "BAN" to ::ban,
+        "SELF_BAN" to ::selfBan,
+        "OPPONENT_BAN" to ::opponentBan,
         "WIN" to ::win,
         "LOSS" to ::loss,
         "HEALTH_REMAINING" to ::healthRemaining,
@@ -87,8 +89,27 @@ object MatchMetrics {
 private fun appearance(context: MetricContext): Double =
     if (context.role is HeroRole.Played) 1.0 else 0.0
 
-private fun ban(context: MetricContext): Double =
-    if (context.role is HeroRole.Banned) 1.0 else 0.0
+/**
+ * A hero its own side banned out. `HeroRole.Banned` stays a bare marker (see
+ * the class doc); only these two extractors look past it into the match's
+ * `bans` to see which category applied.
+ */
+private fun selfBan(context: MetricContext): Double {
+    if (context.role !is HeroRole.Banned) return 0.0
+    val banType = context.match.bans.firstOrNull { it.heroId == context.heroId }?.banType
+    return if (banType == BanType.SELF_BAN) 1.0 else 0.0
+}
+
+/**
+ * A hero the opposing side banned out. `PRE_BAN` -- struck before sides are
+ * known -- is priced by neither this nor [selfBan]: nobody chose to deny it
+ * to a particular opponent.
+ */
+private fun opponentBan(context: MetricContext): Double {
+    if (context.role !is HeroRole.Banned) return 0.0
+    val banType = context.match.bans.firstOrNull { it.heroId == context.heroId }?.banType
+    return if (banType == BanType.OPPONENT_BAN) 1.0 else 0.0
+}
 
 private fun win(context: MetricContext): Double {
     val participant = context.participant ?: return 0.0
@@ -112,12 +133,14 @@ private fun healthRemaining(context: MetricContext): Double =
     context.participant?.healthRemaining?.toDouble() ?: 0.0
 
 /**
- * This hero's health minus the healthiest opponent's. Symmetric in a two-sided
- * match: if one side is +4 the other is -4, so a differential coefficient
- * neither creates nor destroys points across a match.
+ * This hero's health minus the healthiest opponent's, in a game it won. Unlike
+ * [win]/[loss] this is not symmetric across the two sides -- a losing hero
+ * scores 0.0 here regardless of how much health it had left, since there is
+ * no losing side of this metric to price.
  */
 private fun healthDifferential(context: MetricContext): Double {
     val participant = context.participant ?: return 0.0
+    if (!participant.isWinner) return 0.0
     val best = context.opponents.maxOfOrNull { it.healthRemaining } ?: return 0.0
     return (participant.healthRemaining - best).toDouble()
 }

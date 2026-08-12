@@ -35,7 +35,8 @@ const tournaments = computed(() => tournamentsStore.tournaments)
  */
 const knownMetrics = [
   'APPEARANCE',
-  'BAN',
+  'SELF_BAN',
+  'OPPONENT_BAN',
   'WIN',
   'LOSS',
   'HEALTH_REMAINING',

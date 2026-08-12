@@ -598,9 +598,10 @@ from scoring_rule_set rs
         ('HEALTH_REMAINING',    0.7500, 1),
         ('HEALTH_DIFFERENTIAL', 0.5000, 2),
         ('SHUTOUT',             3.0000, 3),
-        ('BAN',                 2.0000, 4),
-        ('APPEARANCE',          1.0000, 5),
-        ('CROWD_FAVOURITE',     5.0000, 6)
+        ('SELF_BAN',            2.0000, 4),
+        ('OPPONENT_BAN',        2.0000, 5),
+        ('APPEARANCE',          1.0000, 6),
+        ('CROWD_FAVOURITE',     5.0000, 7)
     ) as v(metric, coefficient, sort_order);
 
 -- ---------------------------------------------------------------------------
@@ -755,9 +756,9 @@ from (values
 -- One or two bans per match, never naming a hero that then played it. Heroes
 -- on the seeded rosters (Bigfoot, Beowulf, Alice, Robin Hood, Sherlock
 -- Holmes, Dracula, King Arthur, Yennenga, Sun Wukong) are all banned
--- somewhere, so the BAN metric has real work to do. `ban_type` here is
--- illustrative fixture data, not a rule the schema enforces -- nothing links
--- the category distribution to `tournament.format`.
+-- somewhere, so the SELF_BAN/OPPONENT_BAN metrics have real work to do.
+-- `ban_type` here is illustrative fixture data, not a rule the schema
+-- enforces -- nothing links the category distribution to `tournament.format`.
 insert into hero_ban (match_id, hero_id, ban_type)
 select v.match_id, h.id, v.ban_type
 from (values

@@ -25,8 +25,8 @@ import kotlin.test.assertTrue
  * hand-verified end to end; the rest follow from the same weights.
  *
  * Weights (`Season 2026 Standard`): WIN 10, HEALTH_REMAINING 0.75,
- * HEALTH_DIFFERENTIAL 0.5, SHUTOUT 3, BAN 2, APPEARANCE 1 — plus the
- * deliberately unimplemented CROWD_FAVOURITE 5.
+ * HEALTH_DIFFERENTIAL 0.5, SHUTOUT 3, SELF_BAN 2, OPPONENT_BAN 2, APPEARANCE 1
+ * — plus the deliberately unimplemented CROWD_FAVOURITE 5.
  */
 class StandingsIntegrationTest @Autowired constructor(
     private val standingsService: StandingsService,
@@ -55,15 +55,21 @@ class StandingsIntegrationTest @Autowired constructor(
         assertEquals("Season 2026 Standard", board.ruleSetName)
         assertEquals(3, board.currentRound)
         assertEquals(
-            listOf("WIN", "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT", "BAN", "APPEARANCE"),
+            listOf(
+                "WIN", "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT",
+                "SELF_BAN", "OPPONENT_BAN", "APPEARANCE",
+            ),
             board.metrics.map { it.metric },
             "column order is sort_order, which only the database knows",
         )
         assertEquals(
-            listOf("Win", "Health Remaining", "Health Differential", "Shutout", "Ban", "Appearance"),
+            listOf(
+                "Win", "Health Remaining", "Health Differential", "Shutout",
+                "Self Ban", "Opponent Ban", "Appearance",
+            ),
             board.metrics.map { it.label },
         )
-        assertEquals(listOf(10.0, 0.75, 0.5, 3.0, 2.0, 1.0), board.metrics.map { it.coefficient })
+        assertEquals(listOf(10.0, 0.75, 0.5, 3.0, 2.0, 2.0, 1.0), board.metrics.map { it.coefficient })
     }
 
     @Test
@@ -95,10 +101,10 @@ class StandingsIntegrationTest @Autowired constructor(
 
         assertEquals(
             listOf(
-                "ArthurianLegend" to 98.00,
-                "NeonStrategist" to 72.25,
-                "SherlockMain" to 68.00,
-                "MythicMind" to 51.50,
+                "ArthurianLegend" to 100.00,
+                "NeonStrategist" to 79.75,
+                "SherlockMain" to 76.50,
+                "MythicMind" to 61.00,
             ),
             board.rows.map { it.handle to it.totalPoints },
         )
@@ -108,17 +114,22 @@ class StandingsIntegrationTest @Autowired constructor(
     /**
      * The row worked out by hand, metric by metric.
      *
-     * King Arthur — m3 loss (HR 0, HD (0-5)x0.5=-2.50, APP 1.00);
+     * HEALTH_DIFFERENTIAL is win-gated, so a loss or a shutout-taken contributes
+     * 0.00 rather than a negative term; SELF_BAN/OPPONENT_BAN only price a ban
+     * of that specific category, so a `PRE_BAN` (struck before sides are known)
+     * contributes to neither.
+     *
+     * King Arthur — m3 loss (HR 0, HD 0 [not a win], APP 1.00);
      *   m8 win (WIN 10, HR 10x0.75=7.50, HD (10-0)x0.5=5.00, SHUTOUT 3.00, APP 1.00);
-     *   m12 banned (BAN 2.00).
+     *   m12 PRE_BAN (unpriced).
      * Yennenga — m3 win (WIN 10, HR 3.75, HD 2.50, SHUTOUT 3.00, APP 1.00);
-     *   m11 banned (BAN 2.00); m12 win (WIN 10, HR 6.75, HD 4.50, SHUTOUT 3.00, APP 1.00).
-     * Beowulf — m3 banned (BAN 2.00); m6 shut out (HR 0, HD (0-11)x0.5=-5.50,
-     *   APP 1.00); m8 banned (BAN 2.00); m10 win (WIN 10, HR 6.00, HD 4.00,
+     *   m11 OPPONENT_BAN (OPPONENT_BAN 2.00); m12 win (WIN 10, HR 6.75, HD 4.50, SHUTOUT 3.00, APP 1.00).
+     * Beowulf — m3 PRE_BAN (unpriced); m6 shut out (HR 0, HD 0 [not a win],
+     *   APP 1.00); m8 PRE_BAN (unpriced); m10 win (WIN 10, HR 6.00, HD 4.00,
      *   SHUTOUT 3.00, APP 1.00).
      *
-     * WIN 40.00 + HEALTH_REMAINING 24.00 + HEALTH_DIFFERENTIAL 8.00
-     *   + SHUTOUT 12.00 + BAN 8.00 + APPEARANCE 6.00 = 98.00
+     * WIN 40.00 + HEALTH_REMAINING 24.00 + HEALTH_DIFFERENTIAL 16.00
+     *   + SHUTOUT 12.00 + SELF_BAN 0.00 + OPPONENT_BAN 2.00 + APPEARANCE 6.00 = 100.00
      */
     @Test
     fun `the winning row adds up metric by metric`() {
@@ -132,14 +143,15 @@ class StandingsIntegrationTest @Autowired constructor(
             mapOf(
                 "WIN" to 40.0,
                 "HEALTH_REMAINING" to 24.0,
-                "HEALTH_DIFFERENTIAL" to 8.0,
+                "HEALTH_DIFFERENTIAL" to 16.0,
                 "SHUTOUT" to 12.0,
-                "BAN" to 8.0,
+                "SELF_BAN" to 0.0,
+                "OPPONENT_BAN" to 2.0,
                 "APPEARANCE" to 6.0,
             ),
             arthurian.breakdown,
         )
-        assertEquals(98.0, arthurian.totalPoints)
+        assertEquals(100.0, arthurian.totalPoints)
     }
 
     /** Every 0-health opponent awards SHUTOUT points to the winner's drafters. */
@@ -176,10 +188,10 @@ class StandingsIntegrationTest @Autowired constructor(
 
         assertEquals(
             listOf(
-                "ArthurianLegend" to 53.25,
+                "ArthurianLegend" to 51.25,
                 "NeonStrategist" to 3.00,
-                "SherlockMain" to 44.25,
-                "MythicMind" to -2.50,
+                "SherlockMain" to 47.75,
+                "MythicMind" to 4.00,
             ),
             board.rows.map { it.handle to it.roundPoints },
         )
@@ -239,7 +251,7 @@ class StandingsIntegrationTest @Autowired constructor(
         assertEquals(0, board.currentRound)
         assertEquals(1, board.rows.size)
         assertEquals(0.0, board.rows.single().totalPoints)
-        assertEquals(6, board.metrics.size, "the columns exist even before a single match is played")
+        assertEquals(7, board.metrics.size, "the columns exist even before a single match is played")
     }
 
     @Test
@@ -299,8 +311,9 @@ class StandingsIntegrationTest @Autowired constructor(
         assertEquals(listOf("Aurelie Blanc", "Miles Ashworth"), game.sides.map { it.playerLabel })
         assertEquals(listOf(true, false), game.sides.map { it.isWinner })
         assertEquals(listOf(11, 0), game.sides.map { it.healthRemaining })
-        // 10 + 8.25 + 5.50 + 3 + 1 = 27.75 against 0 + (-5.50) + 1 = -4.50.
-        assertEquals(listOf(27.75, -4.5), game.sides.map { it.points })
+        // 10 + 8.25 + 5.50 + 3 + 1 = 27.75 against 0 + 1 = 1.00
+        // (HEALTH_DIFFERENTIAL is win-gated, so the losing side scores none of it).
+        assertEquals(listOf(27.75, 1.0), game.sides.map { it.points })
         assertEquals(listOf("Sun Wukong"), shutout.bannedHeroNames)
     }
 
@@ -312,9 +325,10 @@ class StandingsIntegrationTest @Autowired constructor(
         assertEquals(listOf("Sherlock Holmes", "Dracula"), game.sides.map { it.heroName })
         assertEquals(listOf(true, false), game.sides.map { it.isWinner })
         assertEquals(listOf(7, 0), game.sides.map { it.healthRemaining })
-        // 10 + 5.25 + 3.5 + 3 + 1 = 22.75 against (-3.5) + 1 = -2.5, LOSS being unpriced in the seed.
+        // 10 + 5.25 + 3.5 + 3 + 1 = 22.75 against 1.0, LOSS being unpriced in the
+        // seed and HEALTH_DIFFERENTIAL win-gated, so Dracula's loss earns only APPEARANCE.
         assertEquals(
-            mapOf("Sherlock Holmes" to 22.75, "Dracula" to -2.5),
+            mapOf("Sherlock Holmes" to 22.75, "Dracula" to 1.0),
             game.sides.associate { it.heroName to it.points },
         )
         assertEquals(listOf("Medusa", "Yennenga"), decisiveMatch.bannedHeroNames)
@@ -341,10 +355,10 @@ class StandingsIntegrationTest @Autowired constructor(
         assertTrue(board.rows.all { "Medusa" !in it.roster && "Achilles" !in it.roster })
         assertEquals(
             listOf(
-                "ArthurianLegend" to 98.00,
-                "NeonStrategist" to 72.25,
-                "SherlockMain" to 68.00,
-                "MythicMind" to 51.50,
+                "ArthurianLegend" to 100.00,
+                "NeonStrategist" to 79.75,
+                "SherlockMain" to 76.50,
+                "MythicMind" to 61.00,
             ),
             board.rows.map { it.handle to it.totalPoints },
         )

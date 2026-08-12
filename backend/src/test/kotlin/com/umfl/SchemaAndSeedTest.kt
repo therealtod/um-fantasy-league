@@ -46,7 +46,7 @@ class SchemaAndSeedTest @Autowired constructor(
         assertEquals(4, count("tournament_entry"))
         assertEquals(12, count("entry_slot"), "4 entries x roster size 3")
         assertEquals(3, count("scoring_rule_set"))
-        assertEquals(21, count("scoring_coefficient"), "3 rule sets x 7 metrics")
+        assertEquals(24, count("scoring_coefficient"), "3 rule sets x 8 metrics")
         assertEquals(13, count("tournament_match"), "12 single-game matches + the Bo3 decider")
         assertEquals(26, count("match_participant"), "13 matches x 2 sides")
         assertEquals(15, count("match_game"), "12 single-game matches + the Bo3's 3 games")

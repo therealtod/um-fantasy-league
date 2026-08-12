@@ -176,15 +176,19 @@ Both return *all* violations at once so the UI can highlight every problem in on
 `UNKNOWN_HERO`, `BUDGET_EXCEEDED`.
 
 `MatchMetrics` is a registry keyed by the free-form `scoring_coefficient.metric` string. It
-implements `APPEARANCE`, `BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`, `HEALTH_DIFFERENTIAL`,
-`SHUTOUT`, and **silently ignores everything else** — unknown keys score zero, are dropped from the
-leaderboard's columns and throw nothing. The seed's `CROWD_FAVOURITE` is the deliberate proof of
-that; leave it unimplemented. There is deliberately no `DRAW`: every game has exactly one winner
-(see the invariant above), so `WIN` and `LOSS` are exhaustive within a game and a `DRAW`
-column would price something that cannot be recorded. Extractors take a `MetricContext` (the hero's
-role in *one game* of one match), not a bare participant row, because `HEALTH_DIFFERENTIAL` needs
-the opponent and `BAN` has no participant row at all. `WIN`/`LOSS` are scored per game, not per
-series, so a hero that takes game 1 and drops game 2 of a Bo3 collects one of each.
+implements `APPEARANCE`, `SELF_BAN`, `OPPONENT_BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`,
+`HEALTH_DIFFERENTIAL`, `SHUTOUT`, and **silently ignores everything else** — unknown keys score
+zero, are dropped from the leaderboard's columns and throw nothing. The seed's `CROWD_FAVOURITE` is
+the deliberate proof of that; leave it unimplemented. There is deliberately no `DRAW`: every game
+has exactly one winner (see the invariant above), so `WIN` and `LOSS` are exhaustive within a game
+and a `DRAW` column would price something that cannot be recorded. Extractors take a `MetricContext`
+(the hero's role in *one game* of one match), not a bare participant row, because
+`HEALTH_DIFFERENTIAL` needs the opponent and `SELF_BAN`/`OPPONENT_BAN` have no participant row at
+all — they read `hero_ban.ban_type` off the match instead, so a hero banned `PRE_BAN` (struck before
+sides are known) scores neither. `HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not win
+the game scores 0.0 rather than a negative differential, since there is no losing side of that
+metric to price. `WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and
+drops game 2 of a Bo3 collects one of each.
 
 `StandingsService` returns a `StandingsBoard` that carries its own `metrics` column definitions —
 the backend cannot know the columns until it reads `scoring_coefficient`. Ranking is standard

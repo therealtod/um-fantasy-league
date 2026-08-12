@@ -34,12 +34,13 @@ class ScoringEngineTest {
         "HEALTH_REMAINING" to "0.7500",
         "HEALTH_DIFFERENTIAL" to "0.5000",
         "SHUTOUT" to "3.0000",
-        "BAN" to "2.0000",
+        "SELF_BAN" to "2.0000",
+        "OPPONENT_BAN" to "2.0000",
         "APPEARANCE" to "1.0000",
         "CROWD_FAVOURITE" to "5.0000",
     )
 
-    /** Match 6 of the seed: Bigfoot 11 shuts out Beowulf 0, Sun Wukong banned. */
+    /** Match 6 of the seed: Bigfoot 11 shuts out Beowulf 0, Sun Wukong opponent-banned. */
     private val match = MatchResult(
         matchId = 6,
         tournamentId = 1,
@@ -62,7 +63,7 @@ class ScoringEngineTest {
                 ),
             ),
         ),
-        bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.PRE_BAN)),
+        bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.OPPONENT_BAN)),
     )
 
     private fun contextFor(heroId: Long) = match.heroContexts().single { it.heroId == heroId }
@@ -106,7 +107,10 @@ class ScoringEngineTest {
     @Test
     fun `scored metrics keep their configured column order`() {
         assertEquals(
-            listOf("WIN", "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT", "BAN", "APPEARANCE"),
+            listOf(
+                "WIN", "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT",
+                "SELF_BAN", "OPPONENT_BAN", "APPEARANCE",
+            ),
             standard.scoredMetrics,
         )
     }
@@ -125,17 +129,18 @@ class ScoringEngineTest {
     fun `a metric the hero did not earn is absent, not zero`() {
         val breakdown = ScoringEngine.breakdown(contextFor(11), standard)
 
-        assertEquals(mapOf("APPEARANCE" to 1.0, "HEALTH_DIFFERENTIAL" to -5.5), breakdown)
+        assertEquals(mapOf("APPEARANCE" to 1.0), breakdown)
         assertFalse("WIN" in breakdown)
         assertFalse("SHUTOUT" in breakdown)
         assertFalse("HEALTH_REMAINING" in breakdown, "zero health times any weight is still zero")
+        assertFalse("HEALTH_DIFFERENTIAL" in breakdown, "the losing side has no differential to price")
     }
 
     @Test
     fun `a banned hero scores only its ban`() {
         val breakdown = ScoringEngine.breakdown(contextFor(8), standard)
 
-        assertEquals(mapOf("BAN" to 2.0), breakdown)
+        assertEquals(mapOf("OPPONENT_BAN" to 2.0), breakdown)
         assertEquals(2.0, ScoringEngine.score(contextFor(8), standard))
     }
 
@@ -143,8 +148,8 @@ class ScoringEngineTest {
     fun `negative coefficients are legitimate penalties`() {
         val penalised = rules("HEALTH_DIFFERENTIAL" to "0.5000", "LOSS" to "-6.0000")
 
-        assertEquals(mapOf("HEALTH_DIFFERENTIAL" to -5.5, "LOSS" to -6.0), ScoringEngine.breakdown(contextFor(11), penalised))
-        assertEquals(-11.5, ScoringEngine.score(contextFor(11), penalised))
+        assertEquals(mapOf("LOSS" to -6.0), ScoringEngine.breakdown(contextFor(11), penalised))
+        assertEquals(-6.0, ScoringEngine.score(contextFor(11), penalised))
     }
 
     @Test

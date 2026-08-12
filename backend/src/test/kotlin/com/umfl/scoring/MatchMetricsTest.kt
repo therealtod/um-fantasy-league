@@ -75,6 +75,18 @@ class MatchMetricsTest {
         ),
     )
 
+    /** A fixture with one of each ban category, to tell SELF_BAN/OPPONENT_BAN apart. */
+    private val banVarietyMatch = match(
+        listOf(
+            gameParticipant(side = 0, heroId = 1, heroName = "Alice", health = 5, isWinner = true),
+            gameParticipant(side = 1, heroId = 2, heroName = "Medusa", health = 0),
+        ),
+        bans = listOf(
+            BanResult(heroId = 20, heroName = "Invisible Man", banType = BanType.SELF_BAN),
+            BanResult(heroId = 21, heroName = "Robin Hood", banType = BanType.OPPONENT_BAN),
+        ),
+    )
+
     private fun contextFor(match: MatchResult, heroId: Long): MetricContext =
         assertNotNull(match.heroContexts().singleOrNull { it.heroId == heroId }, "no unique context for hero $heroId")
 
@@ -90,7 +102,7 @@ class MatchMetricsTest {
         fun `every advertised metric resolves to an extractor`() {
             assertEquals(
                 setOf(
-                    "APPEARANCE", "BAN", "WIN", "LOSS",
+                    "APPEARANCE", "SELF_BAN", "OPPONENT_BAN", "WIN", "LOSS",
                     "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT",
                 ),
                 MatchMetrics.known,
@@ -107,7 +119,7 @@ class MatchMetricsTest {
         fun `unknown catches a typo and leaves the real keys alone`() {
             assertEquals(
                 listOf("HEALTH_REMAINNG", "CROWD_FAVOURITE"),
-                MatchMetrics.unknown(listOf("WIN", "HEALTH_REMAINNG", "BAN", "CROWD_FAVOURITE")),
+                MatchMetrics.unknown(listOf("WIN", "HEALTH_REMAINNG", "SELF_BAN", "CROWD_FAVOURITE")),
             )
         }
 
@@ -174,17 +186,16 @@ class MatchMetricsTest {
         }
 
         @Test
-        fun `HEALTH_DIFFERENTIAL is symmetric across the two sides`() {
+        fun `HEALTH_DIFFERENTIAL is won-gated -- only the winner scores it`() {
             val sherlock = measure("HEALTH_DIFFERENTIAL", contextFor(decisiveMatch, 5))
             val dracula = measure("HEALTH_DIFFERENTIAL", contextFor(decisiveMatch, 6))
 
             assertEquals(7.0, sherlock)
-            assertEquals(-7.0, dracula)
-            assertEquals(0.0, sherlock + dracula, "a differential must neither create nor destroy points")
+            assertEquals(0.0, dracula, "the losing side has no differential to price")
         }
 
         @Test
-        fun `HEALTH_DIFFERENTIAL measures against the healthiest opponent`() {
+        fun `HEALTH_DIFFERENTIAL measures the winner against the healthiest opponent`() {
             val threeWay = match(
                 listOf(
                     gameParticipant(side = 0, heroId = 1, heroName = "Alice", health = 6, isWinner = true),
@@ -194,8 +205,8 @@ class MatchMetricsTest {
             )
 
             assertEquals(2.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 1)))
-            assertEquals(-2.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 2)))
-            assertEquals(-6.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 3)))
+            assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 2)))
+            assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 3)))
         }
     }
 
@@ -242,10 +253,11 @@ class MatchMetricsTest {
     inner class Bans {
 
         @Test
-        fun `a banned hero earns BAN and nothing else`() {
+        fun `a pre-banned hero earns neither SELF_BAN nor OPPONENT_BAN`() {
             val sunWukong = contextFor(shutoutMatch, heroId = 8)
 
-            assertEquals(1.0, measure("BAN", sunWukong))
+            assertEquals(0.0, measure("SELF_BAN", sunWukong))
+            assertEquals(0.0, measure("OPPONENT_BAN", sunWukong))
             assertEquals(0.0, measure("APPEARANCE", sunWukong))
             assertEquals(0.0, measure("WIN", sunWukong))
             assertEquals(0.0, measure("LOSS", sunWukong))
@@ -255,11 +267,30 @@ class MatchMetricsTest {
         }
 
         @Test
-        fun `a hero that played earns APPEARANCE and never BAN`() {
+        fun `a self-banned hero earns SELF_BAN and nothing else`() {
+            val invisibleMan = contextFor(banVarietyMatch, heroId = 20)
+
+            assertEquals(1.0, measure("SELF_BAN", invisibleMan))
+            assertEquals(0.0, measure("OPPONENT_BAN", invisibleMan))
+            assertEquals(0.0, measure("APPEARANCE", invisibleMan))
+        }
+
+        @Test
+        fun `an opponent-banned hero earns OPPONENT_BAN and nothing else`() {
+            val robinHood = contextFor(banVarietyMatch, heroId = 21)
+
+            assertEquals(1.0, measure("OPPONENT_BAN", robinHood))
+            assertEquals(0.0, measure("SELF_BAN", robinHood))
+            assertEquals(0.0, measure("APPEARANCE", robinHood))
+        }
+
+        @Test
+        fun `a hero that played earns APPEARANCE and never SELF_BAN or OPPONENT_BAN`() {
             val bigfoot = contextFor(shutoutMatch, heroId = 7)
 
             assertEquals(1.0, measure("APPEARANCE", bigfoot))
-            assertEquals(0.0, measure("BAN", bigfoot))
+            assertEquals(0.0, measure("SELF_BAN", bigfoot))
+            assertEquals(0.0, measure("OPPONENT_BAN", bigfoot))
         }
 
         @Test
