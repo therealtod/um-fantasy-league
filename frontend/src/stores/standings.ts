@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import { openStandingsStream } from '@/api/sseClient'
 import type { StandingsBoard, TickerEntry } from '@/api/types'
 
@@ -51,7 +51,7 @@ export const useStandingsStore = defineStore('standings', () => {
       ticker.value = matches
     } catch (e) {
       if (tournamentId.value !== id) return
-      error.value = e instanceof Error ? e.message : 'Could not load standings'
+      error.value = describeError(e, 'Could not load standings')
     } finally {
       if (tournamentId.value === id) loading.value = false
     }

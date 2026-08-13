@@ -14,6 +14,7 @@ vi.mock('@/api/client', () => ({
       updateHero: (...args: unknown[]) => updateHero(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 const heroes: HeroAdminDto[] = [

@@ -16,6 +16,7 @@ vi.mock('@/api/client', () => ({
       activateScoringRuleSet: (...args: unknown[]) => activateScoringRuleSet(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 vi.mock('@/stores/tournaments', () => ({

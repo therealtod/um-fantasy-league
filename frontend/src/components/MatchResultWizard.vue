@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { BanType, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -119,7 +119,7 @@ async function loadMatchData() {
       bans: matchData.bans.map((b) => ({ heroId: b.heroId, banType: b.banType })),
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load match data'
+    error.value = describeError(e, 'Failed to load match data')
   } finally {
     loading.value = false
   }
@@ -210,7 +210,7 @@ async function saveMatch() {
     }
     emit('success')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to save match'
+    error.value = describeError(e, 'Failed to save match')
   } finally {
     loading.value = false
   }
@@ -231,7 +231,7 @@ onMounted(async () => {
       resetForm()
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load map and hero pools'
+    error.value = describeError(e, 'Failed to load map and hero pools')
   } finally {
     loading.value = false
   }

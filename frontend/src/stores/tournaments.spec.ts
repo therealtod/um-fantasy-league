@@ -5,6 +5,7 @@ import type { Tournament } from '@/api/types'
 vi.mock('@/api/client', () => ({
   api: { tournaments: vi.fn(), register: vi.fn() },
   ApiError: class extends Error {},
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 import { useTournamentsStore } from './tournaments'

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, ApiError } from '@/api/client'
+import { api, ApiError, describeError } from '@/api/client'
 import type { BudgetStatus, Hero, Roster, RosterViolation } from '@/api/types'
 import { budgetStatus as computeBudgetStatus } from '@/domain/rosterPolicy'
 import { useHeroesStore } from './heroes'
@@ -86,7 +86,7 @@ export const useRosterStore = defineStore('roster', () => {
         roster.value = null
         selectedIds.value = []
       } else {
-        error.value = e instanceof Error ? e.message : 'Could not load roster'
+        error.value = describeError(e, 'Could not load roster')
       }
     } finally {
       loading.value = false
@@ -101,7 +101,7 @@ export const useRosterStore = defineStore('roster', () => {
       adopt(await api.register(tournamentId.value))
       await tournamentsStore.load()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Registration failed'
+      error.value = describeError(e, 'Registration failed')
     } finally {
       saving.value = false
     }

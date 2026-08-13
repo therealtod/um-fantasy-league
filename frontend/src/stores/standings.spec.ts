@@ -5,6 +5,7 @@ import type { StandingsBoard, TickerEntry } from '@/api/types'
 vi.mock('@/api/client', () => ({
   api: { standings: vi.fn(), matches: vi.fn() },
   ApiError: class extends Error {},
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 vi.mock('@/api/sseClient', () => ({

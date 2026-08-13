@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import type { Manager } from '@/api/types'
 
 export const useManagerStore = defineStore('manager', () => {
@@ -14,7 +14,7 @@ export const useManagerStore = defineStore('manager', () => {
     try {
       manager.value = await api.me()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Could not load manager'
+      error.value = describeError(e, 'Could not load manager')
     } finally {
       loading.value = false
     }

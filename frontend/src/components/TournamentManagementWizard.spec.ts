@@ -15,6 +15,7 @@ vi.mock('@/api/client', () => ({
       deleteTournament: (...args: unknown[]) => deleteTournament(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 const tournaments: Tournament[] = [

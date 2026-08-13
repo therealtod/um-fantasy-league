@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import type { Hero, HeroSort } from '@/api/types'
 
 /**
@@ -31,7 +31,7 @@ export const useHeroesStore = defineStore('heroes', () => {
         search: search.value || undefined,
       })
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Could not load heroes'
+      error.value = describeError(e, 'Could not load heroes')
     } finally {
       loading.value = false
     }

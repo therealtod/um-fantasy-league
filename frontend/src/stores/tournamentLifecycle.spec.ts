@@ -15,6 +15,7 @@ vi.mock('@/api/client', () => ({
     status = 0
     violations: unknown[] = []
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 import { api } from '@/api/client'

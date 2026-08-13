@@ -1,6 +1,7 @@
 <script setup lang="ts" generic="TItem extends { id: number }, TForm extends { name: string }">
 import { shallowRef, ref, onMounted } from 'vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
+import { describeError } from '@/api/client'
 
 const props = defineProps<{
   entityLabel: string
@@ -30,7 +31,7 @@ async function loadItems() {
   try {
     items.value = await props.load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : `Failed to load ${props.entityLabel.toLowerCase()}s`
+    error.value = describeError(e, `Failed to load ${props.entityLabel.toLowerCase()}s`)
   } finally {
     loading.value = false
   }
@@ -73,7 +74,7 @@ async function save() {
     }
     cancelForm()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : `Failed to save ${props.entityLabel.toLowerCase()}`
+    error.value = describeError(e, `Failed to save ${props.entityLabel.toLowerCase()}`)
   } finally {
     loading.value = false
   }

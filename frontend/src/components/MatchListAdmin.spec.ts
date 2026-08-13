@@ -12,6 +12,7 @@ vi.mock('@/api/client', () => ({
       deleteMatch: (...args: unknown[]) => deleteMatch(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 const matches: MatchResultDto[] = [

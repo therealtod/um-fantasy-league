@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { MapAdminDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -35,7 +35,7 @@ async function loadMaps() {
   try {
     maps.value = await api.admin.listMaps()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load maps'
+    error.value = describeError(e, 'Failed to load maps')
   }
 }
 
@@ -43,7 +43,7 @@ async function loadMapPool(tournamentId: number) {
   try {
     mapPool.value = await api.admin.listMapPool(tournamentId)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load map pool'
+    error.value = describeError(e, 'Failed to load map pool')
   }
 }
 
@@ -69,7 +69,7 @@ async function submitBatch() {
     selectedMapIds.value = []
     await loadMapPool(selectedTournamentId.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to add maps to pool'
+    error.value = describeError(e, 'Failed to add maps to pool')
   } finally {
     loading.value = false
   }
@@ -96,7 +96,7 @@ async function confirmRemoveMap() {
     await loadMapPool(selectedTournamentId.value)
   } catch (e) {
     // A 409 here means the tournament already has a match recorded on this board.
-    error.value = e instanceof Error ? e.message : 'Failed to remove map from pool'
+    error.value = describeError(e, 'Failed to remove map from pool')
   } finally {
     loading.value = false
   }

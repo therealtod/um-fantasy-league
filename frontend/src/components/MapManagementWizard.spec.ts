@@ -14,6 +14,7 @@ vi.mock('@/api/client', () => ({
       updateMap: (...args: unknown[]) => updateMap(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 const maps: MapAdminDto[] = [

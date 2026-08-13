@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, ApiError } from '@/api/client'
+import { api, ApiError, describeError } from '@/api/client'
 import type { Tournament } from '@/api/types'
 
 export const useTournamentsStore = defineStore('tournaments', () => {
@@ -31,7 +31,7 @@ export const useTournamentsStore = defineStore('tournaments', () => {
     try {
       tournaments.value = await api.tournaments()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Could not load tournaments'
+      error.value = describeError(e, 'Could not load tournaments')
     } finally {
       loading.value = false
     }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { ScoringCoefficientRequest, ScoringRuleSetDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -82,7 +82,7 @@ async function loadRuleSets() {
   try {
     ruleSets.value = await api.admin.listScoringRuleSets(selectedTournamentId.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load scoring rule sets'
+    error.value = describeError(e, 'Failed to load scoring rule sets')
   } finally {
     loading.value = false
   }
@@ -198,7 +198,7 @@ async function saveRuleSet() {
       mergeRuleSet(saved)
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to save scoring rule set'
+    error.value = describeError(e, 'Failed to save scoring rule set')
   } finally {
     loading.value = false
   }
@@ -214,7 +214,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
     // Reload rather than patch: the previously active sibling was deactivated too.
     await loadRuleSets()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to activate scoring rule set'
+    error.value = describeError(e, 'Failed to activate scoring rule set')
   } finally {
     loading.value = false
   }

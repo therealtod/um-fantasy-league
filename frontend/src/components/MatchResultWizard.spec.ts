@@ -18,6 +18,7 @@ vi.mock('@/api/client', () => ({
       getMatch: (...args: unknown[]) => getMatch(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 vi.mock('@/stores/tournaments', () => ({

@@ -17,6 +17,7 @@ vi.mock('@/api/client', () => ({
       removeHeroFromPool: (...args: unknown[]) => removeHeroFromPool(...args),
     },
   },
+  describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
 }))
 
 vi.mock('@/stores/tournaments', () => ({

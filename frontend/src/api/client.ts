@@ -86,6 +86,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
+/**
+ * Renders a caught value to a display string, falling back to `fallback` for
+ * anything that isn't an `Error` (a thrown string, a rejected non-Error, …).
+ * Centralises the `e instanceof Error ? e.message : fallback` pattern that
+ * every store/wizard catch block otherwise repeats inline.
+ */
+export function describeError(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}
+
 function queryString(params: Record<string, string | number | undefined | null>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { Hero, HeroAdminDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -42,7 +42,7 @@ async function loadHeroes() {
   try {
     heroes.value = await api.admin.listHeroes()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load heroes'
+    error.value = describeError(e, 'Failed to load heroes')
   }
 }
 
@@ -63,7 +63,7 @@ async function loadHeroPool(tournamentId: number) {
   try {
     heroPoolHeroes.value = await api.admin.listHeroPool(tournamentId)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load hero pool'
+    error.value = describeError(e, 'Failed to load hero pool')
   } finally {
     loading.value = false
   }
@@ -113,7 +113,7 @@ async function submitBatch() {
     await loadHeroPool(selectedTournamentId.value)
     cancelAddForm()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to add heroes to pool'
+    error.value = describeError(e, 'Failed to add heroes to pool')
   } finally {
     loading.value = false
   }
@@ -142,7 +142,7 @@ async function updateHeroCost(heroId: number, newCost: number) {
     await api.admin.setHeroCost(selectedTournamentId.value, heroId, newCost)
     await loadHeroPool(selectedTournamentId.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to update hero cost'
+    error.value = describeError(e, 'Failed to update hero cost')
   } finally {
     loading.value = false
   }
@@ -168,7 +168,7 @@ async function confirmRemoveHero() {
     removingHero.value = null
     await loadHeroPool(selectedTournamentId.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to remove hero from pool'
+    error.value = describeError(e, 'Failed to remove hero from pool')
   } finally {
     loading.value = false
   }

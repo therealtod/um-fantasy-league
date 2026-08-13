@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type {
   Tournament,
@@ -104,7 +104,7 @@ async function confirmDelete() {
     await tournamentsStore.load() // Refresh the list
     cancelDelete()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to delete tournament'
+    error.value = describeError(e, 'Failed to delete tournament')
   } finally {
     loading.value = false
   }
@@ -132,7 +132,7 @@ async function saveTournament() {
     await tournamentsStore.load() // Refresh the list
     cancelForm()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to save tournament'
+    error.value = describeError(e, 'Failed to save tournament')
   } finally {
     loading.value = false
   }

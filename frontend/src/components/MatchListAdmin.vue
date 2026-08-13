@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type { BanType, MatchResultDto } from '@/api/types'
-import { api } from '@/api/client'
+import { api, describeError } from '@/api/client'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 
@@ -43,7 +43,7 @@ async function loadMatches() {
   try {
     matches.value = await api.admin.listMatches(props.tournamentId)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to load matches'
+    error.value = describeError(err, 'Failed to load matches')
   } finally {
     isLoading.value = false
   }
@@ -99,7 +99,7 @@ async function confirmDelete() {
     deletingMatch.value = null
     await loadMatches() // Refresh the list
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Failed to delete match'
+    error.value = describeError(err, 'Failed to delete match')
   } finally {
     isDeleting.value = false
   }
