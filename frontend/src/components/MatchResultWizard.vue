@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
+import { byName } from '@/lib/sort'
 import type { BanType, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
@@ -133,8 +134,8 @@ async function loadPools() {
     api.admin.listMapPool(tournamentId),
     api.admin.listHeroPool(tournamentId),
   ])
-  mapPool.value = maps
-  heroPool.value = heroes
+  mapPool.value = maps.sort(byName)
+  heroPool.value = heroes.sort(byName)
 }
 
 function addGame() {

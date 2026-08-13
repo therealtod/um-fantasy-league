@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
+import { byName } from '@/lib/sort'
 import type { Hero, HeroAdminDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
@@ -40,7 +41,7 @@ onMounted(() => {
 
 async function loadHeroes() {
   try {
-    heroes.value = await api.admin.listHeroes()
+    heroes.value = (await api.admin.listHeroes()).sort(byName)
   } catch (e) {
     error.value = describeError(e, 'Failed to load heroes')
   }

@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { api, describeError } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
+import { byName } from '@/lib/sort'
 import type { MapAdminDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
@@ -33,7 +34,7 @@ onMounted(() => {
 
 async function loadMaps() {
   try {
-    maps.value = await api.admin.listMaps()
+    maps.value = (await api.admin.listMaps()).sort(byName)
   } catch (e) {
     error.value = describeError(e, 'Failed to load maps')
   }
