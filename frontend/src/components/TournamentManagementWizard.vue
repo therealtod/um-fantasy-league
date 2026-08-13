@@ -17,20 +17,22 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const showForm = ref(false)
 const editingTournament = ref<Tournament | null>(null)
-const deletingTournamentId = ref<number | null>(null)
-const deletingTournamentName = ref<string>('')
-const showDeleteConfirm = ref(false)
+const deletingTournament = ref<Tournament | null>(null)
 
-const form = ref<CreateTournamentRequest>({
-  name: '',
-  format: 'BANQUEST',
-  status: 'SCHEDULED',
-  startDate: '',
-  endDate: null,
-  capacity: 64,
-  rosterSize: 3,
-  creditGrant: 10000,
-})
+function blankForm(): CreateTournamentRequest {
+  return {
+    name: '',
+    format: 'BANQUEST',
+    status: 'SCHEDULED',
+    startDate: '',
+    endDate: null,
+    capacity: 64,
+    rosterSize: 3,
+    creditGrant: 10000,
+  }
+}
+
+const form = ref<CreateTournamentRequest>(blankForm())
 
 const formatOptions: { value: TournamentFormat; label: string }[] = [
   { value: 'BANQUEST', label: 'Banquest' },
@@ -48,16 +50,7 @@ const tournaments = computed(() => tournamentsStore.tournaments)
 
 function startCreate() {
   editingTournament.value = null
-  form.value = {
-    name: '',
-    format: 'BANQUEST',
-    status: 'SCHEDULED',
-    startDate: '',
-    endDate: null,
-    capacity: 64,
-    rosterSize: 3,
-    creditGrant: 10000,
-  }
+  form.value = blankForm()
   showForm.value = true
 }
 
@@ -82,25 +75,21 @@ function cancelForm() {
 }
 
 function startDelete(tournament: Tournament) {
-  deletingTournamentId.value = tournament.id
-  deletingTournamentName.value = tournament.name
-  showDeleteConfirm.value = true
+  deletingTournament.value = tournament
 }
 
 function cancelDelete() {
-  showDeleteConfirm.value = false
-  deletingTournamentId.value = null
-  deletingTournamentName.value = ''
+  deletingTournament.value = null
 }
 
 async function confirmDelete() {
-  if (deletingTournamentId.value === null) return
+  if (!deletingTournament.value) return
 
   loading.value = true
   error.value = null
 
   try {
-    await api.admin.deleteTournament(deletingTournamentId.value)
+    await api.admin.deleteTournament(deletingTournament.value.id)
     await tournamentsStore.load() // Refresh the list
     cancelDelete()
   } catch (e) {
@@ -259,7 +248,7 @@ async function saveTournament() {
 
     <!-- Delete confirmation -->
     <DestructiveConfirmPanel
-      v-if="showDeleteConfirm"
+      v-if="deletingTournament"
       title="Delete Tournament"
       confirm-label="Delete Tournament"
       busy-label="Deleting..."
@@ -267,13 +256,13 @@ async function saveTournament() {
       @cancel="cancelDelete"
       @confirm="confirmDelete"
     >
-      Are you sure you want to delete <strong>{{ deletingTournamentName }}</strong>? This
+      Are you sure you want to delete <strong>{{ deletingTournament.name }}</strong>? This
       permanently removes its hero pool, map pool, scoring rules, manager entries, and recorded
       matches. This cannot be undone.
     </DestructiveConfirmPanel>
 
     <!-- Tournaments list -->
-    <div v-if="!showForm && !showDeleteConfirm" class="flex flex-col gap-2">
+    <div v-if="!showForm && !deletingTournament" class="flex flex-col gap-2">
       <div v-if="tournaments.length === 0" class="p-12 text-center">
         <p class="text-ink-dim">No tournaments found. Create a new tournament to begin.</p>
       </div>
