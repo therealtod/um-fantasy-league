@@ -47,15 +47,14 @@ private fun apiAuthorizationRules(
     ).permitAll()
     // Must precede the general "/api/**" rule below — first match wins.
     registry.requestMatchers("/api/admin/**").hasRole("ADMIN")
-    registry.requestMatchers(HttpMethod.DELETE, "/api/tournaments/*").hasRole("ADMIN")
     registry.requestMatchers("/api/**").authenticated()
     registry.anyRequest().denyAll()
 }
 
 /**
  * Production security: a stateless JWT resource server verifying Supabase-issued
- * access tokens. See [com.umfl.auth.SupabaseManagerProvider] for how the verified
- * token is resolved into a [com.umfl.manager.Manager], and
+ * access tokens. See [com.umfl.auth.SecurityContextManagerProvider] for how the
+ * verified token is resolved into a [com.umfl.manager.Manager], and
  * [com.umfl.auth.SupabaseAuthenticationConverter] for where that resolution — and
  * the `ROLE_ADMIN` authority it carries — actually happens.
  */

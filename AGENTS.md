@@ -118,8 +118,7 @@ autoconfiguration from securing everything the moment the oauth2 starter is on t
 delete it.
 
 Those matcher lists are the first layer, not the only one: `MethodSecurityConfig` turns on
-`@EnableMethodSecurity`, and every admin controller (plus `TournamentController.delete`, the one
-admin operation living outside `/api/admin/**`) also carries `@PreAuthorize("hasRole('ADMIN')")`.
+`@EnableMethodSecurity`, and every admin controller also carries `@PreAuthorize("hasRole('ADMIN')")`.
 The annotation travels with the code, so a future admin endpoint that forgets a URL matcher is still
 gated — two independent layers is the point, so keep both in step rather than collapsing one into
 the other.

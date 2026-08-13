@@ -3,15 +3,12 @@ package com.umfl.api
 import com.umfl.auth.CurrentManager
 import com.umfl.common.NotFoundException
 import com.umfl.manager.Manager
-import com.umfl.tournament.AdminTournamentService
 import com.umfl.tournament.EntryStatus
 import com.umfl.tournament.TournamentEntryQuery
 import com.umfl.tournament.TournamentService
 import com.umfl.tournament.TournamentStatus
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
-import org.springframework.security.access.prepost.PreAuthorize
-import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
@@ -27,7 +24,6 @@ import org.springframework.web.bind.annotation.RestController
 class TournamentController(
     private val tournamentService: TournamentService,
     private val entryQuery: TournamentEntryQuery,
-    private val adminTournamentService: AdminTournamentService,
 ) {
 
     @GetMapping
@@ -54,13 +50,6 @@ class TournamentController(
             enrolled = tournamentService.enrolmentCount(id),
             myEntryStatus = myEntryStatuses(manager)[id],
         )
-    }
-
-    @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasRole('ADMIN')")
-    fun delete(@PathVariable id: Long, @CurrentManager admin: Manager) {
-        adminTournamentService.delete(id)
     }
 
     /** Enter this tournament: opens an empty draft roster with the tournament's credit grant. */

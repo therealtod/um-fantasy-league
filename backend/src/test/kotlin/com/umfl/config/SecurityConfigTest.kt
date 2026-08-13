@@ -14,7 +14,6 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.TestPropertySource
 import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.time.Instant
@@ -117,33 +116,6 @@ class SecurityConfigTest @Autowired constructor(
             contentType = MediaType.APPLICATION_JSON
             content = """{"name": "Brand New Hero"}"""
         }.andExpect { status { isCreated() } }
-    }
-
-    @Test
-    fun `delete tournament endpoint rejects requests without a token`() {
-        mockMvc.delete("/api/tournaments/1").andExpect { status { isUnauthorized() } }
-    }
-
-    @Test
-    fun `delete tournament endpoint rejects a token belonging to a non-admin manager`() {
-        val authUserId = UUID.randomUUID()
-        `when`(jwtDecoder.decode("a-token")).thenReturn(jwt(authUserId))
-
-        mockMvc.delete("/api/tournaments/1") {
-            header("Authorization", "Bearer a-token")
-        }.andExpect { status { isForbidden() } }
-    }
-
-    @Test
-    fun `delete tournament endpoint accepts a token belonging to an admin manager`() {
-        val authUserId = UUID.randomUUID()
-        val admin = requireNotNull(managerRepository.findByHandle("NeonStrategist"))
-        managerRepository.save(admin.copy(authUserId = authUserId))
-        `when`(jwtDecoder.decode("admin-token")).thenReturn(jwt(authUserId))
-
-        mockMvc.delete("/api/tournaments/9999") {
-            header("Authorization", "Bearer admin-token")
-        }.andExpect { status { isNotFound() } }
     }
 
     private fun jwt(subject: UUID): Jwt =
