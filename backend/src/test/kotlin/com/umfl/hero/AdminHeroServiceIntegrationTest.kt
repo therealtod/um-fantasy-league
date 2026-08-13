@@ -112,6 +112,20 @@ class AdminHeroServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `addBatchToPool dedupes a repeated hero id, last cost wins`() {
+        val tournamentId = winterOfChampionsId()
+        val newHero = requireNotNull(adminHeroService.create("Batch Hero E", null).id)
+
+        val result = adminHeroService.addBatchToPool(
+            tournamentId,
+            listOf(HeroPoolEntryInput(newHero, 1_000), HeroPoolEntryInput(newHero, 2_000)),
+        )
+
+        assertEquals(listOf(2_000), result.map { it.cost })
+        assertEquals(2_000, heroQueryRepository.findByIds(tournamentId, listOf(newHero)).single().cost)
+    }
+
+    @Test
     fun `addBatchToPool rejects an unknown hero id and writes nothing from the batch`() {
         val tournamentId = winterOfChampionsId()
         val newHero = requireNotNull(adminHeroService.create("Batch Hero D", null).id)

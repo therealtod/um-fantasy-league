@@ -54,8 +54,9 @@ class AdminHeroService(
     fun addBatchToPool(tournamentId: Long, entries: List<HeroPoolEntryInput>): List<HeroView> {
         tournamentService.requireTournament(tournamentId)
         requireHeroes(entries.map { it.heroId })
-        heroPoolAdminRepository.upsertCosts(tournamentId, entries)
-        return heroQueryRepository.findByIds(tournamentId, entries.map { it.heroId }.distinct())
+        val deduped = entries.associateBy { it.heroId }.values.toList()
+        heroPoolAdminRepository.upsertCosts(tournamentId, deduped)
+        return heroQueryRepository.findByIds(tournamentId, deduped.map { it.heroId })
     }
 
     /** A tournament's hero pool, priced — see `AdminHeroController.listPool` for why this is its own endpoint. */
