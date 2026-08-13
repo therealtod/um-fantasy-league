@@ -59,6 +59,30 @@ const form = ref<RecordMatchRequest>(blankForm())
 
 const tournaments = computed(() => tournamentsStore.tournaments)
 
+// form.playedAt is always a full ISO instant (what the server sends and expects),
+// but <input type="datetime-local"> only accepts/emits "YYYY-MM-DDTHH:mm" — anything
+// else is silently sanitized to "" by the browser. This bridges the two formats
+// instead of binding the input straight to form.playedAt.
+const playedAtLocal = computed({
+  get() {
+    const iso = form.value.playedAt
+    if (!iso) return ''
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return ''
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+      `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+    )
+  },
+  set(local: string) {
+    if (!local) return
+    const date = new Date(local)
+    if (Number.isNaN(date.getTime())) return
+    form.value.playedAt = date.toISOString()
+  },
+})
+
 // Reset form based on mode
 function resetForm() {
   form.value = blankForm()
@@ -259,7 +283,7 @@ onMounted(async () => {
           <label for="match-played-at" class="label-caps">Played At (ISO timestamp) *</label>
           <input
             id="match-played-at"
-            v-model="form.playedAt"
+            v-model="playedAtLocal"
             type="datetime-local"
             class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
           />
