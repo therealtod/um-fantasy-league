@@ -36,13 +36,6 @@ data class EntryRoster(
 @Repository
 class StandingsQuery(private val jdbcClient: JdbcClient) {
 
-    fun currentRound(tournamentId: Long): Int =
-        jdbcClient
-            .sql("select coalesce(max(round), 0) from tournament_match where tournament_id = :tournamentId")
-            .param("tournamentId", tournamentId)
-            .query(Int::class.java)
-            .single()
-
     /**
      * Every entry in the tournament with its roster, ordered by entry then slot.
      *
