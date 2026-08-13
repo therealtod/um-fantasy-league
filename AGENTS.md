@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository. `CLAUDE.md` just imports this file.
 
 ## What this is
 
@@ -76,11 +76,9 @@ by collapsing declarations onto one line with a dangling comma. Test sources add
 the wrapping rules and the line-length cap so fixture tables can stay tabular. Retune the
 `.editorconfig` rather than reformatting a file to satisfy a rule.
 
-Spring Boot is pinned to 4.1.0 (managing Testcontainers 2.0.5, up from the 1.21.x line this repo
-started on). The original reason for the pin — 1.21.3 negotiating a Docker API version too old for
-Docker Engine 29+ — is moot now that the managed Testcontainers major version has moved past it;
-verified working against Docker Engine 29.7.1 (API 1.55). Re-verify against your Docker Engine
-version before downgrading Spring Boot back toward the 3.5.x/Testcontainers 1.21.x line.
+Spring Boot is pinned to 4.1.0, which manages Testcontainers 2.0.5 — verified against Docker Engine
+29.7.1 (API 1.55). Re-verify against your own Docker Engine before downgrading toward the
+3.5.x/Testcontainers 1.21.x line: that line negotiates a Docker API version too old for Engine 29+.
 
 ## Profiles
 
@@ -98,11 +96,11 @@ SSE comment lines to already-open connections.
 
 **Which routes need an identity is decided in exactly one place, for every profile**: the private
 `apiAuthorizationRules` function in `SecurityConfig.kt`, passed to `authorizeHttpRequests` by both
-chains. Its public-GET allowlist covers `/api/tournaments`, `/api/tournaments/*`,
-`/api/tournaments/*/heroes`, `/api/tournaments/*/standings`, `/api/tournaments/*/standings/stream`
-and `/api/tournaments/*/matches`; everything else under `/api/**` is `authenticated()`, and
-`anyRequest()` is `denyAll()`. Keep it in step with `SecurityConfigTest` and `DevSecurityConfigTest`,
-which assert it from either side. Don't re-inline it into one chain: the two chains are meant to
+chains. It allowlists the read-only GETs that viewing a tournament needs — nobody needs an account
+to browse tournaments, hero pools, standings or match history, only to enter and draft — and
+everything else under `/api/**` is `authenticated()`, with `anyRequest()` a `denyAll()` backstop. Keep
+it in step with `SecurityConfigTest` and `DevSecurityConfigTest`, which assert it from either side.
+Don't re-inline it into one chain: the two chains are meant to
 differ only in how a credential is *verified* (a Supabase JWT vs. an `X-Manager-Id` header), never in
 which routes require one — which is also why neither `SupabaseAuthenticationConverter` nor
 `DevManagerAuthenticationFilter` carries any route knowledge of its own. Each resolves an identity
@@ -141,16 +139,14 @@ the backend never talks to Discord, only to Supabase-signed tokens.
 
 ## Backend architecture
 
-Package-by-feature under `com.umfl`: `hero`, `manager`, `match`, `scoring`, `standings`,
-`tournament`, plus `api` (controllers + DTOs), `auth`, `common`, `config`, `ratelimit`.
+Package-by-feature under `com.umfl`, one package per domain concept, plus `api` (controllers +
+DTOs), `auth`, `common`, `config` and `ratelimit`.
 
-**The read/write split is the central convention.** Spring Data JDBC repositories handle writes and
-aggregate loading; hand-written `JdbcClient` projections handle reads. Don't reach for a repository
-derived-query method when the screen wants a joined projection, and don't add an ORM.
-
-- Writes/aggregates: `TournamentEntryRepository`, `TournamentRepository`, `ManagerRepository`
-- Reads: `HeroQueryRepository` (`HeroView`), `MatchResultQuery`, `ScoringRuleSetQuery`,
-  `StandingsQuery`
+**The read/write split is the central convention**, and the class names carry it: a plain
+`*Repository` is the Spring Data JDBC write/aggregate-loading side, a `*Query`/`*QueryRepository` is
+a hand-written `JdbcClient` read projection, and an `*AdminRepository` is a `JdbcClient` *write* for
+the composite-keyed link tables Spring Data JDBC can't map. Don't reach for a repository derived-query
+method when the screen wants a joined projection, and don't add an ORM.
 
 `TournamentEntry` is the manager-facing aggregate root — it owns `EntrySlot`s via `@MappedCollection`
 (list index → `entry_slot.slot_index`) and is saved as one unit. `manager` is written on
@@ -179,10 +175,11 @@ below; nothing outside that surface writes reference data or results.
   between two humans; each `match_game` carries its own map and its own two
   `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
   two rows is flagged `is_winner` — a partial unique index stops two, and
-  `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw**, and the loser is
-  always on 0 health: `MatchResultPolicy.LOSER_HAS_POSITIVE_HEALTH` rejects a surviving loser, and
-  every recorded game in `V2__demo_fixtures.sql` respects that. Nothing stores who won the *series*:
-  `MatchListAdmin` counts games won client-side, like every other derived number here.
+  `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw**, and the loser never
+  survives: `MatchResultPolicy.LOSER_HAS_POSITIVE_HEALTH` requires the losing side to finish on 0 or
+  less (an overkill hit lands it below zero), and every recorded game in `V2__demo_fixtures.sql`
+  respects that. Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side,
+  like every other derived number here.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
   `match_participant.player_label` — one row per side for the whole series, nullable free text with
@@ -197,9 +194,8 @@ Domain rules live in pure `object`s with no Spring or persistence dependency —
 
 `RosterPolicy.validateDraft` deliberately permits over-budget selections (the builder is a
 scratchpad, the meter just runs past 100%); `validateLock` adds the budget and roster-size checks.
-Both return *all* violations at once so the UI can highlight every problem in one pass. Rule codes:
-`ENTRY_LOCKED`, `TOURNAMENT_CLOSED`, `TOO_MANY_PICKS`, `INCOMPLETE_ROSTER`, `DUPLICATE_HERO`,
-`UNKNOWN_HERO`, `BUDGET_EXCEEDED`.
+Both return *all* violations at once so the UI can highlight every problem in one pass. The rule
+codes are the `RosterRule` enum, documented constant by constant.
 
 `MatchMetrics` is a registry keyed by the free-form `scoring_coefficient.metric` string. It
 implements `APPEARANCE`, `SELF_BAN`, `OPPONENT_BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`,
@@ -231,22 +227,19 @@ signal, not a second copy of the data.
 
 Controllers take the caller via `@CurrentManager` (resolved by `CurrentManagerArgumentResolver`
 against the `CurrentManagerProvider` seam); a nullable parameter yields `currentOrNull()`. Errors go
-through `GlobalExceptionHandler` as RFC 7807 problem details — `NotFoundException` → 404,
-`ConflictException` → 409, `RosterRuleException` → 422 with a `violations` array.
+through `GlobalExceptionHandler` as RFC 7807 problem details: the domain exceptions in
+`common/DomainExceptions.kt` each map to a status there, and the three `*RuleException` types all
+render 422 with a `violations` array. Throw one of those rather than a bare `ResponseStatusException`.
 
 `HeroSort` holds ORDER BY fragments as an enum whitelist because sort keys can't be parameterised —
 keep new sorts inside that enum.
 
-Migrations are `backend/src/main/resources/db/migration/V*__*.sql`, forward-only. There is a single
-`V1__core_schema.sql` baseline — schema and the admin-authorization column squashed into one file,
-periodically re-squashed the same way rather than left as an accumulating chain, since there is no
-production data yet to preserve migration history for. It carries no seed data: demo fixtures live
-in a second Flyway location, `backend/src/main/resources/db/seed/V2__demo_fixtures.sql`, which is
-only on `spring.flyway.locations` for the `dev` and `test` profiles (see Profiles above) — a default
-start or the `prod` profile migrates schema only and writes no mock tournaments, managers or results.
-Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a unique natural
-key because Spring Data JDBC can't map composite primary keys; the pure link tables (`tournament_hero`,
-`tournament_map`, `entry_slot`, `hero_ban`, `match_game_participant`) keep natural composite keys. The
+Migrations are `backend/src/main/resources/db/migration/V*__*.sql`, forward-only, squashed to a
+single `V1__core_schema.sql` baseline (see Commands above for why, and for the seed's separate Flyway
+location). Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a
+unique natural key because Spring Data JDBC can't map composite primary keys; the pure link tables
+(`tournament_hero`, `tournament_map`, `entry_slot`, `hero_ban`, `match_game_participant`) keep
+natural composite keys. The
 integration tests assert on the seed's numbers exactly — changing a seeded price or result means
 updating `V2__demo_fixtures.sql` and the tests together. New data past that fixed baseline goes
 through the Admin API (see below), not another migration.
@@ -299,13 +292,9 @@ the closed drawer's links in the tab order. **`lg:` (1024px)** is where `RosterB
 a second `BudgetMeter` rides `sticky top-0` above the pool so the budget stays visible while picking.
 
 The standings leaderboard scrolls horizontally rather than shrinking, since its column count comes
-from the active rule set and isn't knowable in advance. Rank and Manager are pinned via `.cell-pinned`
-(`main.css`), which needs an *opaque* row underneath it — hence `.row-opaque` / `.row-opaque-mine`
-instead of the translucent tint a highlighted row would otherwise use. Two constraints there are easy
-to break: the pinned seam is an inset `box-shadow` (`.cell-pinned-edge`) because under
-`border-collapse` the borders belong to the table and don't travel with a sticky cell, and the
-Manager column's `left-12` offset only lines up while the Rank column's content plus `px-3` padding
-stays under its declared `w-12`.
+from the active rule set and isn't knowable in advance. Rank and Manager stay pinned while it
+scrolls, which costs a few non-obvious rules in `main.css` — they're commented where they live, next
+to `.cell-pinned`.
 
 `e2e/responsive.spec.ts` guards all of this from the `mobile` Playwright project (Pixel 5): it
 asserts `document.documentElement.scrollWidth` never exceeds the viewport on any route, which is the
@@ -329,28 +318,25 @@ rejected with a `ConflictException` when the tournament has a recorded game on i
 tournament delete (which cascades to `tournament_map` and, one level deeper, to `match_game`) is not
 tripped by cascade ordering — which is why `AdminMapService.removeFromPool` calls
 `MapPoolAdminRepository.checkMapInPoolNow()` (`set constraints … immediate`) after its DELETE: the
-violation has to surface inside the method that can still name the map, not at commit. The
-`db/seed/V2__demo_fixtures.sql` seed SQL is still what populated the original dev/test fixtures, but
-it is no longer the only way new reference data or results can enter the system, and it never runs
-outside `dev`/`test` in the first place.
+violation has to surface inside the method that can still name the map, not at commit.
 
-Tables that were previously read-only (`heroes`, `game_map`, `tournament_match`/`match_participant`/
-`match_game`/`match_game_participant`/`hero_ban`, `scoring_rule_set`/`scoring_coefficient`) now have
-a Spring Data JDBC write side: `Hero`, `GameMap`, `TournamentMatch` (owning `participants` as a
-`List` keyed by `side`, plus `games` and `bans` as `Set`-mapped children — no `keyColumn` there,
+The reference and result tables have a Spring Data JDBC write side: `Hero`, `GameMap`,
+`TournamentMatch` (owning `participants` as a `List` keyed by `side`, plus `games` and `bans` as
+`Set`-mapped children — no `keyColumn` there,
 since neither carries a list-position column; each `MatchGame` in turn owns its own participants)
 and `ScoringRuleSet` (owning `coefficients`). `tournament_hero` and `tournament_map` stay
 composite-keyed link tables with no Kotlin entity — `HeroPoolAdminRepository`/`MapPoolAdminRepository`
 write them via `JdbcClient`, the same read/write split the rest of the app already uses.
 
-`MatchResultPolicy` (pure, mirrors `RosterPolicy`) validates a match submission — map-in-pool,
-duplicate hero within a game, unknown hero, game numbers a dense 1..N, two sides per series and per
-game, no banned hero also played, and exactly one winner per game (`NOT_EXACTLY_ONE_WINNER` — zero
-is as invalid as two, there being no draw) — before save, raising `MatchRuleException` (422, same
-shape as `RosterRuleException`, kept as a separate type rather than merged into it). Activating a
-scoring rule set deactivates any active sibling in the same transaction, since only one may be active
-per tournament. An unknown scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a
-non-blocking warning on the response, never rejected.
+`MatchResultPolicy` (pure, mirrors `RosterPolicy`) validates a match submission before save, raising
+`MatchRuleException` (422, same shape as `RosterRuleException`, kept as a separate type rather than
+merged into it). The checks are the `MatchRule` enum, one KDoc line each — read them there. Two
+enforce the no-draw invariant above and are the ones to know before touching the policy:
+`NOT_EXACTLY_ONE_WINNER` treats zero winners as being as wrong as two, and
+`LOSER_HAS_POSITIVE_HEALTH` rejects a loser who survived. Activating a scoring rule set deactivates
+any active sibling in the same transaction, since only one may be active per tournament. An unknown
+scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a non-blocking warning on the
+response, never rejected.
 
 `ScoringRuleSetPolicy` (pure, same pattern again) validates a rule set's coefficients on create and
 update, with rule codes `DUPLICATE_METRIC` and `MALFORMED_METRIC`, raising `ScoringRuleException` —

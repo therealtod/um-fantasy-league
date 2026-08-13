@@ -217,6 +217,26 @@
     z-index: 1;
     background-color: inherit;
   }
+  /* The Rank column's width *is* the offset the Manager column pins at, so both
+     derive from one value — as two hand-matched literals they drift silently and
+     the only symptom is a misaligned seam. `sticky` has no way to say "start
+     where the previous sticky column ends", hence the shared constant.
+     Caveat CSS can't remove: under `table-layout: auto` a cell's width is a
+     minimum, so rank content plus its `px-3` has to stay inside 3rem or the
+     column grows and the offset stops lining up. Fixed layout would make the
+     width authoritative but would break the metric columns, which size to
+     content because their count comes from the active rule set. */
+  .cell-pinned-rank,
+  .cell-pinned-manager {
+    --pinned-rank-width: 3rem;
+  }
+  .cell-pinned-rank {
+    left: 0;
+    width: var(--pinned-rank-width);
+  }
+  .cell-pinned-manager {
+    left: var(--pinned-rank-width);
+  }
   /* The seam at the pinned/scrolling boundary. An inset shadow rather than a
      border-right: under border-collapse the borders belong to the table, not
      the cell, so they do not travel with a sticky column. */

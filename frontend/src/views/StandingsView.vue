@@ -136,11 +136,11 @@ const currentTournament = computed(() =>
       <table class="w-max min-w-full border-collapse">
         <thead>
           <tr class="border-b border-edge bg-surface-lowest text-left">
-            <!-- `w-12` only holds if content + padding stays under 48px, and the
-                 Manager column's `left-12` offset depends on it exactly. Hence px-3. -->
-            <th class="label-caps sticky left-0 z-20 w-12 bg-surface-lowest px-3 py-3">Rnk</th>
+            <!-- Width and offset both come from `--pinned-rank-width`; `px-3` is
+                 what keeps the rank inside it. See `.cell-pinned-rank` in main.css. -->
+            <th class="label-caps cell-pinned-rank sticky z-20 bg-surface-lowest px-3 py-3">Rnk</th>
             <th
-              class="label-caps cell-pinned-edge sticky left-12 z-20 bg-surface-lowest px-4 py-3 whitespace-nowrap"
+              class="label-caps cell-pinned-edge cell-pinned-manager sticky z-20 bg-surface-lowest px-4 py-3 whitespace-nowrap"
             >
               Manager
             </th>
@@ -175,12 +175,12 @@ const currentTournament = computed(() =>
             :class="isMe(row.managerId) ? 'row-opaque-mine' : 'row-opaque'"
           >
             <td
-              class="stat-value cell-pinned left-0 px-3 py-3 text-sm"
+              class="stat-value cell-pinned cell-pinned-rank px-3 py-3 text-sm"
               :class="isMe(row.managerId) ? 'text-magenta' : 'text-ink-dim'"
             >
               {{ row.rank }}
             </td>
-            <td class="cell-pinned cell-pinned-edge left-12 px-4 py-3">
+            <td class="cell-pinned cell-pinned-edge cell-pinned-manager px-4 py-3">
               <!-- Capped: this column is pinned, so an unusually long display
                    name would otherwise eat the width the metrics scroll into. -->
               <p
