@@ -109,6 +109,19 @@ which routes require one — which is also why neither `SupabaseAuthenticationCo
 only when the request actually offered a credential; a request without one stays anonymous and lets
 the rules above decide, so no public GET pays a JWT verification or a manager lookup.
 
+Both chains also register `RateLimitFilter` (`com.umfl.ratelimit`), an IP-keyed token-bucket
+(bucket4j) throttle ahead of every `/api/**` route — `addFilterBefore` puts it ahead of
+`BearerTokenAuthenticationFilter` in `SecurityConfig` and ahead of `AuthorizationFilter` in
+`DevSecurityConfig`, so a flood doesn't pay JWT verification or the dev manager lookup either. It
+keys on `HttpServletRequest.remoteAddr`, not `X-Forwarded-For`, since the VPS port is reachable
+directly and a trusted forwarded-for header would be spoofable; the tradeoff is that everything
+proxied through Cloudflare Pages shares a bucket per Cloudflare edge IP rather than per visitor. The
+per-IP bucket cache is Caffeine-backed (`RateLimitProperties.maxTrackedIps`, LRU-evicted, entries
+expire after two quiet refill periods) rather than an unbounded map, since the key space is every IP
+that ever touches `/api/`. Tuning (`capacity`, `refillPeriod`, `maxTrackedIps`) lives in
+`RateLimitProperties` bound to `rate-limit.api.*` in `application.yml` — see the `umfl.*` invariant
+below for why this is the one `@ConfigurationProperties` block in the app despite that rule.
+
 Admin routes (`/api/admin/**`) therefore require `hasRole("ADMIN")` in both profiles — the role comes
 from `manager.is_admin`, our own data, resolved once per request by
 `SupabaseAuthenticationConverter`/`DevManagerAuthenticationFilter` via the shared, provider-agnostic
@@ -129,7 +142,7 @@ the backend never talks to Discord, only to Supabase-signed tokens.
 ## Backend architecture
 
 Package-by-feature under `com.umfl`: `hero`, `manager`, `match`, `scoring`, `standings`,
-`tournament`, plus `api` (controllers + DTOs), `auth`, `common`, `config`.
+`tournament`, plus `api` (controllers + DTOs), `auth`, `common`, `config`, `ratelimit`.
 
 **The read/write split is the central convention.** Spring Data JDBC repositories handle writes and
 aggregate loading; hand-written `JdbcClient` projections handle reads. Don't reach for a repository
@@ -158,7 +171,10 @@ below; nothing outside that surface writes reference data or results.
   slots. Do not materialise either.
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
   `scoring_coefficient`, the budget is `tournament.credit_grant` — both retuned with an UPDATE. Don't
-  reintroduce a tunables block in `application.yml`.
+  reintroduce a tunables block in `application.yml`. The one exception is `rate-limit.api.*`
+  (`RateLimitProperties`, see Profiles above): it's operational tuning for how hard a deployed
+  instance throttles per client IP, not domain data, so it doesn't belong in the database the way a
+  scoring weight or a budget does.
 - **A match is a series, and every game in it has a winner.** `tournament_match` is a best-of-N
   between two humans; each `match_game` carries its own map and its own two
   `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
