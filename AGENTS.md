@@ -163,10 +163,10 @@ below; nothing outside that surface writes reference data or results.
   between two humans; each `match_game` carries its own map and its own two
   `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
   two rows is flagged `is_winner` — a partial unique index stops two, and
-  `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw.** A game that runs out
-  of time is decided on health, so the loser is not necessarily on 0 (seed match 11 is that shape).
-  Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side, like every
-  other derived number here.
+  `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw**, and the loser is
+  always on 0 health: `MatchResultPolicy.LOSER_HAS_POSITIVE_HEALTH` rejects a surviving loser, and
+  every recorded game in `V2__demo_fixtures.sql` respects that. Nothing stores who won the *series*:
+  `MatchListAdmin` counts games won client-side, like every other derived number here.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
   `match_participant.player_label` — one row per side for the whole series, nullable free text with
