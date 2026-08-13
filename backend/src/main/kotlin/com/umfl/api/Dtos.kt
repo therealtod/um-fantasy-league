@@ -4,6 +4,8 @@ import com.umfl.hero.HeroView
 import com.umfl.manager.Manager
 import com.umfl.tournament.BudgetStatus
 import com.umfl.tournament.EntryStatus
+import com.umfl.tournament.RosterPick
+import com.umfl.tournament.RosterPolicy
 import com.umfl.tournament.RosterSnapshot
 import com.umfl.tournament.Tournament
 import com.umfl.tournament.TournamentFormat
@@ -110,7 +112,10 @@ data class RosterDto(
     val rosterSize: Int,
     val heroes: List<HeroDto>,
     val budget: BudgetStatusDto,
-    /** True when the roster is full and within budget — i.e. the lock button may enable. */
+    /**
+     * True when [RosterPolicy.validateLock] raises no violations for this roster —
+     * i.e. the lock button may enable.
+     */
     val lockable: Boolean,
 ) {
     companion object {
@@ -126,10 +131,11 @@ data class RosterDto(
                 rosterSize = snapshot.tournament.rosterSize,
                 heroes = snapshot.heroes.map(HeroDto::from),
                 budget = BudgetStatusDto.from(snapshot.budget),
-                lockable = !entry.isLocked &&
-                    entry.slots.size == snapshot.tournament.rosterSize &&
-                    snapshot.budget.spent <= snapshot.budget.creditGrant &&
-                    snapshot.tournament.acceptsRosterChanges,
+                lockable = RosterPolicy.validateLock(
+                    picks = snapshot.heroes.map { RosterPick(it.id, it.cost) },
+                    tournament = snapshot.tournament,
+                    entry = entry,
+                ).isEmpty(),
             )
         }
     }
