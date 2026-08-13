@@ -72,26 +72,25 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
       </div>
 
       <nav class="flex-1 py-4">
-        <RouterLink
-          v-for="item in nav"
-          :key="item.to"
-          :to="item.to"
-          class="relative flex items-center gap-3 px-5 py-3 transition-colors"
-          :class="
-            route.path === item.to
-              ? 'bg-surface-low text-cyan'
-              : 'text-ink-muted hover:bg-surface-low hover:text-ink'
-          "
-        >
-          <span
-            v-if="route.path === item.to"
-            class="absolute inset-y-0 left-0 w-[2px] bg-cyan"
-            aria-hidden="true"
-          />
-          <span class="font-mono text-xs font-semibold tracking-[0.1em] uppercase">
-            {{ item.label }}
-          </span>
-        </RouterLink>
+        <template v-for="item in nav" :key="item.to">
+          <RouterLink v-slot="{ isActive, href, navigate }" :to="item.to" custom>
+            <a
+              :href="href"
+              class="relative flex items-center gap-3 px-5 py-3 transition-colors"
+              :class="
+                isActive
+                  ? 'bg-surface-low text-cyan'
+                  : 'text-ink-muted hover:bg-surface-low hover:text-ink'
+              "
+              @click="navigate"
+            >
+              <span v-if="isActive" class="absolute inset-y-0 left-0 w-[2px] bg-cyan" aria-hidden="true" />
+              <span class="font-mono text-xs font-semibold tracking-[0.1em] uppercase">
+                {{ item.label }}
+              </span>
+            </a>
+          </RouterLink>
+        </template>
       </nav>
 
       <div v-if="tournamentsStore.openForRegistration.length > 0" class="border-t border-edge p-4">

@@ -115,11 +115,12 @@ export const useRosterStore = defineStore('roster', () => {
    * restored.
    */
   async function toggle(heroId: number) {
-    if (locked.value || !registered.value) return
+    const id = tournamentId.value
+    if (id === null || locked.value || !registered.value) return
 
     const previous = [...selectedIds.value]
     const next = isSelected(heroId)
-      ? previous.filter((id) => id !== heroId)
+      ? previous.filter((selectedId) => selectedId !== heroId)
       : [...previous, heroId]
 
     if (next.length > rosterSize.value) {
@@ -132,7 +133,7 @@ export const useRosterStore = defineStore('roster', () => {
     violations.value = []
     saving.value = true
     try {
-      adopt(await api.setSlots(tournamentId.value!, next))
+      adopt(await api.setSlots(id, next))
     } catch (e) {
       selectedIds.value = previous
       if (e instanceof ApiError) {

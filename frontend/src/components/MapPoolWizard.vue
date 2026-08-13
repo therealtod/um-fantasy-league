@@ -41,8 +41,12 @@ async function loadMaps() {
 
 async function loadMapPool(tournamentId: number) {
   try {
-    mapPool.value = await api.admin.listMapPool(tournamentId)
+    const pool = await api.admin.listMapPool(tournamentId)
+    // A later switch may have already changed the selection while this was in flight — drop it.
+    if (selectedTournamentId.value !== tournamentId) return
+    mapPool.value = pool
   } catch (e) {
+    if (selectedTournamentId.value !== tournamentId) return
     error.value = describeError(e, 'Failed to load map pool')
   }
 }

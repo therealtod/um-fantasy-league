@@ -61,11 +61,15 @@ async function loadHeroPool(tournamentId: number) {
   loading.value = true
   error.value = null
   try {
-    heroPoolHeroes.value = await api.admin.listHeroPool(tournamentId)
+    const pool = await api.admin.listHeroPool(tournamentId)
+    // A later switch may have already changed the selection while this was in flight — drop it.
+    if (selectedTournamentId.value !== tournamentId) return
+    heroPoolHeroes.value = pool
   } catch (e) {
+    if (selectedTournamentId.value !== tournamentId) return
     error.value = describeError(e, 'Failed to load hero pool')
   } finally {
-    loading.value = false
+    if (selectedTournamentId.value === tournamentId) loading.value = false
   }
 }
 
