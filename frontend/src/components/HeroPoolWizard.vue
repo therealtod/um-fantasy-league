@@ -116,6 +116,19 @@ async function submitBatch() {
   }
 }
 
+function onCostInputChange(hero: Hero, event: Event) {
+  const input = event.target as HTMLInputElement
+  const newCost = Number(input.value)
+
+  if (input.value.trim() === '' || !Number.isFinite(newCost) || newCost < 1) {
+    error.value = 'Cost must be a number of at least 1 credit'
+    input.value = String(hero.cost)
+    return
+  }
+
+  updateHeroCost(hero.id, newCost)
+}
+
 async function updateHeroCost(heroId: number, newCost: number) {
   if (!selectedTournamentId.value) return
 
@@ -311,9 +324,7 @@ async function confirmRemoveHero() {
             type="number"
             min="1"
             class="w-24 border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
-            @change="
-              (e) => updateHeroCost(hero.id, Number((e.target as HTMLInputElement).value))
-            "
+            @change="(e) => onCostInputChange(hero, e)"
           />
           <span class="font-mono text-xs text-ink-dim">CR</span>
           <button
