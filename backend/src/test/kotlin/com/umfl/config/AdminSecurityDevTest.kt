@@ -12,9 +12,9 @@ import org.springframework.test.web.servlet.post
 /**
  * Proves admin routes are role-gated in dev/test too, purely via
  * `X-Manager-Id` — no JWT mocking needed, because
- * [com.umfl.auth.DevManagerAuthenticationFilter] resolves the same header
- * [com.umfl.auth.DevManagerProvider] reads, once, at the filter level. See
- * [DevSecurityConfigTest] for the route-level half of the dev chain.
+ * [com.umfl.auth.DevManagerAuthenticationFilter] resolves that header once,
+ * at the filter level. See [DevSecurityConfigTest] for the route-level half
+ * of the dev chain.
  */
 @AutoConfigureMockMvc
 class AdminSecurityDevTest @Autowired constructor(

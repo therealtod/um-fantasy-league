@@ -11,12 +11,12 @@ import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 
 /**
- * Dev/test equivalent of [SupabaseAuthenticationConverter]: resolves the same
- * `X-Manager-Id` header [DevManagerProvider] reads, but does it once at the
- * filter level so `hasRole("ADMIN")` route matchers work in every non-prod
- * profile too — the whole point of this class. Without it, dev's chain has no
- * Spring Security principal at all, so an admin-only route could never be
- * matcher-gated the same way it is in prod.
+ * Dev/test equivalent of [SupabaseAuthenticationConverter]: resolves the
+ * `X-Manager-Id` header once at the filter level so `hasRole("ADMIN")` route
+ * matchers work in every non-prod profile too — the whole point of this
+ * class. Without it, dev's chain has no Spring Security principal at all, so
+ * an admin-only route could never be matcher-gated the same way it is in
+ * prod.
  *
  * Resolution is conditional on a credential being *offered*, never on the
  * route, exactly like prod: there, [SupabaseAuthenticationConverter] runs only
@@ -54,19 +54,23 @@ class DevManagerAuthenticationFilter(
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        val header = request.getHeader(DevManagerProvider.MANAGER_ID_HEADER)
+        val header = request.getHeader(MANAGER_ID_HEADER)
         if (header == null) {
             filterChain.doFilter(request, response)
             return
         }
 
         val managerId = header.toLongOrNull()
-            ?: throw BadCredentialsException("Malformed ${DevManagerProvider.MANAGER_ID_HEADER}: $header")
+            ?: throw BadCredentialsException("Malformed $MANAGER_ID_HEADER: $header")
         val manager = managerRepository.findById(managerId).orElseThrow {
             BadCredentialsException("No manager with id $managerId")
         }
         SecurityContextHolder.getContext().authentication =
             ManagerAuthenticationToken(manager, null, ManagerAuthorities.of(manager))
         filterChain.doFilter(request, response)
+    }
+
+    companion object {
+        const val MANAGER_ID_HEADER = "X-Manager-Id"
     }
 }
