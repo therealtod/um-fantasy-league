@@ -82,7 +82,7 @@ class AdminMapService(
             mapPoolAdminRepository.removeFromPool(tournamentId, mapId).also {
                 mapPoolAdminRepository.checkMapInPoolNow()
             }
-        } catch (e: DataIntegrityViolationException) {
+        } catch (_: DataIntegrityViolationException) {
             throw recordedMatchConflict(tournamentId, mapId)
         }
         if (!removed) {
