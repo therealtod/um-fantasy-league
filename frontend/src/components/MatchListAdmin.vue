@@ -10,6 +10,10 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const emit = defineEmits<{
+  create: []
+  edit: [matchId: number]
+}>()
 
 const matches = ref<MatchResultDto[]>([])
 const isLoading = ref(false)
@@ -75,6 +79,12 @@ function gamesWon(match: MatchResultDto): [number, number] {
   return [side0, side1]
 }
 
+// Precomputed once per match rather than calling gamesWon() from the template, which would
+// otherwise re-derive it on every render for each of the four places the row reads it.
+const rowsWithGamesWon = computed(() =>
+  filteredMatches.value.map(match => ({ match, won: gamesWon(match) })),
+)
+
 function handleEdit(matchId: number) {
   emit('edit', matchId)
 }
@@ -108,11 +118,6 @@ async function confirmDelete() {
 function handleCreate() {
   emit('create')
 }
-
-const emit = defineEmits<{
-  create: []
-  edit: [matchId: number]
-}>()
 
 // Load on mount, and again whenever the parent switches tournament — the round filter is
 // reset with it, since round numbers from the old tournament mean nothing in the new one.
@@ -196,7 +201,7 @@ watch(
         </thead>
         <tbody>
           <tr
-            v-for="match in filteredMatches"
+            v-for="{ match, won } in rowsWithGamesWon"
             :key="match.matchId"
             class="border-b border-edge last:border-none hover:bg-surface-mid"
           >
@@ -208,11 +213,11 @@ watch(
             <td class="px-3 py-3 align-top font-mono text-sm md:px-4">{{ formatDateTime(match.playedAt) }}</td>
             <td class="px-3 py-3 align-top md:px-4">
               <div class="flex flex-col gap-1 font-mono text-sm">
-                <span :class="gamesWon(match)[0] > gamesWon(match)[1] ? 'font-bold text-lime' : 'text-ink-dim'">
-                  {{ sideLabel(match, 0) }} — {{ gamesWon(match)[0] }}
+                <span :class="won[0] > won[1] ? 'font-bold text-lime' : 'text-ink-dim'">
+                  {{ sideLabel(match, 0) }} — {{ won[0] }}
                 </span>
-                <span :class="gamesWon(match)[1] > gamesWon(match)[0] ? 'font-bold text-lime' : 'text-ink-dim'">
-                  {{ sideLabel(match, 1) }} — {{ gamesWon(match)[1] }}
+                <span :class="won[1] > won[0] ? 'font-bold text-lime' : 'text-ink-dim'">
+                  {{ sideLabel(match, 1) }} — {{ won[1] }}
                 </span>
               </div>
             </td>
