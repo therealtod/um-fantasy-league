@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import StatusBadge from '@/components/StatusBadge.vue'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRosterStore } from '@/stores/roster'
 import { useTournamentsStore } from '@/stores/tournaments'
@@ -76,9 +77,7 @@ function openStandings() {
       Loading tournaments…
     </p>
 
-    <p v-else-if="tournamentsStore.error" class="mt-6 border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ tournamentsStore.error }}
-    </p>
+    <ErrorBanner v-else-if="tournamentsStore.error" class="mt-6" :message="tournamentsStore.error" />
 
     <ul v-else class="mt-4 space-y-3">
       <li

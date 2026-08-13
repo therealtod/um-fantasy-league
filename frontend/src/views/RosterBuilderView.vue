@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import BudgetMeter from '@/components/BudgetMeter.vue'
 import HeroCard from '@/components/HeroCard.vue'
 import RosterUplinkPanel from '@/components/RosterUplinkPanel.vue'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 import { useHeroesStore } from '@/stores/heroes'
 import { useRosterStore } from '@/stores/roster'
 import type { HeroSort } from '@/api/types'
@@ -89,12 +90,7 @@ watch(
         />
       </div>
 
-      <p
-        v-if="rosterStore.error"
-        class="mt-4 border border-magenta/50 bg-magenta/10 p-3 font-mono text-xs text-magenta"
-      >
-        {{ rosterStore.error }}
-      </p>
+      <ErrorBanner v-if="rosterStore.error" class="mt-4" compact :message="rosterStore.error" />
 
       <p v-if="heroesStore.loading" class="mt-6 font-mono text-sm text-ink-dim">
         Loading hero pool…

@@ -2,6 +2,8 @@
 import { ref, computed, watch } from 'vue'
 import type { BanType, MatchResultDto } from '@/api/types'
 import { api } from '@/api/client'
+import ErrorBanner from '@/components/ErrorBanner.vue'
+import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 
 interface Props {
   tournamentId: number
@@ -149,30 +151,24 @@ watch(
       </div>
     </div>
 
-    <p v-if="error" class="mb-4 border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner class="mb-4" :message="error" />
 
     <!-- Delete confirmation -->
-    <div v-if="deletingMatch" class="panel mb-4 flex flex-col gap-5 border-magenta p-6">
-      <h3 class="headline text-lg text-magenta">Delete Match</h3>
-      <p class="font-mono text-sm leading-relaxed text-ink-dim">
-        Are you sure you want to delete the round {{ deletingMatch.round }} match between
-        <strong>{{ sideLabel(deletingMatch, 0) }}</strong> and <strong>{{ sideLabel(deletingMatch, 1) }}</strong>
-        ({{ deletingMatch.games.length }} game{{ deletingMatch.games.length === 1 ? '' : 's' }})? Its participants,
-        games and bans go with it, and every standing derived from it is recomputed. This cannot be undone.
-      </p>
-      <div class="flex justify-end gap-3 pt-2">
-        <button class="btn-ghost" :disabled="isDeleting" @click="cancelDelete">Cancel</button>
-        <button
-          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="isDeleting"
-          @click="confirmDelete"
-        >
-          {{ isDeleting ? 'Deleting...' : 'Delete Match' }}
-        </button>
-      </div>
-    </div>
+    <DestructiveConfirmPanel
+      v-if="deletingMatch"
+      class="mb-4"
+      title="Delete Match"
+      confirm-label="Delete Match"
+      busy-label="Deleting..."
+      :busy="isDeleting"
+      @cancel="cancelDelete"
+      @confirm="confirmDelete"
+    >
+      Are you sure you want to delete the round {{ deletingMatch.round }} match between
+      <strong>{{ sideLabel(deletingMatch, 0) }}</strong> and <strong>{{ sideLabel(deletingMatch, 1) }}</strong>
+      ({{ deletingMatch.games.length }} game{{ deletingMatch.games.length === 1 ? '' : 's' }})? Its participants,
+      games and bans go with it, and every standing derived from it is recomputed. This cannot be undone.
+    </DestructiveConfirmPanel>
 
     <div v-if="isLoading" class="p-8 text-center font-mono text-ink-dim">
       Loading matches...

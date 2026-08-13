@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { api } from '@/api/client'
 import type { MapAdminDto, CreateMapRequest } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 
 const maps = ref<MapAdminDto[]>([])
 const loading = ref(false)
@@ -83,9 +84,7 @@ async function saveMap() {
       <button v-if="!showForm" class="btn-primary" @click="startCreate">+ Create Map</button>
     </div>
 
-    <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner :message="error" />
 
     <!-- Form -->
     <div v-if="showForm" class="panel flex flex-col gap-5 p-6">

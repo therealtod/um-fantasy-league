@@ -8,6 +8,8 @@ import type {
   TournamentFormat,
   TournamentStatus,
 } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
+import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 
 const tournamentsStore = useTournamentsStore()
 
@@ -146,9 +148,7 @@ async function saveTournament() {
       </button>
     </div>
 
-    <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner :message="error" />
 
     <!-- Form -->
     <div v-if="showForm" class="panel flex flex-col gap-5 p-6">
@@ -258,24 +258,19 @@ async function saveTournament() {
     </div>
 
     <!-- Delete confirmation -->
-    <div v-if="showDeleteConfirm" class="panel flex flex-col gap-5 border-magenta p-6">
-      <h3 class="headline text-lg text-magenta">Delete Tournament</h3>
-      <p class="font-mono text-sm leading-relaxed text-ink-dim">
-        Are you sure you want to delete <strong>{{ deletingTournamentName }}</strong>? This
-        permanently removes its hero pool, map pool, scoring rules, manager entries, and recorded
-        matches. This cannot be undone.
-      </p>
-      <div class="flex justify-end gap-3 pt-2">
-        <button class="btn-ghost" :disabled="loading" @click="cancelDelete">Cancel</button>
-        <button
-          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="loading"
-          @click="confirmDelete"
-        >
-          {{ loading ? 'Deleting...' : 'Delete Tournament' }}
-        </button>
-      </div>
-    </div>
+    <DestructiveConfirmPanel
+      v-if="showDeleteConfirm"
+      title="Delete Tournament"
+      confirm-label="Delete Tournament"
+      busy-label="Deleting..."
+      :busy="loading"
+      @cancel="cancelDelete"
+      @confirm="confirmDelete"
+    >
+      Are you sure you want to delete <strong>{{ deletingTournamentName }}</strong>? This
+      permanently removes its hero pool, map pool, scoring rules, manager entries, and recorded
+      matches. This cannot be undone.
+    </DestructiveConfirmPanel>
 
     <!-- Tournaments list -->
     <div v-if="!showForm && !showDeleteConfirm" class="flex flex-col gap-2">

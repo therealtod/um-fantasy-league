@@ -4,6 +4,7 @@ import { useManagerStore } from '@/stores/manager'
 import { useStandingsStore } from '@/stores/standings'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { MetricColumn } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 
 const standings = useStandingsStore()
 const tournaments = useTournamentsStore()
@@ -128,12 +129,7 @@ const currentTournament = computed(() =>
       </p>
     </div>
 
-    <p
-      v-if="standings.error"
-      class="mt-4 border border-magenta/50 bg-magenta/10 p-3 font-mono text-xs text-magenta"
-    >
-      {{ standings.error }}
-    </p>
+    <ErrorBanner v-if="standings.error" class="mt-4" compact :message="standings.error" />
 
     <!-- Leaderboard -->
     <div class="panel mt-4 overflow-x-auto">

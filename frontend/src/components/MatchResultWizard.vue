@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { BanType, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 
 interface Props {
   tournamentId?: number
@@ -246,9 +247,7 @@ onMounted(async () => {
       </h2>
     </div>
 
-    <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner :message="error" />
 
     <!-- Tournament info (when provided as prop) -->
     <div v-if="tournamentId" class="panel flex items-center gap-4 p-4">

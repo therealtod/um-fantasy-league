@@ -3,6 +3,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { MapAdminDto } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
+import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 import TournamentSelect from '@/components/TournamentSelect.vue'
 
 const tournamentsStore = useTournamentsStore()
@@ -107,9 +109,7 @@ async function confirmRemoveMap() {
       <h2 class="headline text-xl">Map Pool Management</h2>
     </div>
 
-    <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner :message="error" />
 
     <!-- Tournament selector -->
     <TournamentSelect v-model="selectedTournamentId" :tournaments="tournaments" />
@@ -147,23 +147,18 @@ async function confirmRemoveMap() {
     </div>
 
     <!-- Remove confirmation — the API rejects this if a match was already played on the board -->
-    <div v-if="removingMap" class="panel flex flex-col gap-5 border-magenta p-6">
-      <h3 class="headline text-lg text-magenta">Remove Map from Pool</h3>
-      <p class="font-mono text-sm leading-relaxed text-ink-dim">
-        Remove <strong>{{ removingMap.name }}</strong> from this tournament's pool? This is rejected
-        if the tournament already has a match recorded on this board.
-      </p>
-      <div class="flex justify-end gap-3 pt-2">
-        <button class="btn-ghost" :disabled="loading" @click="cancelRemoveMap">Cancel</button>
-        <button
-          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="loading"
-          @click="confirmRemoveMap"
-        >
-          {{ loading ? 'Removing...' : 'Remove from Pool' }}
-        </button>
-      </div>
-    </div>
+    <DestructiveConfirmPanel
+      v-if="removingMap"
+      title="Remove Map from Pool"
+      confirm-label="Remove from Pool"
+      busy-label="Removing..."
+      :busy="loading"
+      @cancel="cancelRemoveMap"
+      @confirm="confirmRemoveMap"
+    >
+      Remove <strong>{{ removingMap.name }}</strong> from this tournament's pool? This is rejected
+      if the tournament already has a match recorded on this board.
+    </DestructiveConfirmPanel>
 
     <!-- Current pool -->
     <div v-if="selectedTournamentId && !removingMap" class="flex flex-col gap-3">

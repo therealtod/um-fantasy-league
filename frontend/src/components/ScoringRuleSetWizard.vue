@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { ScoringCoefficientRequest, ScoringRuleSetDto } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
 import TournamentSelect from '@/components/TournamentSelect.vue'
 
 const tournamentsStore = useTournamentsStore()
@@ -226,9 +227,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
       <h2 class="headline text-xl">Scoring Rule Sets</h2>
     </div>
 
-    <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner :message="error" />
 
     <!-- Post-save warnings: the save succeeded, but nothing scores these metrics. -->
     <div

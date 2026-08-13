@@ -3,6 +3,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { Hero, HeroAdminDto } from '@/api/types'
+import ErrorBanner from '@/components/ErrorBanner.vue'
+import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 import TournamentSelect from '@/components/TournamentSelect.vue'
 
 const tournamentsStore = useTournamentsStore()
@@ -179,9 +181,7 @@ async function confirmRemoveHero() {
       <h2 class="headline text-xl">Hero Pool & Pricing</h2>
     </div>
 
-    <p v-if="error" class="border border-magenta/50 bg-magenta/10 p-4 font-mono text-sm text-magenta">
-      {{ error }}
-    </p>
+    <ErrorBanner :message="error" />
 
     <!-- Tournament selector -->
     <TournamentSelect v-model="selectedTournamentId" :tournaments="tournaments" />
@@ -272,23 +272,18 @@ async function confirmRemoveHero() {
     </div>
 
     <!-- Remove confirmation — costs are joined live, so dropping the row re-prices unlocked rosters -->
-    <div v-if="removingHero" class="panel flex flex-col gap-5 border-magenta p-6">
-      <h3 class="headline text-lg text-magenta">Remove Hero from Pool</h3>
-      <p class="font-mono text-sm leading-relaxed text-ink-dim">
-        Remove <strong>{{ removingHero.name }}</strong> from this tournament's pool? Any unlocked
-        roster still holding this hero will re-price it to 0 credits until it is picked again.
-      </p>
-      <div class="flex justify-end gap-3 pt-2">
-        <button class="btn-ghost" :disabled="loading" @click="cancelRemoveHero">Cancel</button>
-        <button
-          class="border border-magenta px-6 py-3 font-mono text-sm text-magenta transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
-          :disabled="loading"
-          @click="confirmRemoveHero"
-        >
-          {{ loading ? 'Removing...' : 'Remove from Pool' }}
-        </button>
-      </div>
-    </div>
+    <DestructiveConfirmPanel
+      v-if="removingHero"
+      title="Remove Hero from Pool"
+      confirm-label="Remove from Pool"
+      busy-label="Removing..."
+      :busy="loading"
+      @cancel="cancelRemoveHero"
+      @confirm="confirmRemoveHero"
+    >
+      Remove <strong>{{ removingHero.name }}</strong> from this tournament's pool? Any unlocked
+      roster still holding this hero will re-price it to 0 credits until it is picked again.
+    </DestructiveConfirmPanel>
 
     <!-- Hero pool list -->
     <div v-if="selectedTournamentId && !showAddForm && !removingHero" class="flex flex-col gap-2">
