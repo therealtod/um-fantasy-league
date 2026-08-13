@@ -94,21 +94,19 @@ private fun appearance(context: MetricContext): Double =
  * the class doc); only these two extractors look past it into the match's
  * `bans` to see which category applied.
  */
-private fun selfBan(context: MetricContext): Double {
-    if (context.role !is HeroRole.Banned) return 0.0
-    val banType = context.match.bans.firstOrNull { it.heroId == context.heroId }?.banType
-    return if (banType == BanType.SELF_BAN) 1.0 else 0.0
-}
+private fun selfBan(context: MetricContext): Double = banOfType(context, BanType.SELF_BAN)
 
 /**
  * A hero the opposing side banned out. `PRE_BAN` -- struck before sides are
  * known -- is priced by neither this nor [selfBan]: nobody chose to deny it
  * to a particular opponent.
  */
-private fun opponentBan(context: MetricContext): Double {
+private fun opponentBan(context: MetricContext): Double = banOfType(context, BanType.OPPONENT_BAN)
+
+private fun banOfType(context: MetricContext, type: BanType): Double {
     if (context.role !is HeroRole.Banned) return 0.0
     val banType = context.match.bans.firstOrNull { it.heroId == context.heroId }?.banType
-    return if (banType == BanType.OPPONENT_BAN) 1.0 else 0.0
+    return if (banType == type) 1.0 else 0.0
 }
 
 private fun win(context: MetricContext): Double {
