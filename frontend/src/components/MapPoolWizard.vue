@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { MapAdminDto } from '@/api/types'
+import TournamentSelect from '@/components/TournamentSelect.vue'
 
 const tournamentsStore = useTournamentsStore()
 
@@ -111,19 +112,7 @@ async function confirmRemoveMap() {
     </p>
 
     <!-- Tournament selector -->
-    <div class="flex flex-col gap-2">
-      <label for="tournament-select" class="label-caps">Select Tournament *</label>
-      <select
-        id="tournament-select"
-        v-model.number="selectedTournamentId"
-        class="cursor-pointer field-input"
-      >
-        <option :value="null">-- Choose a tournament --</option>
-        <option v-for="tournament in tournaments" :key="tournament.id" :value="tournament.id">
-          {{ tournament.name }}
-        </option>
-      </select>
-    </div>
+    <TournamentSelect v-model="selectedTournamentId" :tournaments="tournaments" />
 
     <!-- Add maps form — check several, then submit once as a batch -->
     <div v-if="selectedTournamentId && !removingMap" class="panel flex flex-col gap-5 p-6">

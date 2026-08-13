@@ -8,6 +8,7 @@ import MapPoolWizard from '@/components/MapPoolWizard.vue'
 import ScoringRuleSetWizard from '@/components/ScoringRuleSetWizard.vue'
 import MatchResultWizard from '@/components/MatchResultWizard.vue'
 import MatchListAdmin from '@/components/MatchListAdmin.vue'
+import TournamentSelect from '@/components/TournamentSelect.vue'
 import { useTournamentsStore } from '@/stores/tournaments'
 
 const tournamentsStore = useTournamentsStore()
@@ -155,26 +156,18 @@ function handleMatchUpdated() {
               <p class="mt-2 mb-4 text-sm text-ink-dim">
                 Choose a tournament to view or manage its match results
               </p>
-              <div class="flex flex-col gap-2">
-                <label for="match-tournament-select" class="label-caps">Tournament *</label>
-                <select
-                  id="match-tournament-select"
-                  v-model.number="selectedTournamentId"
-                  class="cursor-pointer field-input"
-                >
-                  <option :value="null">-- Choose a tournament --</option>
-                  <option
-                    v-for="tournament in tournaments"
-                    :key="tournament.id"
-                    :value="tournament.id"
-                  >
-                    {{ tournament.name }}
-                  </option>
-                </select>
-                <p v-if="tournaments.length === 0" class="font-mono text-xs text-ink-dim italic">
-                  No tournaments exist yet. Create one in the Tournaments section first.
-                </p>
-              </div>
+              <TournamentSelect
+                id="match-tournament-select"
+                v-model="selectedTournamentId"
+                :tournaments="tournaments"
+                label="Tournament *"
+              />
+              <p
+                v-if="tournaments.length === 0"
+                class="mt-2 font-mono text-xs text-ink-dim italic"
+              >
+                No tournaments exist yet. Create one in the Tournaments section first.
+              </p>
             </div>
 
             <div v-if="selectedTournamentId" class="mt-8">

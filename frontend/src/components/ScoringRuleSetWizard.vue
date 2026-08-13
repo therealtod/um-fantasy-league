@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { ScoringCoefficientRequest, ScoringRuleSetDto } from '@/api/types'
+import TournamentSelect from '@/components/TournamentSelect.vue'
 
 const tournamentsStore = useTournamentsStore()
 
@@ -262,19 +263,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
     </div>
 
     <!-- Tournament selector -->
-    <div class="flex flex-col gap-2">
-      <label for="tournament-select" class="label-caps">Select Tournament *</label>
-      <select
-        id="tournament-select"
-        v-model.number="selectedTournamentId"
-        class="cursor-pointer field-input"
-      >
-        <option :value="null">-- Choose a tournament --</option>
-        <option v-for="tournament in tournaments" :key="tournament.id" :value="tournament.id">
-          {{ tournament.name }}
-        </option>
-      </select>
-    </div>
+    <TournamentSelect v-model="selectedTournamentId" :tournaments="tournaments" />
 
     <!-- Create button -->
     <div v-if="selectedTournamentId && !showForm" class="flex gap-3">
