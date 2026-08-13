@@ -112,7 +112,7 @@ const currentTournament = computed(() =>
         <label for="standings-tournament" class="label-caps">Deployment</label>
         <select
           id="standings-tournament"
-          class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-xs text-ink focus:border-cyan focus:outline-none"
+          class="field-input text-xs"
           :value="standings.tournamentId ?? ''"
           @change="onTournamentChange"
         >

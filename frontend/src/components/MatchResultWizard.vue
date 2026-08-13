@@ -275,7 +275,7 @@ onMounted(async () => {
             v-model.number="form.round"
             type="number"
             min="1"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
 
@@ -285,7 +285,7 @@ onMounted(async () => {
             id="match-played-at"
             v-model="playedAtLocal"
             type="datetime-local"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
 
@@ -296,7 +296,7 @@ onMounted(async () => {
             v-model="form.externalLink"
             type="text"
             placeholder="https://…"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
       </div>
@@ -319,7 +319,7 @@ onMounted(async () => {
               :id="`player-${index}`"
               v-model="participant.playerLabel"
               type="text"
-              class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+              class="field-input-sm"
               placeholder="Who piloted this side"
             />
           </div>
@@ -352,7 +352,7 @@ onMounted(async () => {
             <select
               :id="`game-${gameIndex}-map`"
               v-model.number="game.mapId"
-              class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+              class="field-input-sm"
             >
               <option :value="0" disabled>Select a map…</option>
               <option v-for="map in mapPool" :key="map.id" :value="map.id">{{ map.name }}</option>
@@ -371,7 +371,7 @@ onMounted(async () => {
               <select
                 :id="`game-${gameIndex}-hero-${participantIndex}`"
                 v-model.number="participant.heroId"
-                class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                class="field-input-sm"
               >
                 <option :value="0" disabled>Select a hero…</option>
                 <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
@@ -384,7 +384,7 @@ onMounted(async () => {
                 :id="`game-${gameIndex}-health-${participantIndex}`"
                 v-model.number="participant.healthRemaining"
                 type="number"
-                class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                class="field-input-sm"
               />
             </div>
 
@@ -422,7 +422,7 @@ onMounted(async () => {
               <select
                 :id="`ban-hero-${index}`"
                 v-model.number="ban.heroId"
-                class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                class="field-input-sm"
               >
                 <option :value="0" disabled>Select a hero…</option>
                 <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
@@ -434,7 +434,7 @@ onMounted(async () => {
               <select
                 :id="`ban-type-${index}`"
                 v-model="ban.banType"
-                class="border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                class="field-input-sm"
               >
                 <option v-for="type in banTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
               </select>

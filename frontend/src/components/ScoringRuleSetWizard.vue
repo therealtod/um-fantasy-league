@@ -267,7 +267,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
       <select
         id="tournament-select"
         v-model.number="selectedTournamentId"
-        class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+        class="cursor-pointer field-input"
       >
         <option :value="null">-- Choose a tournament --</option>
         <option v-for="tournament in tournaments" :key="tournament.id" :value="tournament.id">
@@ -293,7 +293,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
           id="rule-set-name"
           v-model="form.name"
           type="text"
-          class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+          class="field-input"
           placeholder="e.g., Standard Scoring, Advanced Metrics"
         />
       </div>
@@ -314,7 +314,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
                   :id="`metric-${index}`"
                   v-model="coef.metric"
                   type="text"
-                  class="border border-edge bg-surface-low px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                  class="field-input-sm bg-surface-low"
                   :class="isUnknownMetric(coef.metric) ? 'border-danger text-danger' : ''"
                   placeholder="METRIC_NAME"
                 />
@@ -341,7 +341,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
                   v-model.number="coef.coefficient"
                   type="number"
                   step="0.1"
-                  class="border border-edge bg-surface-low px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+                  class="field-input-sm bg-surface-low"
                 />
               </div>
 
@@ -352,7 +352,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
                   v-model.number="coef.sortOrder"
                   type="number"
                   disabled
-                  class="border border-edge bg-surface-low px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  class="field-input-sm bg-surface-low disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </div>
             </div>

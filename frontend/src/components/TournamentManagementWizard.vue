@@ -163,7 +163,7 @@ async function saveTournament() {
             id="tournament-name"
             v-model="form.name"
             type="text"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
             placeholder="e.g., Summer of Legends"
           />
         </div>
@@ -173,7 +173,7 @@ async function saveTournament() {
           <select
             id="tournament-format"
             v-model="form.format"
-            class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="cursor-pointer field-input"
           >
             <option v-for="opt in formatOptions" :key="opt.value" :value="opt.value">
               {{ opt.label }}
@@ -186,7 +186,7 @@ async function saveTournament() {
           <select
             id="tournament-status"
             v-model="form.status"
-            class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="cursor-pointer field-input"
           >
             <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
               {{ opt.label }}
@@ -200,7 +200,7 @@ async function saveTournament() {
             id="tournament-start"
             v-model="form.startDate"
             type="date"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
 
@@ -210,7 +210,7 @@ async function saveTournament() {
             id="tournament-end"
             v-model="form.endDate"
             type="date"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
 
@@ -221,7 +221,7 @@ async function saveTournament() {
             v-model.number="form.capacity"
             type="number"
             min="1"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
 
@@ -232,7 +232,7 @@ async function saveTournament() {
             v-model.number="form.rosterSize"
             type="number"
             min="1"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
           />
         </div>
 
@@ -243,7 +243,7 @@ async function saveTournament() {
             v-model.number="form.creditGrant"
             type="number"
             min="1"
-            class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="field-input"
             placeholder="e.g., 10000"
           />
         </div>

@@ -135,7 +135,7 @@ watch(
           <select
             id="round-filter"
             v-model="selectedRound"
-            class="cursor-pointer border border-edge bg-surface-lowest px-2 py-1 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="cursor-pointer field-input-sm py-1"
           >
             <option :value="null">All Rounds</option>
             <option v-for="round in rounds" :key="round" :value="round">

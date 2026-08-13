@@ -98,7 +98,7 @@ async function saveHero() {
           id="hero-name"
           v-model="form.name"
           type="text"
-          class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+          class="field-input"
           placeholder="e.g., Alice, King Arthur, Medusa"
         />
       </div>
@@ -109,7 +109,7 @@ async function saveHero() {
           id="hero-image"
           v-model="form.imageUrl"
           type="text"
-          class="border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+          class="field-input"
           placeholder="https://..."
         />
       </div>

@@ -65,11 +65,14 @@
     border-radius: 0;
   }
 
-  /* Touch targets: the button paddings below land around 40px, under the 44px
-     guideline. Only coarse pointers pay the extra height. */
+  /* Touch targets: the button and field paddings below land around 36–40px, under
+     the 44px guideline. Only coarse pointers pay the extra height, so the dense
+     admin wizards keep their rhythm on a desktop pointer. */
   @media (pointer: coarse) {
     .btn-primary,
-    .btn-ghost {
+    .btn-ghost,
+    .field-input,
+    .field-input-sm {
       min-height: 44px;
     }
   }
@@ -163,6 +166,40 @@
   .btn-ghost:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  /* Text inputs and selects — the form-control twin of the buttons above. Same
+     1px technical border and monospaced voice, sunk one tonal step below the
+     panel it sits in, with the cyan hairline reserved for focus. `.field-input-sm`
+     is the same control at the tighter rhythm the admin wizards use for their
+     dense repeated rows.
+     Everything else stays a utility at the call site, and three of those are
+     load-bearing rather than incidental: `cursor-pointer` on selects, `text-xs`
+     where a filter rides inside a header strip, and `bg-surface-low` where the
+     field lands on a `surface-lowest` container and has to step *up* to stay
+     legible — there being no tonal step left below it. Padding is set as
+     longhands so a `py-1` at the call site overrides the block axis cleanly. */
+  .field-input,
+  .field-input-sm {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: calc(1.25 / 0.875);
+    color: var(--color-ink);
+    background-color: var(--color-surface-lowest);
+    border: 1px solid var(--color-edge);
+  }
+  .field-input {
+    padding-block: calc(var(--spacing) * 2);
+    padding-inline: calc(var(--spacing) * 3);
+  }
+  .field-input-sm {
+    padding-block: calc(var(--spacing) * 1.5);
+    padding-inline: calc(var(--spacing) * 2);
+  }
+  .field-input:focus,
+  .field-input-sm:focus {
+    border-color: var(--color-cyan);
+    outline: none;
   }
 
   /* Leaderboard rows carry an *opaque* background so the pinned identity columns

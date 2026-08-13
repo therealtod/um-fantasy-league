@@ -85,7 +85,7 @@ watch(
           v-model="heroesStore.search"
           type="search"
           placeholder="Search heroes…"
-          class="w-full border border-edge bg-surface-lowest px-3 py-2 font-mono text-xs text-ink placeholder:text-ink-dim focus:border-cyan focus:outline-none sm:ml-auto sm:w-56"
+          class="w-full field-input text-xs placeholder:text-ink-dim sm:ml-auto sm:w-56"
         />
       </div>
 

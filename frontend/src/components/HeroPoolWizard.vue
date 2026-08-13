@@ -188,7 +188,7 @@ async function confirmRemoveHero() {
       <select
         id="tournament-select"
         v-model.number="selectedTournamentId"
-        class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+        class="cursor-pointer field-input"
       >
         <option :value="null">-- Choose a tournament --</option>
         <option v-for="tournament in tournaments" :key="tournament.id" :value="tournament.id">
@@ -212,7 +212,7 @@ async function confirmRemoveHero() {
           <select
             id="hero-select"
             v-model.number="addForm.heroId"
-            class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="cursor-pointer field-input"
           >
             <option :value="null">-- Choose a hero --</option>
             <option v-for="hero in availableHeroes" :key="hero.id" :value="hero.id">
@@ -228,7 +228,7 @@ async function confirmRemoveHero() {
             v-model.number="addForm.cost"
             type="number"
             min="1"
-            class="w-32 border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="w-32 field-input"
             placeholder="e.g., 5000"
           />
         </div>
@@ -257,7 +257,7 @@ async function confirmRemoveHero() {
               v-model.number="pending.cost"
               type="number"
               min="1"
-              class="w-24 border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+              class="w-24 field-input-sm"
             />
             <span class="font-mono text-xs text-ink-dim">CR</span>
             <button
@@ -323,7 +323,7 @@ async function confirmRemoveHero() {
             :value="hero.cost"
             type="number"
             min="1"
-            class="w-24 border border-edge bg-surface-lowest px-2 py-1.5 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+            class="w-24 field-input-sm"
             @change="(e) => onCostInputChange(hero, e)"
           />
           <span class="font-mono text-xs text-ink-dim">CR</span>

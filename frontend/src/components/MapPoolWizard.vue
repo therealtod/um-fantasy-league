@@ -116,7 +116,7 @@ async function confirmRemoveMap() {
       <select
         id="tournament-select"
         v-model.number="selectedTournamentId"
-        class="cursor-pointer border border-edge bg-surface-lowest px-3 py-2 font-mono text-sm text-ink focus:border-cyan focus:outline-none"
+        class="cursor-pointer field-input"
       >
         <option :value="null">-- Choose a tournament --</option>
         <option v-for="tournament in tournaments" :key="tournament.id" :value="tournament.id">
