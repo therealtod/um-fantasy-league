@@ -60,7 +60,7 @@ class StandingsSseHub {
             totalSubscribers++
         }
 
-        val release = { releaseEmitter(emitters, emitter) }
+        val release = { releaseEmitter(tournamentId, emitters, emitter) }
         emitter.onCompletion(release)
         // Completing here (rather than just releasing bookkeeping) matters: SseEmitter is backed by
         // a DeferredResult, and if a timeout elapses without the app setting a result, Spring dispatches
@@ -77,23 +77,30 @@ class StandingsSseHub {
     fun onStandingsUpdate(event: StandingsUpdateEvent) {
         val emitters = emittersByTournament[event.tournamentId] ?: return
         for (emitter in emitters) {
-            send(emitter, emitters) { it.send(SseEmitter.event().name("update").data(event.tournamentId)) }
-        }
-    }
-
-    private fun sendKeepAlive() {
-        for ((_, emitters) in emittersByTournament) {
-            for (emitter in emitters) {
-                send(emitter, emitters) { it.send(SseEmitter.event().comment("keep-alive")) }
+            send(event.tournamentId, emitter, emitters) {
+                it.send(SseEmitter.event().name("update").data(event.tournamentId))
             }
         }
     }
 
-    private fun send(emitter: SseEmitter, emitters: CopyOnWriteArrayList<SseEmitter>, action: (SseEmitter) -> Unit) {
+    private fun sendKeepAlive() {
+        for ((tournamentId, emitters) in emittersByTournament) {
+            for (emitter in emitters) {
+                send(tournamentId, emitter, emitters) { it.send(SseEmitter.event().comment("keep-alive")) }
+            }
+        }
+    }
+
+    private fun send(
+        tournamentId: Long,
+        emitter: SseEmitter,
+        emitters: CopyOnWriteArrayList<SseEmitter>,
+        action: (SseEmitter) -> Unit,
+    ) {
         try {
             action(emitter)
         } catch (e: IOException) {
-            releaseEmitter(emitters, emitter)
+            releaseEmitter(tournamentId, emitters, emitter)
         } catch (e: IllegalStateException) {
             // Emitter already completed/timed out concurrently — its own callback removes it.
             log.debug("SSE emitter already closed", e)
@@ -107,10 +114,25 @@ class StandingsSseHub {
      * without this, `totalSubscribers` would be decremented more than once per
      * emitter. `List.remove`'s boolean return (true only the first time) is the
      * idempotency check.
+     *
+     * Also prunes `emittersByTournament`'s entry once its list is empty, so a
+     * tournament nobody is watching anymore doesn't sit in the map forever —
+     * otherwise the key set grows monotonically with every tournament ever
+     * watched, the one unbounded structure in an otherwise carefully bounded
+     * class. The prune runs under [subscribeLock], the same lock [subscribe]
+     * holds for its own computeIfAbsent-then-add, so a concurrent subscribe
+     * can never add to a list this is in the middle of pruning out of the map;
+     * `remove(key, value)` then double-checks the map still points at this
+     * exact list before dropping it.
      */
-    private fun releaseEmitter(emitters: CopyOnWriteArrayList<SseEmitter>, emitter: SseEmitter) {
+    private fun releaseEmitter(tournamentId: Long, emitters: CopyOnWriteArrayList<SseEmitter>, emitter: SseEmitter) {
         if (emitters.remove(emitter)) {
-            synchronized(subscribeLock) { totalSubscribers-- }
+            synchronized(subscribeLock) {
+                totalSubscribers--
+                if (emitters.isEmpty()) {
+                    emittersByTournament.remove(tournamentId, emitters)
+                }
+            }
         }
     }
 
