@@ -16,16 +16,6 @@ export const useStandingsStore = defineStore('standings', () => {
   /** Closes the current tournament's `/standings/stream` SSE connection, if any. */
   let closeStream: (() => void) | null = null
 
-  /**
-   * The high-water mark for incremental match fetches, and the polling key
-   * `refresh()` uses below. There's no client-side timer — the backend pushes
-   * an "update" event over SSE (see `sseClient.ts`) whenever a match is
-   * recorded, corrected, or deleted, and that event is what triggers `refresh()`.
-   */
-  const highestMatchId = computed(() =>
-    ticker.value.length ? Math.max(...ticker.value.map((entry) => entry.matchId)) : 0,
-  )
-
   const rows = computed(() => board.value?.rows ?? [])
   const metrics = computed(() => board.value?.metrics ?? [])
 
@@ -96,7 +86,6 @@ export const useStandingsStore = defineStore('standings', () => {
     ticker,
     loading,
     error,
-    highestMatchId,
     load,
     refresh,
     stop,

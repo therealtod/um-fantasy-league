@@ -177,6 +177,6 @@ describe('tournament lifecycle (frontend stores)', () => {
     expect(standings.rows.map((r) => r.handle)).toEqual(['SherlockMain', 'MythicMind'])
     expect(standings.rows[0].rank).toBe(1)
     expect(standings.rows[0].totalPoints).toBeGreaterThan(standings.rows[1].totalPoints)
-    expect(standings.highestMatchId).toBe(4)
+    expect(standings.ticker.map((entry) => entry.matchId)).toEqual([4])
   })
 })

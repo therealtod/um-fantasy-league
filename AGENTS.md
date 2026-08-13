@@ -250,10 +250,12 @@ anchor, so change it first and let `npm run type-check` point at every consumer.
 Stores: `auth` (Supabase session), `manager`, `heroes` (keyed by tournament — cost is
 tournament-scoped), `tournaments`, `roster`, `standings`. `roster` keeps an optimistic `selectedIds`
 and rolls it back if the server rejects. `standings` loads once via `load(id)`, then opens the
-`/standings/stream` SSE connection (`src/api/sseClient.ts`) and calls `refresh()` — the store's
-existing incremental fetch, keyed on `highestMatchId` — every time the backend signals that a match
-was written. There's still no client-side polling timer; the server-pushed event is what triggers
-each `refresh()`. The stream is closed and reopened on tournament switch and closed on unmount.
+`/standings/stream` SSE connection (`src/api/sseClient.ts`) and calls `refresh()` every time the
+backend signals that a match was written. `refresh()` always refetches the full ticker head from
+`sinceMatchId=0` rather than incrementally — a correction reuses an existing match id and a deletion
+removes one, so an incremental "since" fetch could miss either. There's still no client-side polling
+timer; the server-pushed event is what triggers each `refresh()`. The stream is closed and reopened
+on tournament switch and closed on unmount.
 
 `src/domain/rosterPolicy.ts` intentionally duplicates the Kotlin budget arithmetic (`budgetStatus`)
 so the meter reacts on click. **If you change that arithmetic, change both sides** —
