@@ -117,7 +117,7 @@ const currentTournament = computed(() =>
           :value="standings.tournamentId ?? ''"
           @change="onTournamentChange"
         >
-          <option v-for="tournament in tournaments.tournaments" :key="tournament.id" :value="tournament.id">
+          <option v-for="tournament in options" :key="tournament.id" :value="tournament.id">
             {{ tournament.name }}
           </option>
         </select>
