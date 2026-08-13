@@ -25,4 +25,14 @@ class TournamentEntryQuery(private val jdbcClient: JdbcClient) {
             .query { rs, _ -> rs.getLong("tournament_id") to EntryStatus.valueOf(rs.getString("status")) }
             .list()
             .toMap()
+
+    /** Entry status for one manager in one tournament, backed by the same index. */
+    fun statusFor(managerId: Long, tournamentId: Long): EntryStatus? =
+        jdbcClient
+            .sql("select status from tournament_entry where manager_id = :managerId and tournament_id = :tournamentId")
+            .param("managerId", managerId)
+            .param("tournamentId", tournamentId)
+            .query { rs, _ -> EntryStatus.valueOf(rs.getString("status")) }
+            .optional()
+            .orElse(null)
 }

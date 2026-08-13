@@ -48,7 +48,7 @@ class TournamentController(
         return TournamentDto.from(
             tournament = tournament,
             enrolled = tournamentService.enrolmentCount(id),
-            myEntryStatus = myEntryStatuses(manager)[id],
+            myEntryStatus = manager?.id?.let { entryQuery.statusFor(it, id) },
         )
     }
 
