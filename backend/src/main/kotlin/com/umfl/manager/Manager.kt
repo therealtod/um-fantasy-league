@@ -3,10 +3,6 @@ package com.umfl.manager
 import org.springframework.data.annotation.Id
 import org.springframework.data.relational.core.mapping.Table
 
-enum class RankTier { BRONZE, SILVER, GOLD, ELITE, LEGEND }
-
-enum class RankDivision { I, II, III }
-
 /**
  * A human player of the fantasy league — the person who drafts a roster, as
  * distinct from the competitor who plays the real tournament (a free-text
@@ -22,14 +18,8 @@ data class Manager(
     @Id val id: Long? = null,
     val handle: String,
     val displayName: String,
-    val rankTier: RankTier,
-    val rankDivision: RankDivision,
     /** Supabase auth.users.id (JWT "sub" claim). Null for dev-seeded managers with no linked identity. */
     val authUserId: java.util.UUID? = null,
     /** Grants ROLE_ADMIN for admin-only routes. Our own data, independent of any auth provider. */
     val isAdmin: Boolean = false,
-) {
-    /** e.g. "Elite III", as shown in the app's top bar. */
-    val rankLabel: String
-        get() = "${rankTier.name.lowercase().replaceFirstChar { it.uppercase() }} $rankDivision"
-}
+)

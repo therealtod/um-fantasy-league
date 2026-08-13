@@ -2,8 +2,6 @@ package com.umfl.config
 
 import com.umfl.api.AdminHeroController
 import com.umfl.manager.Manager
-import com.umfl.manager.RankDivision
-import com.umfl.manager.RankTier
 import com.umfl.support.PostgresIntegrationTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -27,8 +25,6 @@ class MethodSecurityTest @Autowired constructor(
     private val manager = Manager(
         handle = "irrelevant",
         displayName = "irrelevant",
-        rankTier = RankTier.BRONZE,
-        rankDivision = RankDivision.I,
     )
 
     @AfterEach

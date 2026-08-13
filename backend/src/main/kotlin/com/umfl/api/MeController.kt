@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/me")
 class MeController {
 
-    /** The signed-in manager — identity and rank for the app's top bar. */
+    /** The signed-in manager — identity for the app's top bar. */
     @GetMapping
     fun me(@CurrentManager manager: Manager): ManagerDto = ManagerDto.from(manager)
 }

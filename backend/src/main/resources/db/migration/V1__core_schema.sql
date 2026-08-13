@@ -67,8 +67,6 @@ create table manager (
     id            bigserial primary key,
     handle        text not null unique,
     display_name  text not null,
-    rank_tier     text not null check (rank_tier in ('BRONZE', 'SILVER', 'GOLD', 'ELITE', 'LEGEND')),
-    rank_division text not null check (rank_division in ('I', 'II', 'III')),
     auth_user_id  uuid unique,
     is_admin      boolean not null default false
 );
@@ -332,7 +330,7 @@ create unique index uq_match_game_participant_winner
 -- Bans happen once, before the series starts -- not per game -- which is why
 -- this references tournament_match, not match_game. `ban_type` follows this
 -- file's existing check-constrained text + Kotlin enum convention (see
--- manager.rank_tier / tournament.status).
+-- tournament.status).
 --
 -- Who struck the ban is not recorded beyond its category: the BAN metric
 -- prices the banned hero, never the person who banned it. Natural composite

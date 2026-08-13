@@ -2,8 +2,6 @@ package com.umfl.auth
 
 import com.umfl.manager.Manager
 import com.umfl.manager.ManagerRepository
-import com.umfl.manager.RankDivision
-import com.umfl.manager.RankTier
 import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mock
@@ -39,8 +37,6 @@ class SupabaseAuthenticationConverterTest {
             id = 1,
             handle = "Existing",
             displayName = "Existing",
-            rankTier = RankTier.GOLD,
-            rankDivision = RankDivision.I,
             authUserId = authUserId,
         )
         `when`(managerRepository.findByAuthUserId(authUserId)).thenReturn(existing)
@@ -61,8 +57,6 @@ class SupabaseAuthenticationConverterTest {
 
         assertEquals("CoolDiscordUser", result.handle)
         assertEquals("CoolDiscordUser", result.displayName)
-        assertEquals(RankTier.BRONZE, result.rankTier)
-        assertEquals(RankDivision.III, result.rankDivision)
         assertEquals(authUserId, result.authUserId)
         assertFalse(result.isAdmin, "a JIT-provisioned manager is never an admin by default")
     }
@@ -74,8 +68,6 @@ class SupabaseAuthenticationConverterTest {
             id = 2,
             handle = "Taken",
             displayName = "Taken",
-            rankTier = RankTier.SILVER,
-            rankDivision = RankDivision.II,
         )
         `when`(managerRepository.findByAuthUserId(authUserId)).thenReturn(null)
         `when`(managerRepository.findByHandle("Taken")).thenReturn(collision)
@@ -94,8 +86,6 @@ class SupabaseAuthenticationConverterTest {
             id = 4,
             handle = "CoolDiscordUser",
             displayName = "CoolDiscordUser",
-            rankTier = RankTier.BRONZE,
-            rankDivision = RankDivision.III,
             authUserId = authUserId,
         )
         `when`(managerRepository.findByAuthUserId(authUserId)).thenReturn(null, winner)
@@ -115,8 +105,6 @@ class SupabaseAuthenticationConverterTest {
             id = 5,
             handle = "Taken",
             displayName = "Taken",
-            rankTier = RankTier.SILVER,
-            rankDivision = RankDivision.II,
         ))
         `when`(managerRepository.findByHandle("Taken1")).thenReturn(null)
         `when`(managerRepository.save(any(Manager::class.java)))
@@ -135,8 +123,6 @@ class SupabaseAuthenticationConverterTest {
             id = 3,
             handle = "AdminUser",
             displayName = "Admin User",
-            rankTier = RankTier.ELITE,
-            rankDivision = RankDivision.I,
             authUserId = authUserId,
             isAdmin = true,
         )

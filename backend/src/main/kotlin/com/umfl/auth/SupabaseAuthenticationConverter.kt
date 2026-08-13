@@ -2,8 +2,6 @@ package com.umfl.auth
 
 import com.umfl.manager.Manager
 import com.umfl.manager.ManagerRepository
-import com.umfl.manager.RankDivision
-import com.umfl.manager.RankTier
 import org.springframework.context.annotation.Profile
 import org.springframework.core.convert.converter.Converter
 import org.springframework.dao.DuplicateKeyException
@@ -23,10 +21,10 @@ import java.util.UUID
  * `sub` claim is the stable `auth.users.id` UUID.
  *
  * Just-in-time provisioning: the first request from a brand-new Supabase
- * identity has no linked [Manager] row yet, so one is created here at the
- * starting rank, deriving handle/display name from the Discord profile claims
- * Supabase surfaces in `user_metadata`. There is no starting balance to hand
- * out — budget is granted per tournament registration.
+ * identity has no linked [Manager] row yet, so one is created here, deriving
+ * handle/display name from the Discord profile claims Supabase surfaces in
+ * `user_metadata`. There is no starting balance to hand out — budget is
+ * granted per tournament registration.
  *
  * Authorities come entirely from [ManagerAuthorities], which knows nothing
  * about JWTs — this class's only job is turning a token into a [Manager].
@@ -63,8 +61,6 @@ class SupabaseAuthenticationConverter(
             val provisioned = Manager(
                 handle = uniqueHandle(discordUsername),
                 displayName = discordUsername,
-                rankTier = RankTier.BRONZE,
-                rankDivision = RankDivision.III,
                 authUserId = authUserId,
             )
             try {

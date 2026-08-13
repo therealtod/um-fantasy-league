@@ -16,8 +16,6 @@ export interface Manager {
   id: number
   handle: string
   displayName: string
-  /** Pre-formatted, e.g. "Elite III". */
-  rank: string
   isAdmin: boolean
 }
 

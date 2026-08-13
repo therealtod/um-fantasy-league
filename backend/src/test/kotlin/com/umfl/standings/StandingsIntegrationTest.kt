@@ -2,8 +2,6 @@ package com.umfl.standings
 
 import com.umfl.manager.Manager
 import com.umfl.manager.ManagerRepository
-import com.umfl.manager.RankDivision
-import com.umfl.manager.RankTier
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.EntryStatus
 import com.umfl.tournament.TournamentEntry
@@ -209,8 +207,6 @@ class StandingsIntegrationTest @Autowired constructor(
                 Manager(
                     handle = handle,
                     displayName = handle,
-                    rankTier = RankTier.BRONZE,
-                    rankDivision = RankDivision.III,
                 )
             )
             entryRepository.save(

@@ -157,11 +157,11 @@ insert into game_map (name) values
 -- is sent. No credit balances: budget is granted per registration.
 -- ---------------------------------------------------------------------------
 
-insert into manager (handle, display_name, rank_tier, rank_division, is_admin) values
-    ('NeonStrategist',  'Neon Strategist',  'ELITE',  'III', true),
-    ('SherlockMain',    'Sherlock Main',    'GOLD',   'I',   false),
-    ('MythicMind',      'Mythic Mind',      'ELITE',  'II',  false),
-    ('ArthurianLegend', 'Arthurian Legend', 'LEGEND', 'I',   false);
+insert into manager (handle, display_name, is_admin) values
+    ('NeonStrategist',  'Neon Strategist',  true),
+    ('SherlockMain',    'Sherlock Main',    false),
+    ('MythicMind',      'Mythic Mind',      false),
+    ('ArthurianLegend', 'Arthurian Legend', false);
 
 -- ---------------------------------------------------------------------------
 -- Tournaments, one per lifecycle state the Lobby renders.

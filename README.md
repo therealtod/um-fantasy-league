@@ -313,7 +313,7 @@ Consequences worth knowing:
 ## API
 
 ```
-GET  /api/me                                     manager identity and rank
+GET  /api/me                                     manager identity
 GET  /api/tournaments                            ?status=
 GET  /api/tournaments/{id}
 GET  /api/tournaments/{id}/heroes                ?search= &sort=COST|NAME   this pool, these prices
@@ -380,7 +380,7 @@ rejection.
 
 - **`prod`** — `SupabaseManagerProvider` verifies a Supabase-issued JWT (Spring Security's OAuth2
   resource server) and resolves the manager by the token's `sub` claim against
-  `manager.auth_user_id`, just-in-time provisioning a new BRONZE-tier manager on first login.
+  `manager.auth_user_id`, just-in-time provisioning a new manager on first login.
   Sign-in happens via Supabase Auth's Discord OAuth provider from the frontend
   (`supabase.auth.signInWithOAuth({ provider: 'discord' })`) — Discord is just the upstream identity
   provider; the backend only ever verifies Supabase's own signed token.

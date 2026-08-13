@@ -18,7 +18,6 @@ data class ManagerDto(
     val id: Long,
     val handle: String,
     val displayName: String,
-    val rank: String,
     val isAdmin: Boolean,
 ) {
     companion object {
@@ -26,7 +25,6 @@ data class ManagerDto(
             id = requireNotNull(manager.id),
             handle = manager.handle,
             displayName = manager.displayName,
-            rank = manager.rankLabel,
             isAdmin = manager.isAdmin,
         )
     }
