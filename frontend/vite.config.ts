@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // Keeps the browser on a single origin in development.
       '/api': {
-        target: 'https://lucky-said-degree-reporter.trycloudflare.com',
+        target: 'https://act-physician-blowing-paul.trycloudflare.com',
         changeOrigin: true,
       },
     },

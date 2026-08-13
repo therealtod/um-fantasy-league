@@ -11,4 +11,4 @@ binding = "ASSETS"
 # this for the real backend host once one exists at a stable, non-tunnel
 # hostname (see BACKEND_HOST in AGENTS.md's CI/CD section).
 [vars]
-BACKEND_HOST = "https://lucky-said-degree-reporter.trycloudflare.com"
+BACKEND_HOST = "https://act-physician-blowing-paul.trycloudflare.com"
