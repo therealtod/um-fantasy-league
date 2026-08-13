@@ -86,14 +86,6 @@ function returnToMatchList() {
   matchViewMode.value = 'list'
   selectedMatchId.value = null
 }
-
-function handleMatchCreated() {
-  returnToMatchList()
-}
-
-function handleMatchUpdated() {
-  returnToMatchList()
-}
 </script>
 
 <template>
@@ -183,7 +175,7 @@ function handleMatchUpdated() {
             v-else-if="matchViewMode === 'create' && selectedTournamentId"
             :tournament-id="selectedTournamentId"
             :mode="'create'"
-            @success="handleMatchCreated"
+            @success="returnToMatchList"
             @cancel="returnToMatchList"
           />
 
@@ -192,7 +184,7 @@ function handleMatchUpdated() {
             :tournament-id="selectedTournamentId"
             :match-id="selectedMatchId"
             :mode="'edit'"
-            @success="handleMatchUpdated"
+            @success="returnToMatchList"
             @cancel="returnToMatchList"
           />
         </div>
