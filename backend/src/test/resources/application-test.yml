@@ -2,7 +2,9 @@ spring:
   flyway:
     enabled: true
     # Every integration test asserts against the demo fixtures (seeded
-    # tournaments, managers, recorded matches) -- see V2__demo_fixtures.sql.
+    # tournaments, managers, recorded matches) -- see V3__demo_fixtures.sql.
+    # Heroes and boards are not in there: they are reference data and come from
+    # `db/migration/V2__reference_data.sql`, in every profile.
     locations: classpath:db/migration,classpath:db/seed
 
 logging:

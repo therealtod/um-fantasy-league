@@ -29,10 +29,14 @@ cd frontend && npm install && npm run dev
 
 Migrations are periodically squashed back into a single `V1__core_schema.sql` baseline (schema +
 admin authorization, no data), so an older local database fails Flyway checksum validation. There is
-no production data: `docker compose down -v && docker compose up -d db`. Demo/dev fixtures — three
-tournaments, seeded managers, a full recorded result set — live in a second Flyway location,
-`db/seed/V2__demo_fixtures.sql`, that only `dev` and `test` add to `spring.flyway.locations` (see
-Profiles below). A default start or the `prod` profile migrates schema only and writes no mock data.
+no production data: `docker compose down -v && docker compose up -d db`. Data past that baseline
+splits by *kind*, not by environment: `db/migration/V2__reference_data.sql` carries the canonical
+hero and board catalogue — facts about Unmatched, not about a league, and the thing an admin prices
+into a pool — so it migrates in **every** profile, while demo/dev fixtures — three tournaments,
+seeded managers, a full recorded result set — live in a second Flyway location,
+`db/seed/V3__demo_fixtures.sql`, that only `dev` and `test` add to `spring.flyway.locations` (see
+Profiles below). A default start or the `prod` profile therefore comes up with every hero and board
+and no mock league data at all.
 
 Tests:
 
@@ -177,7 +181,7 @@ below; nothing outside that surface writes reference data or results.
   two rows is flagged `is_winner` — a partial unique index stops two, and
   `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw**, and the loser never
   survives: `MatchResultPolicy.LOSER_HAS_POSITIVE_HEALTH` requires the losing side to finish on 0 or
-  less (an overkill hit lands it below zero), and every recorded game in `V2__demo_fixtures.sql`
+  less (an overkill hit lands it below zero), and every recorded game in `V3__demo_fixtures.sql`
   respects that. Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side,
   like every other derived number here.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
@@ -241,8 +245,12 @@ unique natural key because Spring Data JDBC can't map composite primary keys; th
 (`tournament_hero`, `tournament_map`, `entry_slot`, `hero_ban`, `match_game_participant`) keep
 natural composite keys. The
 integration tests assert on the seed's numbers exactly — changing a seeded price or result means
-updating `V2__demo_fixtures.sql` and the tests together. New data past that fixed baseline goes
-through the Admin API (see below), not another migration.
+updating `V3__demo_fixtures.sql` and the tests together. New *league* data past that fixed baseline
+goes through the Admin API (see below), not another migration. The one thing that legitimately
+arrives as a migration is reference data: a hero or a board Restoration Games releases later belongs
+in a forward migration alongside `V2__reference_data.sql` (or through `/api/admin/heroes` /
+`/api/admin/maps`, which write the same tables), since a `prod` database has to have it without
+anyone hand-entering 74 heroes.
 
 ## Frontend architecture
 

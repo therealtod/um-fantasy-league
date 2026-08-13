@@ -37,6 +37,9 @@ class SchemaAndSeedTest @Autowired constructor(
 
     @Test
     fun `every table is seeded to its expected size`() {
+        // These two come from `db/migration/V2__reference_data.sql`, not from the
+        // fixtures: the hero and board catalogue migrates in every profile, so a
+        // `prod` database carries these same counts with everything below at zero.
         assertEquals(74, count("heroes"))
         assertEquals(35, count("game_map"))
         assertEquals(4, count("manager"))

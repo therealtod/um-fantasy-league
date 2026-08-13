@@ -3,20 +3,25 @@
 --
 -- This file lives outside `db/migration` on purpose. `spring.flyway.locations`
 -- in the base `application.yml` points at `classpath:db/migration` only, so a
--- default start (no profile) or the `prod` profile migrates just the schema
--- in `V1__core_schema.sql` and ends up with an empty database: zero
--- tournaments, zero managers, zero recorded results. `application-dev.yml`
--- and `application-test.yml` each add `classpath:db/seed` to that list, which
--- is what pulls this file in for local dev and for the test suite.
+-- default start (no profile) or the `prod` profile migrates the schema in
+-- `V1__core_schema.sql` plus the canonical heroes and boards in
+-- `V2__reference_data.sql`, and ends up with a league that has never been
+-- played: zero tournaments, zero managers, zero recorded results.
+-- `application-dev.yml` and `application-test.yml` each add `classpath:db/seed`
+-- to that list, which is what pulls this file in for local dev and for the
+-- test suite.
+--
+-- Nothing here writes `heroes` or `game_map`. Those are reference data, not
+-- fixtures, so they migrate in every profile from `V2__reference_data.sql`;
+-- this file only *references* them, and would fail loudly on a name that
+-- migration does not carry.
 --
 -- The fixture: three tournaments in three lifecycle states, one of them
--- (Summer of Legends) with a complete recorded result set. Hero and map names
--- reference Unmatched (Restoration Games). No official artwork is bundled, so
--- `heroes.image_url` stays null and the UI falls back to a generated
--- placeholder. Reference rows are joined by their natural key (heroes.name,
--- game_map.name, manager.handle, tournament.name) rather than by assumed
--- serial ids, which is why those columns are unique. The one exception is
--- `tournament_match`, which has no natural key -- see the comment there.
+-- (Summer of Legends) with a complete recorded result set. Reference rows are
+-- joined by their natural key (heroes.name, game_map.name, manager.handle,
+-- tournament.name) rather than by assumed serial ids, which is why those
+-- columns are unique. The one exception is `tournament_match`, which has no
+-- natural key -- see the comment there.
 --
 -- NeonStrategist is flagged admin (see below) -- the only such manager here,
 -- which makes it the manager `DevManagerAuthenticationFilter` falls back to
@@ -28,127 +33,6 @@
 -- Integration tests assert on these numbers exactly. Changing a seeded price
 -- or result means updating them.
 -- ===========================================================================
-
--- The full canonical hero roster from the physical game (all released
--- Unmatched sets as of this seed). Only a subset is ever priced into a given
--- tournament's pool (`tournament_hero`), but every hero the game has ever
--- printed is reference data here so an admin can pool and price any of them
--- without a migration.
-insert into heroes (name) values
-    ('Alice'),
-    ('King Arthur'),
-    ('Medusa'),
-    ('Sinbad'),
-    ('Bruce Lee'),
-    ('Robin Hood'),
-    ('Bigfoot'),
-    ('InGen'),
-    ('Raptors'),
-    ('Sherlock Holmes'),
-    ('Invisible Man'),
-    ('Dracula'),
-    ('Jekyll & Hyde'),
-    ('Buffy'),
-    ('Angel'),
-    ('Spike'),
-    ('Willow'),
-    ('Little Red Riding Hood'),
-    ('Beowulf'),
-    ('Deadpool'),
-    ('Achilles'),
-    ('Yennenga'),
-    ('Bloody Mary'),
-    ('Sun Wukong'),
-    ('Moon Knight'),
-    ('Luke Cage'),
-    ('Ghost Rider'),
-    ('Daredevil'),
-    ('Elektra'),
-    ('Bullseye'),
-    ('Dr. Ellie Sattler'),
-    ('T. Rex'),
-    ('Houdini'),
-    ('The Genie'),
-    ('Ms. Marvel'),
-    ('Cloak & Dagger'),
-    ('Squirrel Girl'),
-    ('Black Widow'),
-    ('Black Panther'),
-    ('Winter Soldier'),
-    ('Doctor Strange'),
-    ('Spiderman'),
-    ('She-Hulk'),
-    ('Annie Christmas'),
-    ('Golden Bat'),
-    ('Nikola Tesla'),
-    ('Dr. Jill Trent'),
-    ('Tomoe Gozen'),
-    ('Oda Nobunaga'),
-    ('Shakespeare'),
-    ('Titania'),
-    ('Hamlet'),
-    ('The Wayward Sisters'),
-    ('Geralt of Rivia'),
-    ('Ancient Leshen'),
-    ('Ciri'),
-    ('Yennefer & Triss'),
-    ('Eredin'),
-    ('Philippa'),
-    ('Loki'),
-    ('Pandora'),
-    ('Chupacabra'),
-    ('Blackbeard'),
-    ('Leonardo'),
-    ('Donatello'),
-    ('Michelangelo'),
-    ('Raphael'),
-    ('Shredder'),
-    ('Krang'),
-    ('Muhammad Ali'),
-    ('John Henry'),
-    ('Rosie the Riveter'),
-    ('George Washington'),
-    ('Wyatt Earp');
-
--- The full canonical board pool. As with `heroes` above, only a subset is ever
--- legal for a given tournament (`tournament_map`); the rest sit here as
--- reference data an admin can pool without a migration.
-insert into game_map (name) values
-    ('Sarpedon'),
-    ('Marmoreal'),
-    ('Sherwood Forest'),
-    ('Yukon'),
-    ('Raptor Paddock'),
-    ('Soho'),
-    ('Baskerville Manor'),
-    ('Sunnydale High'),
-    ('The Bronze'),
-    ('Heorot'),
-    ('Hanging Gardens'),
-    ('The Raft'),
-    ('Hell''s Kitchen'),
-    ('T. Rex Paddock'),
-    ('King Solomon''s Mine'),
-    ('Navy Pier'),
-    ('Helicarrier'),
-    ('Sanctum Sanctorum'),
-    ('McMinnville'),
-    ('Point Pleasant'),
-    ('Azuchi Castle'),
-    ('Globe Theatre'),
-    ('Streets of Novigrad'),
-    ('Naglfar'),
-    ('Kaer Mohren'),
-    ('Fayrlund Forest'),
-    ('Venice'),
-    ('Santa''s Workshop'),
-    ('Tsing Shan Monastery'),
-    ('Thrilla in Manilla'),
-    ('New York City'),
-    ('Technodrome'),
-    ('The White House'),
-    ('The Alamo'),
-    ('Yukon-1900');
 
 -- ---------------------------------------------------------------------------
 -- Managers. NeonStrategist is flagged admin -- that is what makes the admin

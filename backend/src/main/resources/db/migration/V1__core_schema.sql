@@ -6,15 +6,21 @@
 -- anywhere: the tournament is the unit of scoping, and a season is just a
 -- label someone puts in a tournament name.
 --
--- Schema only -- no seed data lives here. A real deployment (`prod` profile,
--- or any start with no profile at all) migrates this file alone and ends up
--- with an empty, schema-only database: zero tournaments, zero managers, zero
--- results. Demo/dev fixtures live in a separate Flyway location
--- (`db/seed/V2__demo_fixtures.sql`) that only `spring.flyway.locations` for
--- the `dev` and `test` profiles adds (see `application-dev.yml` /
--- `application-test.yml`) -- so local dev and the test suite still get the
--- fixture data they're built around, without a production start ever writing
--- mock tournaments or mock managers.
+-- Schema only -- no data lives in this file. Data splits in two after it, and
+-- the split is by *kind*, not by environment:
+--
+--   * `db/migration/V2__reference_data.sql` -- the canonical heroes and boards
+--     Unmatched has printed. Facts about the game, not about a league, so they
+--     migrate in every profile: without them an admin has nothing to price
+--     into a tournament pool.
+--   * `db/seed/V3__demo_fixtures.sql` -- three demo tournaments, seeded
+--     managers, a full recorded result set. A separate Flyway location that
+--     only the `dev` and `test` profiles add to `spring.flyway.locations` (see
+--     `application-dev.yml` / `application-test.yml`).
+--
+-- So a real deployment (`prod`, or any start with no profile at all) comes up
+-- with a full hero and board catalogue and a league that has never been
+-- played: zero tournaments, zero managers, zero results.
 --
 -- Naming: `game_map` and `tournament_match`, because MAP and MATCH are
 -- reserved words in the SQL standard and quoting them at every call site

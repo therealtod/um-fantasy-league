@@ -65,12 +65,15 @@ Then open <http://localhost:5173>. The Vite dev server proxies `/api` to `localh
 > docker compose down -v && docker compose up -d db
 > ```
 
-`V1__core_schema.sql` is schema only — no mock data. The three demo tournaments, the seeded
-managers, and the recorded Summer of Legends result set are a second migration,
-`db/seed/V2__demo_fixtures.sql`, that only the `dev` and `test` profiles add to
-`spring.flyway.locations`. A plain start with no profile, or `--spring.profiles.active=prod`, migrates
-schema only and boots with an empty database — nothing to delete before pointing this at a real
-tournament.
+`V1__core_schema.sql` is schema only — no data at all. What follows it splits by kind rather than by
+environment. `db/migration/V2__reference_data.sql` holds the canonical catalogue: all 74 heroes and
+35 boards Unmatched has printed. That is not mock data — it is a fact about the game, and it is what
+an admin prices into a tournament pool — so it migrates in every profile, production included. The
+three demo tournaments, the seeded managers, and the recorded Summer of Legends result set are the
+part that *is* mock, and they live in `db/seed/V3__demo_fixtures.sql`, a second Flyway location that
+only the `dev` and `test` profiles add to `spring.flyway.locations`. A plain start with no profile,
+or `--spring.profiles.active=prod`, therefore boots with the full hero and board catalogue and a
+league nobody has played yet — nothing to delete before pointing this at a real tournament.
 
 For the local workflow, set `VITE_DEV_MANAGER_ID=1` in `frontend/.env.local` (the supplied example
 does this). Vite development builds then skip Supabase Auth and send that manager ID to the dev
