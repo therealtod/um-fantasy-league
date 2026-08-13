@@ -293,6 +293,25 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `a game with a negative-health loser is accepted`() {
+        val tournamentId = winterOfChampionsId()
+        val mapId = id("game_map", "Baskerville Manor")
+
+        val recorded = adminMatchService.record(
+            tournamentId,
+            round = 1,
+            playedAt = Instant.now(),
+            externalLink = null,
+            participants = participants(),
+            games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, healthB = -3),
+            bans = emptyList(),
+        )
+
+        val loser = recorded.games.single().participants.single { !it.isWinner }
+        assertEquals(-3, loser.healthRemaining)
+    }
+
+    @Test
     fun `correcting a match fully replaces its participants and games, and persists an external link`() {
         val tournamentId = winterOfChampionsId()
         val (games, sides, bans) = aliceVsRobinHood()

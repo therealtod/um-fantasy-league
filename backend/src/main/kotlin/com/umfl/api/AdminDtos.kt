@@ -14,7 +14,6 @@ import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Positive
-import jakarta.validation.constraints.PositiveOrZero
 import jakarta.validation.constraints.Size
 import java.math.BigDecimal
 import java.time.Instant
@@ -122,8 +121,11 @@ data class MatchParticipantRequest(
 data class MatchGameParticipantRequest(
     @field:NotNull(message = "heroId is required")
     val heroId: Long?,
+    // No @PositiveOrZero here: a losing hero finishing on negative health is
+    // legal (the loser-must-be-<=0 rule lives in MatchResultPolicy, which
+    // needs to see negative values to enforce it), and the winner is
+    // unrestricted by the same schema-level check constraint.
     @field:NotNull(message = "healthRemaining is required")
-    @field:PositiveOrZero(message = "healthRemaining cannot be negative")
     val healthRemaining: Int?,
     val isWinner: Boolean = false,
 )
