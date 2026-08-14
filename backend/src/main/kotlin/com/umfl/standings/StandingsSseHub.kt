@@ -36,6 +36,16 @@ class StandingsSseHub {
         Thread(runnable, "standings-sse-keepalive").apply { isDaemon = true }
     }
 
+    // Fans out the actual per-emitter writes off both the admin's request thread (AFTER_COMMIT
+    // listener) and the single-threaded keep-alive scheduler, so one client with a full TCP send
+    // buffer stalls at most this pool's worth of sends rather than blocking either caller behind
+    // it. Small and bounded on purpose: sends are cheap and MAX_TOTAL_SUBSCRIBERS already caps how
+    // many can ever be in flight, so a handful of threads is enough to decouple write latency from
+    // watcher count without turning this into a general-purpose pool.
+    private val dispatch = Executors.newFixedThreadPool(DISPATCH_THREADS) { runnable ->
+        Thread(runnable, "standings-sse-dispatch").apply { isDaemon = true }
+    }
+
     init {
         keepAlive.scheduleAtFixedRate(::sendKeepAlive, KEEP_ALIVE_SECONDS, KEEP_ALIVE_SECONDS, TimeUnit.SECONDS)
     }
@@ -77,8 +87,10 @@ class StandingsSseHub {
     fun onStandingsUpdate(event: StandingsUpdateEvent) {
         val emitters = emittersByTournament[event.tournamentId] ?: return
         for (emitter in emitters) {
-            send(event.tournamentId, emitter, emitters) {
-                it.send(SseEmitter.event().name("update").data(event.tournamentId))
+            dispatch.execute {
+                send(event.tournamentId, emitter, emitters) {
+                    it.send(SseEmitter.event().name("update").data(event.tournamentId))
+                }
             }
         }
     }
@@ -86,7 +98,9 @@ class StandingsSseHub {
     private fun sendKeepAlive() {
         for ((tournamentId, emitters) in emittersByTournament) {
             for (emitter in emitters) {
-                send(tournamentId, emitter, emitters) { it.send(SseEmitter.event().comment("keep-alive")) }
+                dispatch.execute {
+                    send(tournamentId, emitter, emitters) { it.send(SseEmitter.event().comment("keep-alive")) }
+                }
             }
         }
     }
@@ -139,6 +153,7 @@ class StandingsSseHub {
     @PreDestroy
     fun shutdown() {
         keepAlive.shutdownNow()
+        dispatch.shutdownNow()
     }
 
     /** Test seam: real callers have no reason to know how many tabs are watching. */
@@ -152,5 +167,6 @@ class StandingsSseHub {
         const val MAX_SUBSCRIBERS_PER_TOURNAMENT = 200
         const val MAX_TOTAL_SUBSCRIBERS = 500
         const val EMITTER_TIMEOUT_MILLIS = 60L * 60 * 1000 // 1 hour
+        const val DISPATCH_THREADS = 4
     }
 }
