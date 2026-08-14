@@ -199,6 +199,10 @@ async function saveMatch() {
     error.value = 'The losing hero must have 0 or less health'
     return
   }
+  if (form.value.bans.some((b) => b.heroId === 0)) {
+    error.value = 'Every ban needs a hero selected'
+    return
+  }
 
   loading.value = true
   error.value = null
