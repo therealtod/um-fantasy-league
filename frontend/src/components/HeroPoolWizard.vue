@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type { Hero, HeroAdminDto } from '@/api/types'
@@ -15,6 +15,7 @@ const heroes = ref<HeroAdminDto[]>([])
 const heroPoolHeroes = ref<Hero[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const showAddForm = ref(false)
 const removingHero = ref<Hero | null>(null)
 
@@ -44,6 +45,7 @@ async function loadHeroes() {
     heroes.value = (await api.admin.listHeroes()).sort(byName)
   } catch (e) {
     error.value = describeError(e, 'Failed to load heroes')
+    violations.value = violationMessages(e)
   }
 }
 
@@ -61,6 +63,7 @@ watch(selectedTournamentId, async (newId) => {
 async function loadHeroPool(tournamentId: number) {
   loading.value = true
   error.value = null
+  violations.value = []
   try {
     const pool = await api.admin.listHeroPool(tournamentId)
     // A later switch may have already changed the selection while this was in flight — drop it.
@@ -69,6 +72,7 @@ async function loadHeroPool(tournamentId: number) {
   } catch (e) {
     if (selectedTournamentId.value !== tournamentId) return
     error.value = describeError(e, 'Failed to load hero pool')
+    violations.value = violationMessages(e)
   } finally {
     if (selectedTournamentId.value === tournamentId) loading.value = false
   }
@@ -96,6 +100,7 @@ function stageHero() {
   if (!hero) return
 
   error.value = null
+  violations.value = []
   pendingHeroes.value.push({ heroId: hero.id, name: hero.name, cost: addForm.value.cost })
   addForm.value = { heroId: null, cost: 1000 }
 }
@@ -109,6 +114,7 @@ async function submitBatch() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     await api.admin.addHeroesToPool(
@@ -119,6 +125,7 @@ async function submitBatch() {
     cancelAddForm()
   } catch (e) {
     error.value = describeError(e, 'Failed to add heroes to pool')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -130,6 +137,7 @@ function onCostInputChange(hero: Hero, event: Event) {
 
   if (input.value.trim() === '' || !Number.isFinite(newCost) || newCost < 1) {
     error.value = 'Cost must be a number of at least 1 credit'
+    violations.value = []
     input.value = String(hero.cost)
     return
   }
@@ -142,12 +150,14 @@ async function updateHeroCost(heroId: number, newCost: number) {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     await api.admin.setHeroCost(selectedTournamentId.value, heroId, newCost)
     await loadHeroPool(selectedTournamentId.value)
   } catch (e) {
     error.value = describeError(e, 'Failed to update hero cost')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -155,6 +165,7 @@ async function updateHeroCost(heroId: number, newCost: number) {
 
 function startRemoveHero(hero: Hero) {
   error.value = null
+  violations.value = []
   removingHero.value = hero
 }
 
@@ -167,6 +178,7 @@ async function confirmRemoveHero() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     await api.admin.removeHeroFromPool(selectedTournamentId.value, removingHero.value.id)
@@ -174,6 +186,7 @@ async function confirmRemoveHero() {
     await loadHeroPool(selectedTournamentId.value)
   } catch (e) {
     error.value = describeError(e, 'Failed to remove hero from pool')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -186,7 +199,7 @@ async function confirmRemoveHero() {
       <h2 class="headline text-xl">Hero Pool & Pricing</h2>
     </div>
 
-    <ErrorBanner :message="error" />
+    <ErrorBanner :message="error" :violations="violations" />
 
     <!-- Tournament selector -->
     <TournamentSelect v-model="selectedTournamentId" :tournaments="tournaments" />

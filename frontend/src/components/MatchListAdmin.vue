@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import type { BanType, MatchResultDto } from '@/api/types'
-import { api, describeError } from '@/api/client'
+import { api, describeError, violationMessages } from '@/api/client'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 
@@ -18,6 +18,7 @@ const emit = defineEmits<{
 const matches = ref<MatchResultDto[]>([])
 const isLoading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const selectedRound = ref<number | null>(null)
 const deletingMatch = ref<MatchResultDto | null>(null)
 const isDeleting = ref(false)
@@ -45,6 +46,7 @@ async function loadMatches() {
   const tournamentId = props.tournamentId
   isLoading.value = true
   error.value = null
+  violations.value = []
   try {
     const loaded = await api.admin.listMatches(tournamentId)
     // A later switch may have already changed the selection while this was in flight — drop it.
@@ -53,6 +55,7 @@ async function loadMatches() {
   } catch (err) {
     if (props.tournamentId !== tournamentId) return
     error.value = describeError(err, 'Failed to load matches')
+    violations.value = violationMessages(err)
   } finally {
     if (props.tournamentId === tournamentId) isLoading.value = false
   }
@@ -96,6 +99,7 @@ function handleEdit(matchId: number) {
 
 function startDelete(match: MatchResultDto) {
   error.value = null
+  violations.value = []
   deletingMatch.value = match
 }
 
@@ -109,12 +113,14 @@ async function confirmDelete() {
 
   isDeleting.value = true
   error.value = null
+  violations.value = []
   try {
     await api.admin.deleteMatch(props.tournamentId, match.matchId)
     deletingMatch.value = null
     await loadMatches() // Refresh the list
   } catch (err) {
     error.value = describeError(err, 'Failed to delete match')
+    violations.value = violationMessages(err)
   } finally {
     isDeleting.value = false
   }
@@ -161,7 +167,7 @@ watch(
       </div>
     </div>
 
-    <ErrorBanner class="mb-4" :message="error" />
+    <ErrorBanner class="mb-4" :message="error" :violations="violations" />
 
     <!-- Delete confirmation -->
     <DestructiveConfirmPanel

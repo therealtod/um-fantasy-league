@@ -96,6 +96,18 @@ export function describeError(e: unknown, fallback: string): string {
   return e instanceof Error ? e.message : fallback
 }
 
+/**
+ * Rule violations from a 422 `ApiError`, as display strings — `[]` for
+ * anything else. `ApiError.violations` already covers roster, match and
+ * scoring rule breaches alike (`GlobalExceptionHandler` serialises all three
+ * `*RuleException` types to the same `{rule, message}` shape), so this is the
+ * one place that reaches past `describeError`'s single joined sentence to the
+ * structured list underneath it.
+ */
+export function violationMessages(e: unknown): string[] {
+  return e instanceof ApiError ? e.violations.map((violation) => violation.message) : []
+}
+
 function queryString(params: Record<string, string | number | undefined | null>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {

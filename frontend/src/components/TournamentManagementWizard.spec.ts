@@ -16,6 +16,7 @@ vi.mock('@/api/client', () => ({
     },
   },
   describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
+  violationMessages: () => [],
 }))
 
 const tournaments: Tournament[] = [

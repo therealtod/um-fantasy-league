@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type { MapAdminDto } from '@/api/types'
@@ -15,6 +15,7 @@ const maps = ref<MapAdminDto[]>([])
 const mapPool = ref<MapAdminDto[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const removingMap = ref<MapAdminDto | null>(null)
 
 // Maps staged for the next batch submit — checked here, sent in one request.
@@ -37,6 +38,7 @@ async function loadMaps() {
     maps.value = (await api.admin.listMaps()).sort(byName)
   } catch (e) {
     error.value = describeError(e, 'Failed to load maps')
+    violations.value = violationMessages(e)
   }
 }
 
@@ -49,6 +51,7 @@ async function loadMapPool(tournamentId: number) {
   } catch (e) {
     if (selectedTournamentId.value !== tournamentId) return
     error.value = describeError(e, 'Failed to load map pool')
+    violations.value = violationMessages(e)
   }
 }
 
@@ -68,6 +71,7 @@ async function submitBatch() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     await api.admin.addMapsToPool(selectedTournamentId.value, selectedMapIds.value)
@@ -75,6 +79,7 @@ async function submitBatch() {
     await loadMapPool(selectedTournamentId.value)
   } catch (e) {
     error.value = describeError(e, 'Failed to add maps to pool')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -82,6 +87,7 @@ async function submitBatch() {
 
 function startRemoveMap(map: MapAdminDto) {
   error.value = null
+  violations.value = []
   removingMap.value = map
 }
 
@@ -94,6 +100,7 @@ async function confirmRemoveMap() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     await api.admin.removeMapFromPool(selectedTournamentId.value, removingMap.value.id)
@@ -102,6 +109,7 @@ async function confirmRemoveMap() {
   } catch (e) {
     // A 409 here means the tournament already has a match recorded on this board.
     error.value = describeError(e, 'Failed to remove map from pool')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -114,7 +122,7 @@ async function confirmRemoveMap() {
       <h2 class="headline text-xl">Map Pool Management</h2>
     </div>
 
-    <ErrorBanner :message="error" />
+    <ErrorBanner :message="error" :violations="violations" />
 
     <!-- Tournament selector -->
     <TournamentSelect v-model="selectedTournamentId" :tournaments="tournaments" />

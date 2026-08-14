@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type {
   Tournament,
@@ -15,6 +15,7 @@ const tournamentsStore = useTournamentsStore()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const showForm = ref(false)
 const editingTournament = ref<Tournament | null>(null)
 const deletingTournament = ref<Tournament | null>(null)
@@ -87,6 +88,7 @@ async function confirmDelete() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     await api.admin.deleteTournament(deletingTournament.value.id)
@@ -94,12 +96,15 @@ async function confirmDelete() {
     cancelDelete()
   } catch (e) {
     error.value = describeError(e, 'Failed to delete tournament')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
 }
 
 async function saveTournament() {
+  violations.value = []
+
   if (!form.value.name.trim()) {
     error.value = 'Tournament name is required'
     return
@@ -111,6 +116,7 @@ async function saveTournament() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     if (editingTournament.value) {
@@ -122,6 +128,7 @@ async function saveTournament() {
     cancelForm()
   } catch (e) {
     error.value = describeError(e, 'Failed to save tournament')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -137,7 +144,7 @@ async function saveTournament() {
       </button>
     </div>
 
-    <ErrorBanner :message="error" />
+    <ErrorBanner :message="error" :violations="violations" />
 
     <!-- Form -->
     <div v-if="showForm" class="panel flex flex-col gap-5 p-6">

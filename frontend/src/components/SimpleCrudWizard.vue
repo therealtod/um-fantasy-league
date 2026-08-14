@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="TItem extends { id: number }, TForm extends { name: string }">
 import { shallowRef, ref, onMounted } from 'vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
-import { describeError } from '@/api/client'
+import { describeError, violationMessages } from '@/api/client'
 
 const props = defineProps<{
   entityLabel: string
@@ -16,6 +16,7 @@ const props = defineProps<{
 const items = shallowRef<TItem[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const showForm = ref(false)
 const editingItem = ref<TItem | null>(null)
 
@@ -28,10 +29,12 @@ onMounted(() => {
 async function loadItems() {
   loading.value = true
   error.value = null
+  violations.value = []
   try {
     items.value = await props.load()
   } catch (e) {
     error.value = describeError(e, `Failed to load ${props.entityLabel.toLowerCase()}s`)
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -56,6 +59,8 @@ function cancelForm() {
 }
 
 async function save() {
+  violations.value = []
+
   if (!form.value.name.trim()) {
     error.value = `${props.entityLabel} name is required`
     return
@@ -63,6 +68,7 @@ async function save() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     if (editingItem.value) {
@@ -75,6 +81,7 @@ async function save() {
     cancelForm()
   } catch (e) {
     error.value = describeError(e, `Failed to save ${props.entityLabel.toLowerCase()}`)
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -88,7 +95,7 @@ async function save() {
       <button v-if="!showForm" class="btn-primary" @click="startCreate">+ Create {{ entityLabel }}</button>
     </div>
 
-    <ErrorBanner :message="error" />
+    <ErrorBanner :message="error" :violations="violations" />
 
     <!-- Form -->
     <div v-if="showForm" class="panel flex flex-col gap-5 p-6">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type { BanType, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
@@ -22,6 +22,7 @@ const tournamentsStore = useTournamentsStore()
 
 const loading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const isInitialized = ref(false)
 
 const banTypes: { value: BanType; label: string }[] = [
@@ -96,6 +97,7 @@ async function loadMatchData() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     const matchData = await api.admin.getMatch(props.tournamentId, props.matchId)
@@ -121,6 +123,7 @@ async function loadMatchData() {
     }
   } catch (e) {
     error.value = describeError(e, 'Failed to load match data')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -170,6 +173,8 @@ function setWinner(gameIndex: number, participantIndex: number) {
 }
 
 async function saveMatch() {
+  violations.value = []
+
   const tournamentId = props.tournamentId
   if (!tournamentId) {
     error.value = 'Tournament ID is required'
@@ -206,6 +211,7 @@ async function saveMatch() {
 
   loading.value = true
   error.value = null
+  violations.value = []
 
   try {
     if (props.mode === 'create') {
@@ -216,6 +222,7 @@ async function saveMatch() {
     emit('success')
   } catch (e) {
     error.value = describeError(e, 'Failed to save match')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -237,6 +244,7 @@ onMounted(async () => {
     }
   } catch (e) {
     error.value = describeError(e, 'Failed to load map and hero pools')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -252,7 +260,7 @@ onMounted(async () => {
       </h2>
     </div>
 
-    <ErrorBanner :message="error" />
+    <ErrorBanner :message="error" :violations="violations" />
 
     <!-- Tournament info (when provided as prop) -->
     <div v-if="tournamentId" class="panel flex items-center gap-4 p-4">

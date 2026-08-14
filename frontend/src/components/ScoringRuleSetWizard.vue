@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { ScoringCoefficientRequest, ScoringRuleSetDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -12,6 +12,7 @@ const selectedTournamentId = ref<number | null>(null)
 const ruleSets = ref<ScoringRuleSetDto[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const violations = ref<string[]>([])
 const showForm = ref(false)
 const editingRuleSet = ref<ScoringRuleSetDto | null>(null)
 
@@ -80,6 +81,7 @@ async function loadRuleSets() {
 
   loading.value = true
   error.value = null
+  violations.value = []
   try {
     const loaded = await api.admin.listScoringRuleSets(tournamentId)
     // A later switch may have already changed the selection while this was in flight — drop it.
@@ -88,6 +90,7 @@ async function loadRuleSets() {
   } catch (e) {
     if (selectedTournamentId.value !== tournamentId) return
     error.value = describeError(e, 'Failed to load scoring rule sets')
+    violations.value = violationMessages(e)
   } finally {
     if (selectedTournamentId.value === tournamentId) loading.value = false
   }
@@ -157,6 +160,8 @@ function mergeRuleSet(saved: ScoringRuleSetDto) {
 }
 
 async function saveRuleSet() {
+  violations.value = []
+
   if (!selectedTournamentId.value) {
     error.value = 'Please select a tournament'
     return
@@ -179,6 +184,7 @@ async function saveRuleSet() {
 
   loading.value = true
   error.value = null
+  violations.value = []
   savedWarnings.value = null
 
   try {
@@ -204,6 +210,7 @@ async function saveRuleSet() {
     }
   } catch (e) {
     error.value = describeError(e, 'Failed to save scoring rule set')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -214,12 +221,14 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
 
   loading.value = true
   error.value = null
+  violations.value = []
   try {
     await api.admin.activateScoringRuleSet(selectedTournamentId.value, ruleSet.id)
     // Reload rather than patch: the previously active sibling was deactivated too.
     await loadRuleSets()
   } catch (e) {
     error.value = describeError(e, 'Failed to activate scoring rule set')
+    violations.value = violationMessages(e)
   } finally {
     loading.value = false
   }
@@ -232,7 +241,7 @@ async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
       <h2 class="headline text-xl">Scoring Rule Sets</h2>
     </div>
 
-    <ErrorBanner :message="error" />
+    <ErrorBanner :message="error" :violations="violations" />
 
     <!-- Post-save warnings: the save succeeded, but nothing scores these metrics. -->
     <div

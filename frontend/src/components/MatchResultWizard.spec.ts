@@ -7,6 +7,7 @@ const listHeroPool = vi.fn()
 const recordMatch = vi.fn()
 const correctMatch = vi.fn()
 const getMatch = vi.fn()
+const violationMessagesMock = vi.fn((_e: unknown) => [] as string[])
 
 vi.mock('@/api/client', () => ({
   api: {
@@ -19,6 +20,7 @@ vi.mock('@/api/client', () => ({
     },
   },
   describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
+  violationMessages: (e: unknown) => violationMessagesMock(e),
 }))
 
 vi.mock('@/stores/tournaments', () => ({
@@ -42,6 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   listMapPool.mockResolvedValue(mapPool)
   listHeroPool.mockResolvedValue(heroPool)
+  violationMessagesMock.mockReturnValue([])
 })
 
 describe('MatchResultWizard', () => {
@@ -248,5 +251,32 @@ describe('MatchResultWizard', () => {
         bans: [{ heroId: 11, banType: 'OPPONENT_BAN' }],
       }),
     )
+  })
+
+  it('renders a server-side 422 as one line per violation instead of a joined sentence', async () => {
+    // Mirrors GlobalExceptionHandler's MatchRuleException shape: `describeError` collapses this to
+    // one semicolon-joined message, `violationMessages` recovers the structured list underneath it.
+    recordMatch.mockRejectedValue(new Error('Exactly one winner is required; The loser must have 0 or less health'))
+    violationMessagesMock.mockReturnValue([
+      'Exactly one winner is required',
+      'The loser must have 0 or less health',
+    ])
+
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    const items = wrapper.findAll('li')
+    expect(items.map((li) => li.text())).toEqual([
+      'Exactly one winner is required',
+      'The loser must have 0 or less health',
+    ])
   })
 })
