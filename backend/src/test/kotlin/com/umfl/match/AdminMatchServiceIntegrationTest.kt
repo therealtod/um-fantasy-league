@@ -88,6 +88,28 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
+    fun `findByTournamentNewestFirst reverses the fold's order and honours its limit`() {
+        val tournamentId = winterOfChampionsId()
+        val mapId = id("game_map", "Baskerville Manor")
+        val (games, sides, bans) = aliceVsRobinHood(mapId)
+        val playedAt = Instant.parse("2026-03-01T18:00:00Z")
+        repeat(3) { round ->
+            adminMatchService.record(
+                tournamentId, round = round + 1, playedAt = playedAt.plusSeconds(3600L * round),
+                externalLink = null, participants = sides, games = games, bans = bans,
+            )
+        }
+
+        val newestFirst = matchResultQuery.findByTournamentNewestFirst(tournamentId, round = null, limit = 100)
+        assertEquals(listOf(3, 2, 1), newestFirst.map { it.round })
+        assertEquals(matchResultQuery.findByTournament(tournamentId).reversed(), newestFirst)
+
+        // The bound takes the newest page, not the oldest one.
+        assertEquals(listOf(3, 2), matchResultQuery.findByTournamentNewestFirst(tournamentId, round = null, limit = 2).map { it.round })
+        assertEquals(listOf(2), matchResultQuery.findByTournamentNewestFirst(tournamentId, round = 2, limit = 100).map { it.round })
+    }
+
+    @Test
     fun `records a best-of-three series with a hero repeated across games and different maps`() {
         val tournamentId = winterOfChampionsId()
         val baskerville = id("game_map", "Baskerville Manor")

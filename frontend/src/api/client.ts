@@ -243,8 +243,9 @@ export const api = {
       request(`/admin/tournaments/${tournamentId}/maps/${mapId}`, { method: 'DELETE' }),
 
     // Matches
-    listMatches: (tournamentId: number, round?: number): Promise<MatchResultDto[]> =>
-      request(`/admin/tournaments/${tournamentId}/matches${queryString({ round })}`),
+    // Newest first, and bounded server-side (200 by default, 500 max) — pass `limit` to widen it.
+    listMatches: (tournamentId: number, round?: number, limit?: number): Promise<MatchResultDto[]> =>
+      request(`/admin/tournaments/${tournamentId}/matches${queryString({ round, limit })}`),
 
     getMatch: (tournamentId: number, matchId: number): Promise<MatchResultDto> =>
       request(`/admin/tournaments/${tournamentId}/matches/${matchId}`),

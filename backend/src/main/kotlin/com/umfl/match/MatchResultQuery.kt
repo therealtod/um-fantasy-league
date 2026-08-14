@@ -51,6 +51,35 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
         )
 
     /**
+     * The newest [limit] matches in a tournament, optionally narrowed to one
+     * [round] — the admin match list's page.
+     *
+     * Newest first and bounded in SQL rather than in Kotlin: the admin list is
+     * the one screen that wants the most recent results, and [findByTournament]
+     * is the scoring fold's input, which wants all of them oldest first. Same
+     * `played_at desc, id desc` tiebreak as the ticker, since parallel tables
+     * in a round share a timestamp.
+     */
+    fun findByTournamentNewestFirst(tournamentId: Long, round: Int?, limit: Int): List<MatchResult> =
+        assemble(
+            jdbcClient
+                .sql(
+                    """
+                    $SELECT_MATCH
+                    where m.tournament_id = :tournamentId
+                      and (cast(:round as int) is null or m.round = cast(:round as int))
+                    order by m.played_at desc, m.id desc
+                    limit :limit
+                    """
+                )
+                .param("tournamentId", tournamentId)
+                .param("round", round)
+                .param("limit", limit)
+                .query(::mapMatchRow)
+                .list()
+        )
+
+    /**
      * The newest [limit] matches after [sinceMatchId] — the ticker's page.
      *
      * The polling key is the id, not `played_at`: parallel tables share a start

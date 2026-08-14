@@ -40,16 +40,25 @@ class AdminMatchController(
     private val tournamentService: TournamentService,
 ) {
 
+    /**
+     * Recorded matches, newest first, optionally narrowed to one [round].
+     *
+     * Bounded: every match comes back with all of its games, game participants
+     * and bans attached, so an unbounded list is the one admin read whose cost
+     * grows with the tournament forever. [limit] defaults to 200 — a page well
+     * past any real tournament's match count — and is clamped the same way the
+     * ticker's is in [StandingsController.matches].
+     */
     @GetMapping
     fun listMatches(
         @PathVariable tournamentId: Long,
         @RequestParam(required = false) round: Int?,
+        @RequestParam(required = false, defaultValue = "200") limit: Int,
         @CurrentManager admin: Manager,
     ): List<MatchResultDto> {
         tournamentService.requireTournament(tournamentId)
         return matchResultQuery
-            .findByTournament(tournamentId, round)
-            .sortedByDescending { it.playedAt }
+            .findByTournamentNewestFirst(tournamentId, round, limit.coerceIn(1, 500))
             .map(MatchResultDto::from)
     }
 
