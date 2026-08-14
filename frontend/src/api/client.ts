@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabaseClient'
-import { developmentManagerId } from '@/lib/developmentIdentity'
+import { developmentManagerId, isDevelopmentIdentityMode } from '@/lib/developmentIdentity'
+import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
 import type {
   CreateHeroRequest,
   CreateMapRequest,
@@ -61,6 +63,25 @@ export async function buildAuthHeaders(): Promise<HeadersInit> {
   }
 }
 
+/**
+ * A 401 means the session Supabase handed us no longer verifies — expired,
+ * revoked, whatever — not that this particular request lacked a header.
+ * Without central handling, every store surfaces that as its own "request
+ * failed" text on whatever screen the manager happened to be looking at, with
+ * no path back to signing in again. This clears the stale session and bounces
+ * once to `/login`, carrying the current path as `redirect`. Dev identity
+ * mode has no real session to expire — `isAuthenticated` is hardwired true
+ * there (see `useAuthStore`), so redirecting would just bounce straight back.
+ */
+async function handleUnauthorized(): Promise<void> {
+  if (isDevelopmentIdentityMode) return
+
+  await useAuthStore().signOut()
+  if (router.currentRoute.value.name !== 'login') {
+    void router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
@@ -78,6 +99,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       problem = { ...problem, ...(await response.json()) }
     } catch {
       // A non-JSON error body (a proxy error page, say) leaves the defaults in place.
+    }
+    if (response.status === 401) {
+      await handleUnauthorized()
     }
     throw new ApiError(response.status, problem)
   }
