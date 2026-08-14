@@ -52,7 +52,7 @@ class AdminScoringService(
                 coefficients = toCoefficients(coefficients),
             )
         )
-        val result = if (activate) activate(tournamentId, requireNotNull(saved.id)) else saved
+        val result = if (activate) activate(saved) else saved
         return ScoringRuleSetResult(result, MatchMetrics.unknown(coefficients.map { it.metric }))
     }
 
@@ -76,19 +76,26 @@ class AdminScoringService(
         return ScoringRuleSetResult(saved, MatchMetrics.unknown(coefficients.map { it.metric }))
     }
 
-    /**
-     * Deactivates any currently-active sibling before activating [ruleSetId] —
-     * two separate statements, so the partial unique index never sees two
-     * active rows for the same tournament at once.
-     *
-     * Both go through [ScoringRuleSetAdminRepository] rather than an aggregate
-     * save: flipping the flag must not rewrite the rule sets' coefficient rows.
-     */
+    /** Activates [ruleSetId], once it is confirmed to belong to [tournamentId]. */
     @Transactional
-    fun activate(tournamentId: Long, ruleSetId: Long): ScoringRuleSet {
-        val target = requireRuleSet(tournamentId, ruleSetId)
+    fun activate(tournamentId: Long, ruleSetId: Long): ScoringRuleSet =
+        activate(requireRuleSet(tournamentId, ruleSetId))
 
-        ruleSetAdminRepository.deactivateOthers(tournamentId, ruleSetId)
+    /**
+     * The flag flip itself, for a rule set already in hand — [create] has just
+     * saved the row it wants activated, so re-reading it by id would only buy
+     * back what it already holds.
+     *
+     * Deactivates any currently-active sibling first — two separate statements,
+     * so the partial unique index never sees two active rows for the same
+     * tournament at once. Both go through [ScoringRuleSetAdminRepository]
+     * rather than an aggregate save: flipping the flag must not rewrite the
+     * rule sets' coefficient rows.
+     */
+    private fun activate(target: ScoringRuleSet): ScoringRuleSet {
+        val ruleSetId = requireNotNull(target.id) { "Cannot activate an unsaved scoring rule set" }
+
+        ruleSetAdminRepository.deactivateOthers(target.tournamentId, ruleSetId)
         ruleSetAdminRepository.activate(ruleSetId)
 
         return target.copy(isActive = true)
