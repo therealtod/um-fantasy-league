@@ -6,6 +6,7 @@ import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.jdbc.core.simple.JdbcClient
 import java.math.BigDecimal
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -17,6 +18,7 @@ class AdminScoringServiceIntegrationTest @Autowired constructor(
     private val ruleSetRepository: ScoringRuleSetRepository,
     private val scoringRuleSetQuery: ScoringRuleSetQuery,
     private val tournamentRepository: TournamentRepository,
+    private val jdbcClient: JdbcClient,
 ) : PostgresIntegrationTest() {
 
     private fun winterOfChampionsId() = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
@@ -52,6 +54,23 @@ class AdminScoringServiceIntegrationTest @Autowired constructor(
         val listed = adminScoringService.list(tournamentId)
 
         assertEquals(listOf("CROWD_FAVOURITE"), listed.single { it.ruleSet.name == "Experimental Weights" }.unknownMetrics)
+    }
+
+    @Test
+    fun `an insert that omits is_active lands inactive, not active`() {
+        val tournamentId = winterOfChampionsId()
+
+        // The application always writes the column, so only a hand-written
+        // INSERT sees the schema default. With the old `default true` this
+        // statement tripped uq_scoring_rule_set_active against the seeded
+        // active rule set instead of writing a draft.
+        jdbcClient
+            .sql("insert into scoring_rule_set (tournament_id, name) values (:tournamentId, 'Hand-Written Draft')")
+            .param("tournamentId", tournamentId)
+            .update()
+
+        assertFalse(requireNotNull(ruleSetRepository.findByTournamentIdAndName(tournamentId, "Hand-Written Draft")).isActive)
+        assertEquals("Season 2026 Standard", scoringRuleSetQuery.activeRules(tournamentId).name)
     }
 
     @Test
