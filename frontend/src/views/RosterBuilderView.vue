@@ -27,8 +27,14 @@ onMounted(async () => {
   }
 })
 
-// Cost is tournament-scoped, so a route change re-fetches the whole pool.
-watch(tournamentId, (id) => void heroesStore.select(id))
+// Cost is tournament-scoped, and the roster belongs to a specific tournament too,
+// so a route change re-fetches both — otherwise the grid shows one tournament's
+// pool while the roster store (and any toggle it sends to the server) still
+// points at the previous one.
+watch(tournamentId, (id) => {
+  void heroesStore.select(id)
+  void rosterStore.select(id)
+})
 
 watch(
   () => [heroesStore.sort, heroesStore.search],
