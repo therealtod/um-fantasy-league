@@ -7,6 +7,7 @@ import RosterUplinkPanel from '@/components/RosterUplinkPanel.vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { useHeroesStore } from '@/stores/heroes'
 import { useRosterStore } from '@/stores/roster'
+import { debounce } from '@/lib/debounce'
 import type { HeroSort } from '@/api/types'
 
 const route = useRoute()
@@ -37,9 +38,15 @@ watch(tournamentId, (id) => {
 })
 
 watch(
-  () => [heroesStore.sort, heroesStore.search],
+  () => heroesStore.sort,
   () => void heroesStore.load(),
 )
+
+// Search reloads on every keystroke via v-model, so it's debounced to avoid
+// firing a request per character; the store itself drops any response that
+// resolves out of order (see heroes.ts).
+const reloadOnSearch = debounce(() => void heroesStore.load(), 300)
+watch(() => heroesStore.search, reloadOnSearch)
 </script>
 
 <template>

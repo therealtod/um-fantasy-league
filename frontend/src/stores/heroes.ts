@@ -16,6 +16,11 @@ export const useHeroesStore = defineStore('heroes', () => {
   const sort = ref<HeroSort>('COST')
   const search = ref('')
 
+  // Bumped on every load() so an out-of-order response — a search request
+  // that started earlier but resolves later than a newer one — can be told
+  // apart from the latest and dropped instead of clobbering it.
+  let requestId = 0
+
   async function load(id: number | null = tournamentId.value) {
     if (id === null) {
       tournamentId.value = null
@@ -23,17 +28,21 @@ export const useHeroesStore = defineStore('heroes', () => {
       return
     }
     tournamentId.value = id
+    const thisRequest = ++requestId
     loading.value = true
     error.value = null
     try {
-      heroes.value = await api.heroes(id, {
+      const result = await api.heroes(id, {
         sort: sort.value,
         search: search.value || undefined,
       })
+      if (thisRequest !== requestId) return
+      heroes.value = result
     } catch (e) {
+      if (thisRequest !== requestId) return
       error.value = describeError(e, 'Could not load heroes')
     } finally {
-      loading.value = false
+      if (thisRequest === requestId) loading.value = false
     }
   }
 
