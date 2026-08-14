@@ -72,7 +72,8 @@ watch(selectedTournamentId, () => {
 })
 
 async function loadRuleSets() {
-  if (!selectedTournamentId.value) {
+  const tournamentId = selectedTournamentId.value
+  if (!tournamentId) {
     ruleSets.value = []
     return
   }
@@ -80,11 +81,15 @@ async function loadRuleSets() {
   loading.value = true
   error.value = null
   try {
-    ruleSets.value = await api.admin.listScoringRuleSets(selectedTournamentId.value)
+    const loaded = await api.admin.listScoringRuleSets(tournamentId)
+    // A later switch may have already changed the selection while this was in flight — drop it.
+    if (selectedTournamentId.value !== tournamentId) return
+    ruleSets.value = loaded
   } catch (e) {
+    if (selectedTournamentId.value !== tournamentId) return
     error.value = describeError(e, 'Failed to load scoring rule sets')
   } finally {
-    loading.value = false
+    if (selectedTournamentId.value === tournamentId) loading.value = false
   }
 }
 

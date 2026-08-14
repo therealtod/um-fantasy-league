@@ -42,14 +42,19 @@ const filteredMatches = computed(() => {
 })
 
 async function loadMatches() {
+  const tournamentId = props.tournamentId
   isLoading.value = true
   error.value = null
   try {
-    matches.value = await api.admin.listMatches(props.tournamentId)
+    const loaded = await api.admin.listMatches(tournamentId)
+    // A later switch may have already changed the selection while this was in flight — drop it.
+    if (props.tournamentId !== tournamentId) return
+    matches.value = loaded
   } catch (err) {
+    if (props.tournamentId !== tournamentId) return
     error.value = describeError(err, 'Failed to load matches')
   } finally {
-    isLoading.value = false
+    if (props.tournamentId === tournamentId) isLoading.value = false
   }
 }
 
