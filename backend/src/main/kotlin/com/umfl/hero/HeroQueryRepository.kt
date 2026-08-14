@@ -45,12 +45,12 @@ class HeroQueryRepository(private val jdbcClient: JdbcClient) {
         val sql = buildString {
             append(SELECT_HERO_VIEW)
             append(" where th.tournament_id = :tournamentId")
-            if (!filter.search.isNullOrBlank()) append(" and h.name ilike :search")
+            if (!filter.search.isNullOrBlank()) append(" and h.name ilike :search escape '\\'")
             append(" order by ").append(filter.sort.orderBy)
         }
 
         var spec = jdbcClient.sql(sql).param("tournamentId", tournamentId)
-        filter.search?.takeIf { it.isNotBlank() }?.let { spec = spec.param("search", "%${it.trim()}%") }
+        filter.search?.takeIf { it.isNotBlank() }?.let { spec = spec.param("search", "%${escapeLike(it.trim())}%") }
 
         return spec.query(::mapHeroView).list()
     }
@@ -99,6 +99,9 @@ class HeroQueryRepository(private val jdbcClient: JdbcClient) {
         """
     }
 }
+
+/** Escapes ILIKE metacharacters so a search for `_` or `%` matches those characters literally. */
+private fun escapeLike(raw: String) = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 private fun mapHeroView(rs: ResultSet, @Suppress("UNUSED_PARAMETER") rowNum: Int) =
     HeroView(

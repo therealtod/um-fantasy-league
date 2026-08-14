@@ -296,5 +296,11 @@ class RosterFlowIntegrationTest @Autowired constructor(
 
         val searched = heroQueryRepository.findByTournament(winter, com.umfl.hero.HeroFilter(search = "ho"))
         assertEquals(listOf("Robin Hood", "Sherlock Holmes"), searched.map { it.name }.sorted())
+
+        val wildcardSearch = heroQueryRepository.findByTournament(winter, com.umfl.hero.HeroFilter(search = "_"))
+        assertEquals(emptyList<String>(), wildcardSearch.map { it.name }, "_ is a literal, not a match-any-char wildcard")
+
+        val percentSearch = heroQueryRepository.findByTournament(winter, com.umfl.hero.HeroFilter(search = "%"))
+        assertEquals(emptyList<String>(), percentSearch.map { it.name }, "% is a literal, not a match-all wildcard")
     }
 }
