@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import BudgetMeter from './BudgetMeter.vue'
 import { useRosterStore } from '@/stores/roster'
+import { formatCredits } from '@/lib/format'
 
 const roster = useRosterStore()
 
@@ -10,10 +11,6 @@ const emptySlots = computed(() => Math.max(0, roster.rosterSize - roster.selecte
 const averageCost = computed(() =>
   roster.selected.length === 0 ? 0 : Math.round(roster.budget.spent / roster.selected.length),
 )
-
-function money(value: number) {
-  return `$${value.toLocaleString('en-US')}`
-}
 </script>
 
 <template>
@@ -40,7 +37,7 @@ function money(value: number) {
         <p class="min-w-0 flex-1 truncate font-mono text-xs font-bold text-ink uppercase">
           {{ hero.name }}
         </p>
-        <span class="stat-value shrink-0 text-xs text-cyan">{{ money(hero.cost) }}</span>
+        <span class="stat-value shrink-0 text-xs text-cyan">{{ formatCredits(hero.cost) }}</span>
         <button
           v-if="!roster.locked"
           type="button"
@@ -65,7 +62,7 @@ function money(value: number) {
     <div class="border-t border-edge px-5 py-4">
       <div class="border border-edge bg-surface-mid p-2.5">
         <p class="label-caps">Avg Cost</p>
-        <p class="stat-value mt-1 text-sm text-ink">{{ money(averageCost) }}</p>
+        <p class="stat-value mt-1 text-sm text-ink">{{ formatCredits(averageCost) }}</p>
       </div>
     </div>
 

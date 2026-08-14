@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BudgetStatus } from '@/api/types'
+import { formatCredits } from '@/lib/format'
 
 const props = defineProps<{ budget: BudgetStatus }>()
 
 const percent = computed(() => Math.min(100, Math.max(0, props.budget.utilisation * 100)))
 const over = computed(() => props.budget.remaining < 0)
-
-function money(value: number) {
-  const sign = value < 0 ? '-' : ''
-  return `${sign}$${Math.abs(value).toLocaleString('en-US')}`
-}
 </script>
 
 <template>
@@ -18,8 +14,8 @@ function money(value: number) {
     <div class="flex items-baseline justify-between">
       <span class="label-caps">Budget</span>
       <span class="stat-value text-sm">
-        <span :class="over ? 'text-magenta' : 'text-cyan'">{{ money(budget.spent) }}</span>
-        <span class="text-ink-dim"> / {{ money(budget.creditGrant) }}</span>
+        <span :class="over ? 'text-magenta' : 'text-cyan'">{{ formatCredits(budget.spent) }}</span>
+        <span class="text-ink-dim"> / {{ formatCredits(budget.creditGrant) }}</span>
       </span>
     </div>
 
@@ -32,7 +28,11 @@ function money(value: number) {
     </div>
 
     <p class="mt-2 font-mono text-[11px]" :class="over ? 'text-magenta' : 'text-ink-dim'">
-      {{ over ? `${money(-budget.remaining)} over budget` : `${money(budget.remaining)} remaining` }}
+      {{
+        over
+          ? `${formatCredits(-budget.remaining)} over budget`
+          : `${formatCredits(budget.remaining)} remaining`
+      }}
     </p>
   </div>
 </template>

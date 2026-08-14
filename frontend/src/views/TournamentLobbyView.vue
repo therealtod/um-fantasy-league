@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useRosterStore } from '@/stores/roster'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { Tournament } from '@/api/types'
+import { formatCredits } from '@/lib/format'
 
 const router = useRouter()
 const tournamentsStore = useTournamentsStore()
@@ -14,10 +15,6 @@ const rosterStore = useRosterStore()
 const authStore = useAuthStore()
 
 const tournaments = computed(() => tournamentsStore.tournaments)
-
-function formatCredits(value: number) {
-  return value.toLocaleString('en-US')
-}
 
 function enrolmentPercent(tournament: Tournament) {
   return Math.min(100, Math.round((tournament.enrolled / tournament.capacity) * 100))
@@ -124,7 +121,7 @@ function openStandings() {
             <div class="text-left sm:text-right">
               <p class="label-caps">Credit Grant</p>
               <p class="stat-value mt-1 text-base text-cyan">
-                {{ formatCredits(tournament.creditGrant) }} <span class="text-ink-dim">CR</span>
+                {{ formatCredits(tournament.creditGrant) }}
               </p>
             </div>
 

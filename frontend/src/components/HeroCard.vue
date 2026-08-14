@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Hero } from '@/api/types'
+import { formatCredits } from '@/lib/format'
 
 const props = defineProps<{
   hero: Hero
@@ -10,7 +11,7 @@ const props = defineProps<{
 
 defineEmits<{ toggle: [id: number] }>()
 
-const cost = computed(() => `$${props.hero.cost.toLocaleString('en-US')}`)
+const cost = computed(() => formatCredits(props.hero.cost))
 const initials = computed(() =>
   props.hero.name
     .split(' ')
