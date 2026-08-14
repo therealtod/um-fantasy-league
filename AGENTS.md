@@ -235,6 +235,17 @@ through `GlobalExceptionHandler` as RFC 7807 problem details: the domain excepti
 `common/DomainExceptions.kt` each map to a status there, and the three `*RuleException` types all
 render 422 with a `violations` array. Throw one of those rather than a bare `ResponseStatusException`.
 
+`GlobalExceptionHandler` **extends `ResponseEntityExceptionHandler`, and must keep doing so**:
+`ExceptionHandlerExceptionResolver` runs ahead of `DefaultHandlerExceptionResolver`, so the
+`@ExceptionHandler(Exception)` catch-all intercepts Spring MVC's own exceptions before the resolver
+that knows their real status — without the base class an unparseable path variable, a malformed body,
+a wrong HTTP method and a `@PreAuthorize` denial all answered 500. That inheritance is also a
+constraint: the base already maps every type listed on its `handleException`, and mapping one twice
+is an ambiguous-handler error at *context startup*, so customise anything in that set by overriding
+the matching `protected` hook (as `handleMethodArgumentNotValid` does to keep the `fields` property),
+never with a second `@ExceptionHandler`. `GlobalExceptionHandlerMvcTest` pins the statuses through a
+real dispatch — a direct unit call cannot see resolver ordering, which is the whole bug.
+
 `HeroSort` holds ORDER BY fragments as an enum whitelist because sort keys can't be parameterised —
 keep new sorts inside that enum.
 
