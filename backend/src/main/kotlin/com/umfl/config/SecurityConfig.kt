@@ -4,6 +4,7 @@ import com.umfl.auth.DevManagerAuthenticationFilter
 import com.umfl.auth.SupabaseAuthenticationConverter
 import com.umfl.ratelimit.RateLimitFilter
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Profile
@@ -97,6 +98,15 @@ class SecurityConfig(
             .addFilterBefore(rateLimitFilter, BearerTokenAuthenticationFilter::class.java)
         return http.build()
     }
+
+    // rateLimitFilter is a @Component, so Boot's servlet-filter autoconfiguration would
+    // otherwise register it a second time as a plain /* filter alongside the copy wired
+    // into the security chain above. That second copy is a no-op today — OncePerRequestFilter
+    // marks the request as already filtered — but it's an ordering accident, not a guarantee,
+    // so disable the auto-registration explicitly and keep only the one addFilterBefore wires in.
+    @Bean
+    fun rateLimitFilterRegistration(): FilterRegistrationBean<RateLimitFilter> =
+        FilterRegistrationBean(rateLimitFilter).apply { isEnabled = false }
 }
 
 /**
@@ -140,4 +150,19 @@ class DevSecurityConfig(
             .addFilterBefore(devManagerAuthenticationFilter, AuthorizationFilter::class.java)
         return http.build()
     }
+
+    // Both filters are @Component beans, so Boot's servlet-filter autoconfiguration would
+    // otherwise register each a second time as a plain /* filter alongside the copies wired
+    // into the security chain above. See rateLimitFilterRegistration in SecurityConfig for why
+    // that's an ordering accident worth closing rather than relying on — for
+    // devManagerAuthenticationFilter in particular, an auto-registered copy running ahead of
+    // ExceptionTranslationFilter would let its BadCredentialsException surface as a bare 500
+    // instead of the RFC 7807 401 documented on its KDoc.
+    @Bean
+    fun rateLimitFilterRegistration(): FilterRegistrationBean<RateLimitFilter> =
+        FilterRegistrationBean(rateLimitFilter).apply { isEnabled = false }
+
+    @Bean
+    fun devManagerAuthenticationFilterRegistration(): FilterRegistrationBean<DevManagerAuthenticationFilter> =
+        FilterRegistrationBean(devManagerAuthenticationFilter).apply { isEnabled = false }
 }
