@@ -8,6 +8,8 @@ import com.umfl.scoring.ScoringRuleSetQuery
 import com.umfl.scoring.ScoringRules
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Isolation
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 /**
@@ -92,6 +94,21 @@ class StandingsService(
 
     private val log = LoggerFactory.getLogger(javaClass)
 
+    /**
+     * REPEATABLE_READ, not just readOnly: Postgres's default READ COMMITTED
+     * gives every *statement* in a transaction its own snapshot, so a plain
+     * `@Transactional` still lets a concurrent `AdminMatchService.record` /
+     * `correct` / `delete` land between this method's several statements (the
+     * rules read, the match fold, [MatchResultQuery.assemble]'s five queries,
+     * the rosters read) and skew them against each other — e.g. a delete
+     * committing between the match header query and its participants query
+     * yields a header whose games/participants come back empty. REPEATABLE_READ
+     * pins one snapshot for the whole transaction. It's safe to use here with
+     * no retry handling because the transaction is read-only: Postgres only
+     * raises a serialization failure on a write/write conflict, which a
+     * read-only transaction can never have.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun board(tournamentId: Long): StandingsBoard {
         val rules = resolveRules(tournamentId)
         val matches = matchResultQuery.findByTournament(tournamentId)
@@ -161,6 +178,8 @@ class StandingsService(
      * [sinceMatchId] is the polling key rather than a timestamp: parallel tables
      * share a `played_at`, while the match id is a monotonic bigserial.
      */
+    /** See the isolation note on [board] — the same cross-statement race applies here. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun ticker(tournamentId: Long, sinceMatchId: Long = 0, limit: Int = 25): List<TickerEntry> {
         val rules = resolveRules(tournamentId)
         return matchResultQuery.findByTournamentSince(tournamentId, sinceMatchId, limit).map { match ->
