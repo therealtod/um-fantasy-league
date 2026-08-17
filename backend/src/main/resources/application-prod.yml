@@ -22,7 +22,7 @@ spring:
 
 app:
   # Only needed if a frontend deployment calls the API cross-origin instead of
-  # through the same-origin `_redirects` proxy (UMFL-01) — see ProdCorsConfig.
+  # through the Cloudflare Worker's same-origin /api/* proxy — see ProdCorsConfig.
   frontend-origin: ${FRONTEND_ORIGIN:}
 
 logging:

@@ -90,7 +90,7 @@ Spring Boot is pinned to 4.1.0, which manages Testcontainers 2.0.5 — verified 
 |---|---|---|
 | `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` once at the filter level, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `DevManagerProvider` just reads the result back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
 | `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection`; same `db/seed` addition, since every integration test asserts against the fixtures |
-| `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `manager.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through `_redirects`) |
+| `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `manager.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through the Worker proxy) |
 
 There are no scheduled tasks and no background workers in any profile, with one narrow exception:
 `StandingsSseHub` runs a single-thread keep-alive that pings open standings SSE connections every
@@ -115,12 +115,21 @@ Both chains also register `RateLimitFilter` (`com.umfl.ratelimit`), an IP-keyed 
 (bucket4j) throttle ahead of every `/api/**` route — `addFilterBefore` puts it ahead of
 `BearerTokenAuthenticationFilter` in `SecurityConfig` and ahead of `AuthorizationFilter` in
 `DevSecurityConfig`, so a flood doesn't pay JWT verification or the dev manager lookup either. It
-keys on `HttpServletRequest.remoteAddr`, not `X-Forwarded-For`, since the VPS port is reachable
-directly and a trusted forwarded-for header would be spoofable; the tradeoff is that everything
-proxied through Cloudflare Pages shares a bucket per Cloudflare edge IP rather than per visitor. The
+keys on `HttpServletRequest.remoteAddr` by default, because a forwarded-for header from a peer that
+could itself be the flooder is worthless. `X-Forwarded-For` is read *only* when the peer falls inside
+`RateLimitProperties.trustedProxies` — loopback plus the RFC1918 ranges, which is what a
+TLS-terminating reverse proxy on the same VPS looks like (note it arrives as the Docker bridge
+gateway, e.g. `172.17.0.1`, not `127.0.0.1`, even when the container is published on
+`127.0.0.1:8080`). Without that carve-out a proxied deployment puts the entire internet in one
+bucket. `RateLimitFilter.clientIp` reads the **last** forwarded entry, not the first: a proxy appends
+the address it saw, so the trailing entry is the only one it vouches for, and reading the first would
+let a flooder mint a fresh bucket per request with a fake prefix. A backend exposed directly on a
+public interface never matches a trusted range and keeps the original behaviour. The tradeoff moves
+one hop out rather than disappearing: traffic arriving through the Cloudflare Worker still shares a
+bucket per Cloudflare edge IP rather than per visitor. The
 per-IP bucket cache is Caffeine-backed (`RateLimitProperties.maxTrackedIps`, LRU-evicted, entries
 expire after two quiet refill periods) rather than an unbounded map, since the key space is every IP
-that ever touches `/api/`. Tuning (`capacity`, `refillPeriod`, `maxTrackedIps`) lives in
+that ever touches `/api/`. Tuning (`capacity`, `refillPeriod`, `maxTrackedIps`, `trustedProxies`) lives in
 `RateLimitProperties` bound to `rate-limit.api.*` in `application.yml` — see the `umfl.*` invariant
 below for why this is the one `@ConfigurationProperties` block in the app despite that rule.
 
@@ -414,8 +423,13 @@ the frontend stays separate: Cloudflare Pages is connected directly to the GitHu
 build`, no tests), independent of the backend pipeline — the two sides deploy independently since
 neither needs the other to be green. The Playwright e2e suite (`frontend/e2e/`) needs a live backend
 and Postgres and is not wired into either workflow yet.
-`frontend/public/_redirects` is what routes the deployed frontend to the backend: a
-`/api/* https://<BACKEND_HOST>/api/:splat 200` rule that Cloudflare Pages applies so the frontend's
-relative `/api/...` calls (`client.ts`, `sseClient.ts`) reach the VPS as a same-origin proxy, with no
-cross-origin request involved. `<BACKEND_HOST>` is a placeholder — fill it in with the real production
-hostname before this is live.
+`frontend/src/worker.ts` is what routes the deployed frontend to the backend. The frontend deploys as
+a **Cloudflare Worker with static assets** (`frontend/wrangler.toml`), not a Pages project, so
+`public/_redirects` would never be read — the Worker proxies `/api/*` to `env.BACKEND_HOST` by hand
+and serves everything else from the `ASSETS` binding, falling back to `index.html` so Vue Router's
+history mode survives a deep link. The effect is the same same-origin proxy: the frontend's relative
+`/api/...` calls (`client.ts`, `sseClient.ts`) reach the VPS with no cross-origin request involved,
+which is why `FRONTEND_ORIGIN` stays unset in `prod`. `BACKEND_HOST` is a plain `[vars]` entry in
+`wrangler.toml` rather than a secret (it's just a base URL) — point it at the real backend hostname,
+and keep the `server.proxy` target in `frontend/vite.config.ts` in step so dev and prod hit the same
+API.

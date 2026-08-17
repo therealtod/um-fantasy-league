@@ -32,9 +32,10 @@ class DevCorsConfig : WebMvcConfigurer {
 }
 
 /**
- * The deployed frontend reaches the backend through a same-origin proxy
- * (`frontend/public/_redirects`, UMFL-01), so cross-origin CORS is not on the
- * critical path in prod and this allowlist is empty by default.
+ * The deployed frontend reaches the backend through a same-origin proxy — the
+ * Cloudflare Worker in `frontend/src/worker.ts`, which forwards every `/api`
+ * request to `BACKEND_HOST` — so cross-origin CORS is not on the critical path
+ * in prod and this allowlist is empty by default.
  * `FRONTEND_ORIGIN` exists only for a hypothetical frontend deployment that
  * calls the API directly instead of through that proxy.
  */

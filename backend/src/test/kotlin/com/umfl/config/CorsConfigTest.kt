@@ -12,8 +12,8 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.options
 
 /**
- * Verifies [ProdCorsConfig]: empty by default (UMFL-01's `_redirects` proxy makes
- * cross-origin calls unnecessary), and origin-specific once `app.frontend-origin`
+ * Verifies [ProdCorsConfig]: empty by default (the Cloudflare Worker's same-origin
+ * `/api` proxy makes cross-origin calls unnecessary), and origin-specific once `app.frontend-origin`
  * is set. Mirrors [SecurityConfigTest]'s prod-profile `MockMvc` setup.
  */
 @AutoConfigureMockMvc

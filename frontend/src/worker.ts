@@ -2,14 +2,15 @@ interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> }
   // Backend base URL — set in wrangler.toml [vars], not hardcoded here, so a
   // tunnel rotation (or the eventual move to a stable host) is a one-line
-  // change instead of a code edit. See BACKEND_HOST in AGENTS.md's CI/CD
-  // section for the equivalent placeholder on the Pages/_redirects side.
+  // change instead of a code edit. Keep it in step with the server.proxy
+  // target in vite.config.ts, which points dev at the same API.
   BACKEND_HOST: string
 }
 
-// UMFL-01 equivalent for Cloudflare Workers: public/_redirects only takes
-// effect on Cloudflare Pages, so this Worker does the same same-origin
-// /api/* proxy by hand.
+// The frontend deploys as a Worker with static assets, not a Pages project, so
+// a public/_redirects rule would never be read — this does the same-origin
+// /api/* proxy by hand. That proxy is why prod needs no CORS allowlist; see
+// ProdCorsConfig on the backend.
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
