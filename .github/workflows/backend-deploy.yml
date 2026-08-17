@@ -1,6 +1,11 @@
 name: backend-deploy
 
 on:
+  # Manual re-deploy. The path filter below means an unrelated commit to master
+  # ships nothing, so a VPS rebuild (or a first deploy against a freshly
+  # provisioned box) needs a way to run the pipeline without touching backend
+  # sources.
+  workflow_dispatch:
   push:
     branches:
       - master
