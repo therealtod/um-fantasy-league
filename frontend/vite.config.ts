@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // Keeps the browser on a single origin in development.
       '/api': {
-        target: 'https://act-physician-blowing-paul.trycloudflare.com',
+        target: 'https://bond-partition-cross-gold.trycloudflare.com',
         changeOrigin: true,
       },
     },
