@@ -10,6 +10,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ProblemDetail
+import org.springframework.security.web.util.matcher.IpAddressMatcher
 import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import tools.jackson.databind.json.JsonMapper
@@ -22,12 +23,18 @@ import java.time.Duration
  * it runs ahead of authentication in every profile — a flood shouldn't pay
  * JWT verification (or the dev manager lookup) either.
  *
- * Keyed on [HttpServletRequest.getRemoteAddr] rather than `X-Forwarded-For`:
- * the VPS port is reachable directly (no reverse proxy in front of it), so a
- * trusted forwarded-for header would be trivially spoofable by anyone
- * connecting straight to the backend. The tradeoff is that traffic proxied
- * through Cloudflare Pages (see `frontend/public/_redirects`) shares a
- * bucket per Cloudflare edge IP rather than per real visitor.
+ * Keyed on the client address resolved by [clientIp]: normally
+ * [HttpServletRequest.getRemoteAddr], since a forwarded-for header from a
+ * peer that could itself be the attacker is worthless. Only when the peer is
+ * inside [RateLimitProperties.trustedProxies] — a TLS-terminating reverse
+ * proxy on the same host — is `X-Forwarded-For` read instead, because
+ * otherwise every request on that topology arrives from the proxy and the
+ * whole internet shares one bucket.
+ *
+ * The tradeoff the original direct-exposure design accepted still stands one
+ * hop further out: traffic reaching the proxy through the Cloudflare Worker
+ * in `frontend/src/worker.ts` shares a bucket per Cloudflare edge IP rather
+ * than per real visitor.
  *
  * The key space is "every IP on the internet that touches `/api/`", which is
  * unbounded, so the bucket store itself must be bounded and self-evicting —
@@ -49,6 +56,8 @@ class RateLimitFilter(
         .expireAfterAccess(properties.refillPeriod.multipliedBy(2))
         .build<String, Bucket> { newBucket() }
 
+    private val trustedProxies = properties.trustedProxies.map(::IpAddressMatcher)
+
     override fun doFilterInternal(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -59,7 +68,7 @@ class RateLimitFilter(
             return
         }
 
-        val bucket = buckets.get(request.remoteAddr)
+        val bucket = buckets.get(clientIp(request))
         val probe = bucket.tryConsumeAndReturnRemaining(1)
         if (probe.isConsumed) {
             filterChain.doFilter(request, response)
@@ -78,11 +87,35 @@ class RateLimitFilter(
         jsonMapper.writeValue(response.writer, problem)
     }
 
+    /**
+     * The address to charge this request to.
+     *
+     * Reads the **last** `X-Forwarded-For` entry, not the first, and only
+     * from a trusted peer. A proxy *appends* the address it saw to whatever
+     * the client sent, so the last entry is the one our own proxy observed
+     * and the only one it vouches for; the earlier entries are client-supplied
+     * and a flooder would happily rotate a fake first entry per request to get
+     * a fresh bucket each time. An untrusted peer is the client, header or no
+     * header.
+     */
+    private fun clientIp(request: HttpServletRequest): String {
+        val peer = request.remoteAddr
+        if (trustedProxies.none { it.matches(peer) }) return peer
+
+        val forwarded = request.getHeader(X_FORWARDED_FOR) ?: return peer
+        return forwarded.substringAfterLast(',').trim().removeSurrounding("[", "]").ifEmpty { peer }
+    }
+
     private fun newBucket(): Bucket {
         val bandwidth = Bandwidth.builder()
             .capacity(properties.capacity)
             .refillGreedy(properties.capacity, properties.refillPeriod)
             .build()
         return Bucket.builder().addLimit(bandwidth).build()
+    }
+
+    private companion object {
+        // Not on Spring's HttpHeaders, unlike the response constants above.
+        const val X_FORWARDED_FOR = "X-Forwarded-For"
     }
 }

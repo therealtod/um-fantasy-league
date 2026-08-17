@@ -32,10 +32,11 @@ class RateLimitFilterTest {
             RateLimitProperties(capacity = capacity, refillPeriod = Duration.ofMinutes(1), maxTrackedIps = maxTrackedIps),
         )
 
-    private fun request(uri: String, remoteAddr: String): HttpServletRequest {
+    private fun request(uri: String, remoteAddr: String, forwardedFor: String? = null): HttpServletRequest {
         val request = mock(HttpServletRequest::class.java)
         `when`(request.requestURI).thenReturn(uri)
         `when`(request.remoteAddr).thenReturn(remoteAddr)
+        `when`(request.getHeader("X-Forwarded-For")).thenReturn(forwardedFor)
         return request
     }
 
@@ -89,6 +90,63 @@ class RateLimitFilterTest {
 
         verify(chain, times(2)).doFilter(any(), any())
         verify(secondIp.response, never()).status = 429
+    }
+
+    @Test
+    fun `behind a trusted proxy each forwarded client keeps its own bucket`() {
+        // The reason this exists: with a TLS-terminating proxy on the same host every
+        // request arrives from the Docker bridge gateway, so keying on remoteAddr alone
+        // would put the entire internet in one bucket.
+        val filter = newFilter(capacity = 1)
+        val chain = mock(FilterChain::class.java)
+
+        filter.doFilter(request("/api/tournaments", "172.17.0.1", forwardedFor = "1.1.1.1"), FakeResponse().response, chain)
+        val secondClient = FakeResponse()
+        filter.doFilter(request("/api/tournaments", "172.17.0.1", forwardedFor = "2.2.2.2"), secondClient.response, chain)
+
+        verify(chain, times(2)).doFilter(any(), any())
+        verify(secondClient.response, never()).status = 429
+    }
+
+    @Test
+    fun `an untrusted peer's X-Forwarded-For is ignored`() {
+        val filter = newFilter(capacity = 1)
+        val chain = mock(FilterChain::class.java)
+
+        filter.doFilter(request("/api/tournaments", "9.9.9.9", forwardedFor = "1.1.1.1"), FakeResponse().response, chain)
+        val spoofed = FakeResponse()
+        filter.doFilter(request("/api/tournaments", "9.9.9.9", forwardedFor = "2.2.2.2"), spoofed.response, chain)
+
+        verify(chain, times(1)).doFilter(any(), any())
+        verify(spoofed.response).status = 429
+    }
+
+    @Test
+    fun `only the last X-Forwarded-For entry counts, so a spoofed prefix buys no extra bucket`() {
+        // A proxy appends the peer it saw, so the trailing entry is the vouched-for one.
+        // Reading the first would let a flooder mint a fresh bucket per request.
+        val filter = newFilter(capacity = 1)
+        val chain = mock(FilterChain::class.java)
+
+        filter.doFilter(request("/api/tournaments", "127.0.0.1", forwardedFor = "fake-a, 5.5.5.5"), FakeResponse().response, chain)
+        val stillSameClient = FakeResponse()
+        filter.doFilter(request("/api/tournaments", "127.0.0.1", forwardedFor = "fake-b, 5.5.5.5"), stillSameClient.response, chain)
+
+        verify(chain, times(1)).doFilter(any(), any())
+        verify(stillSameClient.response).status = 429
+    }
+
+    @Test
+    fun `a trusted peer sending no X-Forwarded-For falls back to its own address`() {
+        val filter = newFilter(capacity = 1)
+        val chain = mock(FilterChain::class.java)
+
+        filter.doFilter(request("/api/tournaments", "127.0.0.1"), FakeResponse().response, chain)
+        val blocked = FakeResponse()
+        filter.doFilter(request("/api/tournaments", "127.0.0.1"), blocked.response, chain)
+
+        verify(chain, times(1)).doFilter(any(), any())
+        verify(blocked.response).status = 429
     }
 
     @Test

@@ -22,4 +22,26 @@ data class RateLimitProperties(
      * entries are evicted first once this is exceeded.
      */
     val maxTrackedIps: Long = 100_000,
+    /**
+     * CIDR ranges whose `X-Forwarded-For` [RateLimitFilter] will believe. A
+     * peer outside every range is treated as the client itself and its header
+     * ignored, so this list is the whole trust boundary — see the filter's
+     * KDoc for why the *last* entry is the one read.
+     *
+     * The defaults cover a reverse proxy on the same host. Loopback alone is
+     * not enough: publishing the container as `127.0.0.1:8080:8080` still
+     * NATs the connection through the Docker bridge, so the proxy arrives as
+     * the bridge gateway (`172.17.0.1`, or the compose network's equivalent)
+     * rather than `127.0.0.1`. These ranges are private and unroutable, so a
+     * backend exposed directly on a public interface — the topology this
+     * filter was originally written for — never matches one and keeps its
+     * old behaviour unchanged.
+     */
+    val trustedProxies: List<String> = listOf(
+        "127.0.0.1/32",
+        "::1/128",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+    ),
 )
