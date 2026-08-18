@@ -34,7 +34,9 @@ splits by *kind*, not by environment: `db/migration/V2__reference_data.sql` carr
 hero and board catalogue — facts about Unmatched, not about a league, and the thing an admin prices
 into a pool — so it migrates in **every** profile, while demo/dev fixtures — three tournaments,
 seeded managers, a full recorded result set — live in a second Flyway location,
-`db/seed/V3__demo_fixtures.sql`, that only `dev` and `test` add to `spring.flyway.locations` (see
+`db/seed/` (`V3__demo_fixtures.sql`, plus `V6__demo_draft_picks.sql` — a separate file only because
+Flyway orders every location by version, and `match_hero_pick` does not exist until V5), that only
+`dev` and `test` add to `spring.flyway.locations` (see
 Profiles below). A default start or the `prod` profile therefore comes up with every hero and board
 and no mock league data at all.
 
@@ -193,6 +195,14 @@ below; nothing outside that surface writes reference data or results.
   less (an overkill hit lands it below zero), and every recorded game in `V3__demo_fixtures.sql`
   respects that. Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side,
   like every other derived number here.
+- **The draft is recorded in full, as picks *and* bans.** `hero_ban` holds the heroes struck out of a
+  series; `match_hero_pick (match_id, side, hero_id)` holds the heroes each side took. Both are per
+  series, never per game. A recorded draft is *complete* — `MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED`
+  rejects a game whose hero is missing from that side's picks — which is what lets `APPEARANCE` be
+  "was drafted and not banned" rather than "played". `BANNED_HERO_DRAFTED` keeps the two halves
+  disjoint. There is deliberately no `unique (match_id, hero_id)` on the picks: games are
+  independent, so a hero may legitimately go to one side in game 1 and the other in game 2, and
+  `MatchResult.draftedHeroIds` de-duplicates instead.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
   `match_participant.player_label` — one row per side for the whole series, nullable free text with
@@ -217,13 +227,23 @@ zero, are dropped from the leaderboard's columns and throw nothing. The seed's `
 the deliberate proof of that; leave it unimplemented. There is deliberately no `DRAW`: every game
 has exactly one winner (see the invariant above), so `WIN` and `LOSS` are exhaustive within a game
 and a `DRAW` column would price something that cannot be recorded. Extractors take a `MetricContext`
-(the hero's role in *one game* of one match), not a bare participant row, because
-`HEALTH_DIFFERENTIAL` needs the opponent and `SELF_BAN`/`OPPONENT_BAN` have no participant row at
-all — they read `hero_ban.ban_type` off the match instead, so a hero banned `PRE_BAN` (struck before
-sides are known) scores neither. `HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not win
+(the hero's role in one match — `Played`, which is scoped to *one game* of it, or the per-series
+`Drafted`/`Banned`), not a bare participant row, because
+`HEALTH_DIFFERENTIAL` needs the opponent and `APPEARANCE`/`SELF_BAN`/`OPPONENT_BAN` have no
+participant row at all — they price the draft, reading `hero_ban.ban_type` off the match or the role
+itself, so a hero banned `PRE_BAN` (struck before sides are known) scores neither ban metric.
+`HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not win
 the game scores 0.0 rather than a negative differential, since there is no losing side of that
 metric to price. `WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and
 drops game 2 of a Bo3 collects one of each.
+
+`MatchResult.heroContexts()` is where per-game and per-series part ways, and the split is the whole
+reason `APPEARANCE` is not multiplied by series length: a hero that played yields one `Played`
+context *per game* plus exactly one `Drafted` context, a hero drafted and never fielded yields only
+the `Drafted` one, and a banned hero yields only `Banned`. `StandingsService.ticker` has to bridge
+that, since its rows are games: it banks the `Drafted` context against the hero's **first** game so
+the ticker's per-game points still sum to what the board gained, and names the never-fielded picks
+separately as `draftedUnplayedHeroNames`.
 
 `StandingsService` returns a `StandingsBoard` that carries its own `metrics` column definitions —
 the backend cannot know the columns until it reads `scoring_coefficient`. Ranking is standard
@@ -262,8 +282,8 @@ Migrations are `backend/src/main/resources/db/migration/V*__*.sql`, forward-only
 single `V1__core_schema.sql` baseline (see Commands above for why, and for the seed's separate Flyway
 location). Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a
 unique natural key because Spring Data JDBC can't map composite primary keys; the pure link tables
-(`tournament_hero`, `tournament_map`, `entry_slot`, `hero_ban`, `match_game_participant`) keep
-natural composite keys. The
+(`tournament_hero`, `tournament_map`, `entry_slot`, `hero_ban`, `match_hero_pick`,
+`match_game_participant`) keep natural composite keys. The
 integration tests assert on the seed's numbers exactly — changing a seeded price or result means
 updating `V3__demo_fixtures.sql` and the tests together. New *league* data past that fixed baseline
 goes through the Admin API (see below), not another migration. The one thing that legitimately
@@ -349,10 +369,16 @@ tripped by cascade ordering — which is why `AdminMapService.removeFromPool` ca
 violation has to surface inside the method that can still name the map, not at commit.
 
 The reference and result tables have a Spring Data JDBC write side: `Hero`, `GameMap`,
-`TournamentMatch` (owning `participants` as a `List` keyed by `side`, plus `games` and `bans` as
-`Set`-mapped children — no `keyColumn` there,
-since neither carries a list-position column; each `MatchGame` in turn owns its own participants)
-and `ScoringRuleSet` (owning `coefficients`). `tournament_hero` and `tournament_map` stay
+`TournamentMatch` (owning `participants` as a `List` keyed by `side`, plus `games`, `bans` and
+`picks` as `Set`-mapped children — no `keyColumn` there,
+since none carries a list-position column; each `MatchGame` in turn owns its own participants)
+and `ScoringRuleSet` (owning `coefficients`). `picks` hangs off the match root rather than off
+`MatchParticipant`, where it would read more naturally: `match_participant` is composite-keyed and
+Spring Data JDBC cannot map a child of an entity keyed that way. The *API* still hangs the draft off
+the side that owns it — `MatchParticipantRequest.draftedHeroIds` in, `MatchParticipantResult.draftedHeroes`
+out, with `side` the list position as it already is for `player_label` — and `AdminMatchService.toPicks`
+does the transposition, which is also why an out-of-range side is unrepresentable and no rule polices
+one. `tournament_hero` and `tournament_map` stay
 composite-keyed link tables with no Kotlin entity — `HeroPoolAdminRepository`/`MapPoolAdminRepository`
 write them via `JdbcClient`, the same read/write split the rest of the app already uses.
 
@@ -361,8 +387,10 @@ write them via `JdbcClient`, the same read/write split the rest of the app alrea
 merged into it). The checks are the `MatchRule` enum, one KDoc line each — read them there. Two
 enforce the no-draw invariant above and are the ones to know before touching the policy:
 `NOT_EXACTLY_ONE_WINNER` treats zero winners as being as wrong as two, and
-`LOSER_HAS_POSITIVE_HEALTH` rejects a loser who survived. Activating a scoring rule set deactivates
-any active sibling in the same transaction, since only one may be active per tournament. An unknown
+`LOSER_HAS_POSITIVE_HEALTH` rejects a loser who survived. Three more police the draft:
+`PLAYED_HERO_NOT_DRAFTED` is what makes a recorded draft complete (and so what makes `APPEARANCE`
+measurable), `BANNED_HERO_DRAFTED` keeps picks and bans disjoint, and `DUPLICATE_PICK` mirrors
+`DUPLICATE_BAN`. Activating a scoring rule set deactivates any active sibling in the same transaction, since only one may be active per tournament. An unknown
 scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a non-blocking warning on the
 response, never rejected.
 
@@ -398,8 +426,13 @@ cannot measure.
 `MatchResultWizard` records a whole series: one map and two heroes per game, "+ Add Game" for a
 best-of-N, and the two player names once for the match. Each game's winner is a **radio**, not a
 checkbox — exactly one side wins, and there is no "neither" to express — with a client-side check
-before save so an untouched winner reads as a prompt instead of a 422. `MatchListAdmin` renders the
-games grouped under their maps and derives the games-won tally per side.
+before save so an untouched winner reads as a prompt instead of a 422. Each side also carries its
+**draft**, and the form only asks for the half it cannot derive: the heroes that side fields in the
+games are folded into `draftedHeroIds` at save time by `draftFor`, so the admin types only the picks
+that never played, and `PLAYED_HERO_NOT_DRAFTED` can never fire on a submission this UI built.
+`MatchListAdmin` renders the games grouped under their maps, derives the games-won tally per side,
+and names each side's drafted-but-unfielded picks — the heroes that scored an appearance without
+appearing in any game row.
 
 ## Deliberately not built
 

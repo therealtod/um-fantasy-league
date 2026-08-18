@@ -2,6 +2,10 @@ package com.umfl.standings
 
 import com.umfl.manager.Manager
 import com.umfl.manager.ManagerRepository
+import com.umfl.match.AdminMatchService
+import com.umfl.match.MatchGameInput
+import com.umfl.match.MatchGameParticipantInput
+import com.umfl.match.MatchParticipantInput
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.EntryStatus
 import com.umfl.tournament.TournamentEntry
@@ -10,6 +14,7 @@ import com.umfl.tournament.TournamentRepository
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.simple.JdbcClient
+import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -32,6 +37,7 @@ class StandingsIntegrationTest @Autowired constructor(
     private val tournamentRepository: TournamentRepository,
     private val entryRepository: TournamentEntryRepository,
     private val managerRepository: ManagerRepository,
+    private val adminMatchService: AdminMatchService,
     private val jdbcClient: JdbcClient,
 ) : PostgresIntegrationTest() {
 
@@ -311,6 +317,7 @@ class StandingsIntegrationTest @Autowired constructor(
         // (HEALTH_DIFFERENTIAL is win-gated, so the losing side scores none of it).
         assertEquals(listOf(27.75, 1.0), game.sides.map { it.points })
         assertEquals(listOf("Sun Wukong"), shutout.bannedHeroNames)
+        assertEquals(emptyList(), shutout.draftedUnplayedHeroNames, "both sides fielded everything they drafted")
     }
 
     @Test
@@ -357,6 +364,70 @@ class StandingsIntegrationTest @Autowired constructor(
                 "MythicMind" to 61.00,
             ),
             board.rows.map { it.handle to it.totalPoints },
+        )
+    }
+
+    /**
+     * The seed's only drafted-but-unfielded heroes, both on match 13 and both
+     * off every roster — see `V6__demo_draft_picks.sql`. They earn APPEARANCE
+     * without ever appearing in a game row, which is why the ticker names them
+     * separately from the heroes that played.
+     */
+    @Test
+    fun `a hero drafted and never fielded is named on the ticker rather than left invisible`() {
+        val decider = assertNotNull(standingsService.ticker(summerId()).singleOrNull { it.matchId == 13L })
+
+        assertEquals(listOf("Tomoe Gozen", "Nikola Tesla"), decider.draftedUnplayedHeroNames)
+        assertTrue(
+            decider.games.flatMap { it.sides }.none { it.heroName in decider.draftedUnplayedHeroNames },
+            "they are on the draft, not in any game",
+        )
+    }
+
+    /**
+     * The whole point of the change: a hero credits its manager for surviving
+     * the draft, not for reaching the table. Recorded through the admin path so
+     * the pick actually goes through `MatchResultPolicy` and the write
+     * aggregate, then read back off the board.
+     */
+    @Test
+    fun `drafting a rostered hero without fielding it moves that roster by exactly one appearance`() {
+        val tournamentId = summerId()
+        val before = row("NeonStrategist").totalPoints
+        val appearanceWeight = assertNotNull(board().metrics.singleOrNull { it.metric == "APPEARANCE" }).coefficient
+
+        fun heroId(name: String) =
+            jdbcClient.sql("select id from heroes where name = :name").param("name", name).query(Long::class.java).single()
+        val mapId = jdbcClient.sql("select tm.map_id from tournament_map tm where tm.tournament_id = :id limit 1")
+            .param("id", tournamentId).query(Long::class.java).single()
+
+        // Bigfoot is on NeonStrategist's roster; it is drafted here and never played.
+        adminMatchService.record(
+            tournamentId = tournamentId,
+            round = 3,
+            playedAt = Instant.parse("2026-06-20T12:00:00Z"),
+            externalLink = null,
+            participants = listOf(
+                MatchParticipantInput("Hana Sato", listOf(heroId("Medusa"), heroId("Bigfoot"))),
+                MatchParticipantInput("Dmitri Kovac", listOf(heroId("Achilles"))),
+            ),
+            games = listOf(
+                MatchGameInput(
+                    gameNumber = 1,
+                    mapId = mapId,
+                    participants = listOf(
+                        MatchGameParticipantInput(heroId("Medusa"), 4, true),
+                        MatchGameParticipantInput(heroId("Achilles"), 0, false),
+                    ),
+                ),
+            ),
+            bans = emptyList(),
+        )
+
+        assertEquals(
+            before + appearanceWeight,
+            row("NeonStrategist").totalPoints,
+            "Bigfoot never played, so only its appearance point moved",
         )
     }
 }

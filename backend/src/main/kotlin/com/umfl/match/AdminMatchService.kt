@@ -49,6 +49,7 @@ class AdminMatchService(
                 participants = toParticipants(participants),
                 games = toGames(tournamentId, games),
                 bans = toBans(bans),
+                picks = toPicks(participants),
             )
         )
         eventPublisher.publishEvent(StandingsUpdateEvent(tournamentId))
@@ -77,6 +78,7 @@ class AdminMatchService(
                 participants = toParticipants(participants),
                 games = toGames(tournamentId, games),
                 bans = toBans(bans),
+                picks = toPicks(participants),
             )
         )
         eventPublisher.publishEvent(StandingsUpdateEvent(tournamentId))
@@ -101,7 +103,9 @@ class AdminMatchService(
         games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
     ) {
-        val referencedHeroIds = games.flatMap { it.participants.map { p -> p.heroId } } + bans.map { it.heroId }
+        val referencedHeroIds = games.flatMap { it.participants.map { p -> p.heroId } } +
+            participants.flatMap { it.draftedHeroIds } +
+            bans.map { it.heroId }
         val violations = MatchResultPolicy.validate(
             validMapIds = mapPoolAdminRepository.poolMapIds(tournamentId),
             validHeroIds = heroRepository.findAllById(referencedHeroIds).mapNotNull { it.id }.toSet(),
@@ -142,4 +146,15 @@ class AdminMatchService(
 
     private fun toBans(bans: List<MatchBanInput>): Set<HeroBan> =
         bans.map { HeroBan(heroId = it.heroId, banType = it.banType) }.toSet()
+
+    /**
+     * The draft rides in on the participants — a pick belongs to a side — but
+     * persists as a child of the match, since `match_participant` is composite-
+     * keyed and cannot own children of its own. The side is the participant's
+     * list position, the same ordinal `match_participant.side` is written from.
+     */
+    private fun toPicks(participants: List<MatchParticipantInput>): Set<HeroPick> =
+        participants.flatMapIndexed { side, participant ->
+            participant.draftedHeroIds.distinct().map { HeroPick(side = side, heroId = it) }
+        }.toSet()
 }

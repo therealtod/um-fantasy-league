@@ -74,6 +74,12 @@ data class TickerEntry(
     /** Ordered by game number — one entry per game played in the series. */
     val games: List<TickerGame>,
     val bannedHeroNames: List<String>,
+    /**
+     * Heroes drafted for this series that never played a game. They appear in
+     * no [games] row, so without naming them here their appearance points come
+     * from nowhere the reader can see.
+     */
+    val draftedUnplayedHeroNames: List<String>,
 )
 
 /**
@@ -188,6 +194,27 @@ class StandingsService(
             val contextsByGameAndHero = match.heroContexts()
                 .filter { it.role is HeroRole.Played }
                 .associateBy { context -> (context.role as HeroRole.Played).game.gameId to context.heroId }
+
+            // A `Drafted` context is a match-level fact with no game of its own,
+            // but the ticker only has game rows to show points in. Bank it against
+            // the hero's first game so the rows still sum to what the match banked
+            // on the board; in a Bo3 that makes game 1 worth one appearance more
+            // than games 2 and 3, which is the draft being priced once, not drift.
+            val firstGameIdByHero = buildMap {
+                match.games.sortedBy { it.gameNumber }.forEach { game ->
+                    game.participants.forEach { participant -> putIfAbsent(participant.heroId, game.gameId) }
+                }
+            }
+            val draftContextsByGameAndHero = match.heroContexts()
+                .filter { it.role is HeroRole.Drafted }
+                .mapNotNull { context ->
+                    firstGameIdByHero[context.heroId]?.let { gameId -> (gameId to context.heroId) to context }
+                }
+                .toMap()
+
+            val playedHeroIds = match.games.flatMapTo(mutableSetOf()) { game ->
+                game.participants.map { it.heroId }
+            }
             TickerEntry(
                 matchId = match.matchId,
                 round = match.round,
@@ -204,14 +231,22 @@ class StandingsService(
                                 heroName = participant.heroName,
                                 healthRemaining = participant.healthRemaining,
                                 isWinner = participant.isWinner,
-                                points = contextsByGameAndHero[game.gameId to participant.heroId]
-                                    ?.let { ScoringEngine.score(it, rules) }
-                                    ?: 0.0,
+                                points = ScoringEngine.round2(
+                                    listOfNotNull(
+                                        contextsByGameAndHero[game.gameId to participant.heroId],
+                                        draftContextsByGameAndHero[game.gameId to participant.heroId],
+                                    ).sumOf { ScoringEngine.score(it, rules) }
+                                ),
                             )
                         },
                     )
                 },
                 bannedHeroNames = match.bans.map { it.heroName },
+                draftedUnplayedHeroNames = match.participants
+                    .flatMap { it.draftedHeroes }
+                    .filterNot { it.heroId in playedHeroIds }
+                    .distinctBy { it.heroId }
+                    .map { it.heroName },
             )
         }
     }

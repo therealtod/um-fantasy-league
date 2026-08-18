@@ -150,7 +150,10 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
                 round = round,
                 playedAt = Instant.now(),
                 externalLink = null,
-                participants = listOf(MatchParticipantInput(winnerPlayer), MatchParticipantInput(loserPlayer)),
+                participants = listOf(
+                    MatchParticipantInput(winnerPlayer, listOf(heroId(winnerHero))),
+                    MatchParticipantInput(loserPlayer, listOf(heroId(loserHero))),
+                ),
                 games = listOf(
                     MatchGameInput(
                         gameNumber = 1,

@@ -163,6 +163,7 @@ describe('tournament lifecycle (frontend stores)', () => {
           },
         ],
         bannedHeroNames: [],
+        draftedUnplayedHeroNames: [],
       },
     ]
 

@@ -37,6 +37,7 @@ function entry(matchId: number, points: number): TickerEntry {
       },
     ],
     bannedHeroNames: [],
+    draftedUnplayedHeroNames: [],
   }
 }
 

@@ -27,11 +27,12 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         jdbcClient.sql("select id from $table where name = :name").param("name", name).query(Long::class.java).single()
 
     @Test
-    fun `a match with two participants, one game and a ban round-trips`() {
+    fun `a match with two participants, one game, a ban and a draft round-trips`() {
         val tournamentId = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
         val alice = id("heroes", "Alice")
         val robinHood = id("heroes", "Robin Hood")
         val bigfoot = id("heroes", "Bigfoot")
+        val medusa = id("heroes", "Medusa")
         val baskerville = id("game_map", "Baskerville Manor")
         val playedAt = Instant.parse("2026-08-15T12:00:00Z")
 
@@ -57,6 +58,11 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                     ),
                 ),
                 bans = setOf(HeroBan(heroId = bigfoot, banType = BanType.PRE_BAN)),
+                picks = setOf(
+                    HeroPick(side = 0, heroId = alice),
+                    HeroPick(side = 0, heroId = medusa),
+                    HeroPick(side = 1, heroId = robinHood),
+                ),
             )
         )
 
@@ -80,6 +86,13 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         val ban = reloaded.bans.single()
         assertEquals(bigfoot, ban.heroId)
         assertEquals(BanType.PRE_BAN, ban.banType)
+
+        // The draft: side 0 took a hero it never fielded, which is the whole
+        // reason `match_hero_pick` exists.
+        assertEquals(
+            setOf(HeroPick(0, alice), HeroPick(0, medusa), HeroPick(1, robinHood)),
+            reloaded.picks,
+        )
     }
 
     @Test
@@ -154,7 +167,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
     }
 
     @Test
-    fun `saving again fully replaces the previous participants, games and bans`() {
+    fun `saving again fully replaces the previous participants, games, bans and draft`() {
         val tournamentId = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
         val alice = id("heroes", "Alice")
         val robinHood = id("heroes", "Robin Hood")
@@ -183,6 +196,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                     ),
                 ),
                 bans = emptySet(),
+                picks = setOf(HeroPick(side = 0, heroId = alice), HeroPick(side = 1, heroId = robinHood)),
             )
         )
 
@@ -199,6 +213,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                         ),
                     ),
                 ),
+                picks = setOf(HeroPick(side = 0, heroId = sherlock), HeroPick(side = 1, heroId = dracula)),
             )
         )
 
@@ -206,5 +221,6 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         val heroIds = reloaded.games.single().participants.map { it.heroId }.toSet()
         assertEquals(setOf(sherlock, dracula), heroIds)
         assertTrue(heroIds.none { it == alice || it == robinHood })
+        assertEquals(setOf(HeroPick(0, sherlock), HeroPick(1, dracula)), reloaded.picks)
     }
 }

@@ -9,8 +9,21 @@ class MatchResultPolicyTest {
     private val validMaps = setOf(1L, 2L, 3L)
     private val validHeroes = setOf(10L, 11L, 12L)
 
-    private fun participants(label1: String? = "Someone", label2: String? = "Someone Else") =
-        listOf(MatchParticipantInput(playerLabel = label1), MatchParticipantInput(playerLabel = label2))
+    /**
+     * Both sides draft both heroes by default. A real draft is usually disjoint,
+     * but these fixtures swap 10 and 11 across sides from game to game, and a
+     * recorded draft has to cover every hero the side fielded — so the default
+     * keeps every test about the rule it is actually testing.
+     */
+    private fun participants(
+        label1: String? = "Someone",
+        label2: String? = "Someone Else",
+        drafted1: List<Long> = listOf(10, 11),
+        drafted2: List<Long> = listOf(10, 11),
+    ) = listOf(
+        MatchParticipantInput(playerLabel = label1, draftedHeroIds = drafted1),
+        MatchParticipantInput(playerLabel = label2, draftedHeroIds = drafted2),
+    )
 
     private fun gameParticipant(heroId: Long, health: Int = 0, winner: Boolean = false) =
         MatchGameParticipantInput(heroId = heroId, healthRemaining = health, isWinner = winner)
@@ -121,7 +134,7 @@ class MatchResultPolicyTest {
         val violations = MatchResultPolicy.validate(
             validMapIds = validMaps,
             validHeroIds = validHeroes,
-            participants = listOf(MatchParticipantInput(playerLabel = "Someone")),
+            participants = listOf(MatchParticipantInput(playerLabel = "Someone", draftedHeroIds = listOf(10, 11))),
             games = oneLegalGame(),
             bans = emptyList(),
         )
@@ -135,9 +148,9 @@ class MatchResultPolicyTest {
             validMapIds = validMaps,
             validHeroIds = validHeroes,
             participants = listOf(
-                MatchParticipantInput(playerLabel = "A"),
-                MatchParticipantInput(playerLabel = "B"),
-                MatchParticipantInput(playerLabel = "C"),
+                MatchParticipantInput(playerLabel = "A", draftedHeroIds = listOf(10, 11)),
+                MatchParticipantInput(playerLabel = "B", draftedHeroIds = listOf(10, 11)),
+                MatchParticipantInput(playerLabel = "C", draftedHeroIds = listOf(10, 11)),
             ),
             games = oneLegalGame(),
             bans = emptyList(),
@@ -223,7 +236,10 @@ class MatchResultPolicyTest {
         val violations = MatchResultPolicy.validate(
             validMapIds = validMaps,
             validHeroIds = validHeroes,
-            participants = participants(),
+            // Drafted too, since a side cannot field a hero it never drafted --
+            // which is why a banned hero that played breaks both ban rules at
+            // once rather than only BANNED_HERO_PLAYED.
+            participants = participants(drafted1 = listOf(10, 11, 12), drafted2 = listOf(10, 11)),
             games = listOf(
                 game(1, participants = listOf(gameParticipant(10, winner = true), gameParticipant(11))),
                 game(2, participants = listOf(gameParticipant(12, winner = true), gameParticipant(11))),
@@ -231,8 +247,113 @@ class MatchResultPolicyTest {
             bans = listOf(MatchBanInput(heroId = 12, banType = BanType.PRE_BAN)),
         )
 
-        assertEquals(listOf(MatchRule.BANNED_HERO_PLAYED), violations.map { it.rule })
+        assertEquals(
+            setOf(MatchRule.BANNED_HERO_DRAFTED, MatchRule.BANNED_HERO_PLAYED),
+            violations.map { it.rule }.toSet(),
+        )
+        assertTrue(violations.all { it.message.contains("12") })
+    }
+
+    @Test
+    fun `a hero drafted and never fielded is legal - that is what a draft records`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(drafted1 = listOf(10, 12), drafted2 = listOf(11)),
+            games = oneLegalGame(),
+            bans = emptyList(),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+    }
+
+    @Test
+    fun `a hero played by a side that did not draft it is rejected, naming hero and game`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(drafted1 = listOf(10), drafted2 = listOf(11)),
+            games = listOf(
+                game(1, participants = listOf(gameParticipant(10, winner = true), gameParticipant(11))),
+                game(2, participants = listOf(gameParticipant(12, winner = true), gameParticipant(11))),
+            ),
+            bans = emptyList(),
+        )
+
+        assertEquals(listOf(MatchRule.PLAYED_HERO_NOT_DRAFTED), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("12 in game 2"))
+    }
+
+    @Test
+    fun `drafting a hero for one side does not let the other side field it`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(drafted1 = listOf(10, 11), drafted2 = listOf(12)),
+            games = oneLegalGame(heroA = 10, heroB = 11),
+            bans = emptyList(),
+        )
+
+        assertEquals(listOf(MatchRule.PLAYED_HERO_NOT_DRAFTED), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("11 in game 1"))
+    }
+
+    @Test
+    fun `the same hero drafted twice by one side is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(drafted1 = listOf(10, 10, 11), drafted2 = listOf(10, 11)),
+            games = oneLegalGame(),
+            bans = emptyList(),
+        )
+
+        assertEquals(listOf(MatchRule.DUPLICATE_PICK), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("10"))
+    }
+
+    @Test
+    fun `the same hero drafted by both sides is legal - sides may trade a hero between games`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = listOf(
+                game(1, participants = listOf(gameParticipant(10, winner = true), gameParticipant(11))),
+                game(2, participants = listOf(gameParticipant(11, winner = true), gameParticipant(10))),
+            ),
+            bans = emptyList(),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+    }
+
+    @Test
+    fun `a banned hero that was also drafted is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(drafted1 = listOf(10, 11, 12), drafted2 = listOf(10, 11)),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN)),
+        )
+
+        assertEquals(listOf(MatchRule.BANNED_HERO_DRAFTED), violations.map { it.rule })
         assertTrue(violations.single().message.contains("12"))
+    }
+
+    @Test
+    fun `a nonexistent heroId on a draft is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(drafted1 = listOf(10, 11, 999), drafted2 = listOf(10, 11)),
+            games = oneLegalGame(),
+            bans = emptyList(),
+        )
+
+        assertEquals(listOf(MatchRule.UNKNOWN_HERO), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("999"))
     }
 
     @Test
@@ -286,7 +407,7 @@ class MatchResultPolicyTest {
         val violations = MatchResultPolicy.validate(
             validMapIds = validMaps,
             validHeroIds = validHeroes,
-            participants = participants(),
+            participants = participants(drafted1 = listOf(10), drafted2 = listOf(999)),
             games = oneLegalGame(heroA = 10, heroB = 999),
             bans = emptyList(),
         )

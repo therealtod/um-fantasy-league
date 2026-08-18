@@ -29,8 +29,21 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     private fun id(table: String, name: String): Long =
         jdbcClient.sql("select id from $table where name = :name").param("name", name).query(Long::class.java).single()
 
-    private fun participants(label1: String? = "Tomas Ferreira", label2: String? = "Rina Okafor") =
-        listOf(MatchParticipantInput(label1), MatchParticipantInput(label2))
+    /**
+     * Both sides draft every hero these fixtures field. A recorded draft has to
+     * cover whatever the games use (`PLAYED_HERO_NOT_DRAFTED`), and the games
+     * below trade heroes across sides freely, so one shared draft keeps each
+     * test about the rule it is actually testing. Bigfoot is deliberately not
+     * in it: it is the hero these fixtures ban.
+     */
+    private fun fixtureDraft() =
+        listOf("Alice", "Robin Hood", "Medusa", "Achilles", "King Arthur").map { id("heroes", it) }
+
+    private fun participants(
+        label1: String? = "Tomas Ferreira",
+        label2: String? = "Rina Okafor",
+        drafted: List<Long> = fixtureDraft(),
+    ) = listOf(MatchParticipantInput(label1, drafted), MatchParticipantInput(label2, drafted))
 
     private fun oneGame(
         mapId: Long,
@@ -203,7 +216,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 round = 1,
                 playedAt = Instant.now(),
                 externalLink = null,
-                participants = participants(),
+                participants = participants(drafted = fixtureDraft() + 999_999L),
                 games = oneGame(mapId, heroA = 999_999L, heroB = id("heroes", "Robin Hood")),
                 bans = emptyList(),
             )
@@ -225,7 +238,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 round = 1,
                 playedAt = Instant.now(),
                 externalLink = null,
-                participants = participants(),
+                participants = participants(drafted = fixtureDraft() + bigfoot),
                 games = listOf(
                     MatchGameInput(1, mapId, listOf(MatchGameParticipantInput(alice, 6, true), MatchGameParticipantInput(robinHood, 0, false))),
                     MatchGameInput(2, mapId, listOf(MatchGameParticipantInput(bigfoot, 4, true), MatchGameParticipantInput(robinHood, 0, false))),
@@ -233,7 +246,12 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 bans = listOf(MatchBanInput(bigfoot, BanType.PRE_BAN)),
             )
         }
-        assertEquals(listOf(MatchRule.BANNED_HERO_PLAYED), error.violations.map { it.rule })
+        // A hero cannot be struck out of the draft and then taken in it, so a
+        // banned hero that played breaks both ban rules rather than one.
+        assertEquals(
+            setOf(MatchRule.BANNED_HERO_DRAFTED, MatchRule.BANNED_HERO_PLAYED),
+            error.violations.map { it.rule }.toSet(),
+        )
     }
 
     /**
@@ -393,5 +411,109 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         assertEquals(0, countWhere("match_game", "match_id", recorded.matchId))
         assertEquals(0, countWhere("match_game_participant", "game_id", gameId))
         assertEquals(0, countWhere("hero_ban", "match_id", recorded.matchId))
+        assertEquals(0, countWhere("match_hero_pick", "match_id", recorded.matchId))
+    }
+
+    @Test
+    fun `each side's draft round-trips, including a hero it never fielded`() {
+        val tournamentId = winterOfChampionsId()
+        val mapId = id("game_map", "Baskerville Manor")
+        val alice = id("heroes", "Alice")
+        val robinHood = id("heroes", "Robin Hood")
+        val medusa = id("heroes", "Medusa")
+
+        val recorded = adminMatchService.record(
+            tournamentId,
+            round = 1,
+            playedAt = Instant.now(),
+            externalLink = null,
+            participants = listOf(
+                MatchParticipantInput("Tomas Ferreira", listOf(alice, medusa)),
+                MatchParticipantInput("Rina Okafor", listOf(robinHood)),
+            ),
+            games = oneGame(mapId, heroA = alice, heroB = robinHood),
+            bans = emptyList(),
+        )
+
+        val sideZero = recorded.participants.single { it.side == 0 }
+        assertEquals(listOf("Alice", "Medusa"), sideZero.draftedHeroes.map { it.heroName })
+        assertEquals(listOf("Robin Hood"), recorded.participants.single { it.side == 1 }.draftedHeroes.map { it.heroName })
+        assertTrue(
+            recorded.games.single().participants.none { it.heroName == "Medusa" },
+            "Medusa was drafted and never fielded -- exactly the case APPEARANCE now prices",
+        )
+    }
+
+    @Test
+    fun `a hero fielded by a side that never drafted it is rejected with a 422`() {
+        val tournamentId = winterOfChampionsId()
+        val mapId = id("game_map", "Baskerville Manor")
+        val alice = id("heroes", "Alice")
+        val robinHood = id("heroes", "Robin Hood")
+
+        val error = assertFailsWith<MatchRuleException> {
+            adminMatchService.record(
+                tournamentId,
+                round = 1,
+                playedAt = Instant.now(),
+                externalLink = null,
+                participants = listOf(
+                    MatchParticipantInput("Tomas Ferreira", listOf(alice)),
+                    MatchParticipantInput("Rina Okafor", listOf(alice)),
+                ),
+                games = oneGame(mapId, heroA = alice, heroB = robinHood),
+                bans = emptyList(),
+            )
+        }
+
+        assertEquals(listOf(MatchRule.PLAYED_HERO_NOT_DRAFTED), error.violations.map { it.rule })
+        assertTrue(error.violations.single().message.contains("$robinHood in game 1"))
+    }
+
+    @Test
+    fun `correcting a match replaces the draft rather than adding to it`() {
+        val tournamentId = winterOfChampionsId()
+        val mapId = id("game_map", "Baskerville Manor")
+        val alice = id("heroes", "Alice")
+        val robinHood = id("heroes", "Robin Hood")
+        val medusa = id("heroes", "Medusa")
+
+        val recorded = adminMatchService.record(
+            tournamentId,
+            round = 1,
+            playedAt = Instant.now(),
+            externalLink = null,
+            participants = listOf(
+                MatchParticipantInput("Tomas Ferreira", listOf(alice, medusa)),
+                MatchParticipantInput("Rina Okafor", listOf(robinHood)),
+            ),
+            games = oneGame(mapId, heroA = alice, heroB = robinHood),
+            bans = emptyList(),
+        )
+
+        val corrected = adminMatchService.correct(
+            tournamentId,
+            recorded.matchId,
+            round = 1,
+            playedAt = recorded.playedAt,
+            externalLink = null,
+            participants = listOf(
+                MatchParticipantInput("Tomas Ferreira", listOf(alice)),
+                MatchParticipantInput("Rina Okafor", listOf(robinHood)),
+            ),
+            games = oneGame(mapId, heroA = alice, heroB = robinHood),
+            bans = emptyList(),
+        )
+
+        assertEquals(
+            listOf("Alice"),
+            corrected.participants.single { it.side == 0 }.draftedHeroes.map { it.heroName },
+            "the mistaken Medusa pick is gone, not merged",
+        )
+        assertEquals(
+            2,
+            jdbcClient.sql("select count(*) from match_hero_pick where match_id = :id")
+                .param("id", recorded.matchId).query(Int::class.java).single(),
+        )
     }
 }

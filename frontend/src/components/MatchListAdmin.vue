@@ -71,6 +71,20 @@ function sideLabel(match: MatchResultDto, side: number): string {
 }
 
 /**
+ * The heroes a side drafted and never fielded. The draft always contains what
+ * the side played, so subtracting the games leaves exactly the picks that only
+ * show up as an appearance.
+ */
+function unplayedPicks(match: MatchResultDto, side: number): string[] {
+  const fielded = new Set(
+    match.games.flatMap(game => game.participants.filter(p => p.side === side).map(p => p.heroId)),
+  )
+  return (match.participants.find(p => p.side === side)?.draftedHeroes ?? [])
+    .filter(hero => !fielded.has(hero.heroId))
+    .map(hero => hero.heroName)
+}
+
+/**
  * Games won per side, derived client-side from each game's own `isWinner`
  * flags — there is no stored series winner (nothing about "best of N" is
  * tracked), consistent with this app's rule that anything derivable is
@@ -227,8 +241,14 @@ watch(
                 <span :class="won[0] > won[1] ? 'font-bold text-lime' : 'text-ink-dim'">
                   {{ sideLabel(match, 0) }} — {{ won[0] }}
                 </span>
+                <span v-if="unplayedPicks(match, 0).length" class="text-xs text-ink-dim">
+                  drafted, unplayed: {{ unplayedPicks(match, 0).join(', ') }}
+                </span>
                 <span :class="won[1] > won[0] ? 'font-bold text-lime' : 'text-ink-dim'">
                   {{ sideLabel(match, 1) }} — {{ won[1] }}
+                </span>
+                <span v-if="unplayedPicks(match, 1).length" class="text-xs text-ink-dim">
+                  drafted, unplayed: {{ unplayedPicks(match, 1).join(', ') }}
                 </span>
               </div>
             </td>

@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
-import type { BanType, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
+import type { BanType, GameResult, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
 interface Props {
@@ -52,7 +52,14 @@ function blankForm(): RecordMatchRequest {
     round: 1,
     playedAt: new Date().toISOString(),
     externalLink: '',
-    participants: [{ playerLabel: '' }, { playerLabel: '' }],
+    // `draftedHeroIds` here holds only the heroes a side drafted and never
+    // fielded. The ones it did field are unioned in at save time from the games
+    // themselves, so a recorded draft is always complete without the admin
+    // entering the same hero twice — see `draftFor`.
+    participants: [
+      { playerLabel: '', draftedHeroIds: [] },
+      { playerLabel: '', draftedHeroIds: [] },
+    ],
     games: [blankGame(1)],
     bans: [],
   }
@@ -109,7 +116,15 @@ async function loadMatchData() {
       externalLink: matchData.externalLink ?? '',
       participants: [...matchData.participants]
         .sort((a, b) => a.side - b.side)
-        .map((p) => ({ playerLabel: p.playerLabel ?? '' })),
+        .map((p) => ({
+          playerLabel: p.playerLabel ?? '',
+          // Split the stored draft back into the halves the form works in: the
+          // heroes this side fielded come back from the games, so only the
+          // unplayed picks belong in the editable list.
+          draftedHeroIds: p.draftedHeroes
+            .map((h) => h.heroId)
+            .filter((heroId) => !fieldedHeroIds(matchData.games, p.side).includes(heroId)),
+        })),
       games: [...matchData.games]
         .sort((a, b) => a.gameNumber - b.gameNumber)
         .map((g) => ({
@@ -161,6 +176,42 @@ function removeBan(index: number) {
   form.value.bans.splice(index, 1)
 }
 
+/** The heroes a side fielded in a *saved* match, where `side` is a real field. */
+function fieldedHeroIds(games: GameResult[], side: number): number[] {
+  return games.flatMap((game) => game.participants.filter((p) => p.side === side).map((p) => p.heroId))
+}
+
+/** The same, read off the form, where a side is the participant's list position. */
+function fieldedInForm(side: number): number[] {
+  return form.value.games.flatMap((game) => {
+    const participant = game.participants[side]
+    return participant && participant.heroId !== 0 ? [participant.heroId] : []
+  })
+}
+
+/**
+ * One side's complete draft as the API wants it: everything it fielded, plus
+ * the picks it never played. Building the union here rather than making the
+ * admin re-enter each game's hero is what keeps PLAYED_HERO_NOT_DRAFTED from
+ * ever firing on a form the UI itself produced.
+ */
+function draftFor(side: number): number[] {
+  const unplayed = form.value.participants[side]?.draftedHeroIds ?? []
+  return [...new Set([...fieldedInForm(side), ...unplayed])]
+}
+
+function addDraftPick(side: number) {
+  form.value.participants[side].draftedHeroIds.push(0)
+}
+
+function removeDraftPick(side: number, index: number) {
+  form.value.participants[side].draftedHeroIds.splice(index, 1)
+}
+
+function heroName(heroId: number): string {
+  return heroPool.value.find((hero) => hero.id === heroId)?.name ?? `#${heroId}`
+}
+
 // Picking a side makes it the sole winner of that game and clears the other.
 // There is no way to pick *neither*, and that is deliberate: every game is
 // played to a decision, so the server rejects a game with no winner
@@ -208,16 +259,33 @@ async function saveMatch() {
     error.value = 'Every ban needs a hero selected'
     return
   }
+  if (form.value.participants.some((p) => p.draftedHeroIds.some((heroId) => heroId === 0))) {
+    error.value = 'Every drafted hero needs a hero selected'
+    return
+  }
+  // DUPLICATE_PICK server-side; caught here so it reads as a prompt, not a 422.
+  if (form.value.participants.some((p, side) => draftFor(side).length !== fieldedInForm(side).length + p.draftedHeroIds.length)) {
+    error.value = 'A side cannot draft the same hero twice — a hero it played is already on its draft'
+    return
+  }
 
   loading.value = true
   error.value = null
   violations.value = []
 
+  const payload: RecordMatchRequest = {
+    ...form.value,
+    participants: form.value.participants.map((participant, side) => ({
+      ...participant,
+      draftedHeroIds: draftFor(side),
+    })),
+  }
+
   try {
     if (props.mode === 'create') {
-      await api.admin.recordMatch(tournamentId, form.value)
+      await api.admin.recordMatch(tournamentId, payload)
     } else if (props.mode === 'edit' && props.matchId) {
-      await api.admin.correctMatch(tournamentId, props.matchId, form.value)
+      await api.admin.correctMatch(tournamentId, props.matchId, payload)
     }
     emit('success')
   } catch (e) {
@@ -320,20 +388,60 @@ onMounted(async () => {
         <div
           v-for="(participant, index) in form.participants"
           :key="index"
-          class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-center"
+          class="flex flex-col gap-4 border border-edge bg-surface-low p-4"
         >
-          <div class="flex size-8 shrink-0 items-center justify-center bg-cyan font-display text-xl text-surface-lowest">
-            {{ index + 1 }}
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
+            <div class="flex size-8 shrink-0 items-center justify-center bg-cyan font-display text-xl text-surface-lowest">
+              {{ index + 1 }}
+            </div>
+            <div class="flex flex-1 flex-col gap-2">
+              <label :for="`player-${index}`" class="label-caps">Player name (optional)</label>
+              <input
+                :id="`player-${index}`"
+                v-model="participant.playerLabel"
+                type="text"
+                class="field-input-sm"
+                placeholder="Who piloted this side"
+              />
+            </div>
           </div>
-          <div class="flex flex-1 flex-col gap-2">
-            <label :for="`player-${index}`" class="label-caps">Player name (optional)</label>
-            <input
-              :id="`player-${index}`"
-              v-model="participant.playerLabel"
-              type="text"
-              class="field-input-sm"
-              placeholder="Who piloted this side"
-            />
+
+          <!-- This side's draft. The heroes it fields below are already on it —
+               they are listed read-only and added to the submission for you —
+               so this list is for the picks that never reach the table. They
+               still score an appearance, which is the point of recording them. -->
+          <div class="flex flex-col gap-3 border-t border-edge pt-3">
+            <span class="label-caps">Draft</span>
+            <p class="font-mono text-xs text-ink-dim">
+              Played:
+              <template v-if="fieldedInForm(index).length">
+                {{ fieldedInForm(index).map(heroName).join(', ') }}
+              </template>
+              <template v-else>— pick heroes in the games below</template>
+            </p>
+
+            <div
+              v-for="(_heroId, pickIndex) in participant.draftedHeroIds"
+              :key="pickIndex"
+              class="flex flex-col gap-2 sm:flex-row sm:items-end"
+            >
+              <div class="flex flex-1 flex-col gap-2">
+                <label :for="`draft-${index}-${pickIndex}`" class="label-caps">Drafted, not played</label>
+                <select
+                  :id="`draft-${index}-${pickIndex}`"
+                  v-model.number="participant.draftedHeroIds[pickIndex]"
+                  class="field-input-sm"
+                >
+                  <option :value="0" disabled>Select a hero…</option>
+                  <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
+                </select>
+              </div>
+              <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removeDraftPick(index, pickIndex)">
+                Remove
+              </button>
+            </div>
+
+            <button type="button" class="btn-ghost" @click="addDraftPick(index)">+ Add Drafted Hero</button>
           </div>
         </div>
       </div>

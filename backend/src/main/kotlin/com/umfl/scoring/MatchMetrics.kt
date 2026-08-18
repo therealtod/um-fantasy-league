@@ -6,12 +6,18 @@ import com.umfl.match.GameResult
 import com.umfl.match.MatchResult
 
 /**
- * What a hero did in one match: it either played one of the series' games
- * (and there is a game + participant row) or it was banned out of the whole
- * series (and there is not).
+ * What a hero did in one match.
+ *
+ * [Played] is per *game*: there is a game + participant row, and a hero that
+ * played three games of a Bo3 has three of these. [Drafted] and [Banned] are
+ * per *series* and mutually exclusive -- a hero was taken in the match's draft
+ * or struck out of it, once, before any game was played. A hero that was
+ * drafted and then fielded has both a [Drafted] role and its [Played] ones.
  */
 sealed interface HeroRole {
     data class Played(val game: GameResult, val participant: GameParticipantResult) : HeroRole
+
+    data object Drafted : HeroRole
 
     data object Banned : HeroRole
 }
@@ -20,9 +26,10 @@ sealed interface HeroRole {
  * One hero's role in one match, with the whole match still visible.
  *
  * The extractors need more than a participant row: `HEALTH_DIFFERENTIAL` needs
- * the opponent, and `SELF_BAN`/`OPPONENT_BAN` have no participant row at all --
- * they read `match.bans` instead. WIN and LOSS are scoped per game rather than
- * per series — a hero that takes game 1 and drops game 2 scores one of each.
+ * the opponent, and `APPEARANCE`/`SELF_BAN`/`OPPONENT_BAN` have no participant
+ * row at all -- they price the draft, reading `match.bans` or the role itself.
+ * WIN and LOSS are scoped per game rather than per series — a hero that takes
+ * game 1 and drops game 2 scores one of each.
  */
 data class MetricContext(
     val match: MatchResult,
@@ -86,8 +93,15 @@ object MatchMetrics {
 // in the map literal: several of them need an early `return`, which a lambda in
 // an infix `to` expression cannot express.
 
+/**
+ * A hero featured in this match's draft and not banned out of it -- whether or
+ * not it went on to play a game. Scored off the draft rather than off a
+ * participant row precisely so a hero taken and never fielded still counts,
+ * and scored once for the series rather than once per game: a side drafts
+ * before game 1, not again before game 2.
+ */
 private fun appearance(context: MetricContext): Double =
-    if (context.role is HeroRole.Played) 1.0 else 0.0
+    if (context.role is HeroRole.Drafted) 1.0 else 0.0
 
 /**
  * A hero its own side banned out. `HeroRole.Banned` stays a bare marker (see

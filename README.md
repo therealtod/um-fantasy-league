@@ -157,6 +157,7 @@ tournament ──< tournament_hero   >── hero            the pool, and its p
            ──< tournament_match  ──< match_participant              the two humans, per series
                                  ├──< match_game      >── game_map  one game, one board
                                  │         └──< match_game_participant >── hero
+                                 ├──< match_hero_pick >── hero       drafted once per series
                                  └──< hero_ban        >── hero       struck once per series
            ──< tournament_entry  ──< entry_slot       >── hero
                      │
@@ -205,7 +206,26 @@ not be multiplied by the number of games played (`MatchResult.heroContexts` yiel
 `Banned` context per banned hero regardless of series length).
 
 Bans are per match, so they never touch `entry_slot`: a hero banned in one round can be played in
-the next, and its manager still scores the `BAN` coefficient for the round it sat out.
+the next, and its manager still scores the `SELF_BAN`/`OPPONENT_BAN` coefficient for the round it sat
+out.
+
+### Why the picks are their own table too
+
+`match_hero_pick (match_id, side, hero_id)` — the other half of the draft, and the reason
+`APPEARANCE` can mean "was featured in the draft" rather than "reached the table". Without it, a
+hero drafted and never fielded is indistinguishable from a hero nobody took, since the only record
+of a pick was whatever `match_game_participant` happened to contain.
+
+Separate from `hero_ban` rather than one draft table with a kind column, because the two carry
+different data: a pick has an owning `side` and no category, a ban has a category and no side — a
+pre-ban belongs to neither side. A hero cannot be both, which `MatchResultPolicy` enforces as
+`BANNED_HERO_DRAFTED`, and a side cannot field a hero it never drafted, which it enforces as
+`PLAYED_HERO_NOT_DRAFTED` — that second rule is what makes the draft a complete record rather than a
+list of afterthoughts.
+
+There is deliberately no `unique (match_id, hero_id)`: games in a series are independent, so a hero
+may legitimately appear for one side in game 1 and the other in game 2. `APPEARANCE` de-duplicates
+by hero instead, so a hero drafted by both sides still scores once.
 
 ### Schema notes
 
@@ -266,8 +286,8 @@ implements:
 
 | Metric | Measures |
 |---|---|
-| `APPEARANCE` | the hero played this game |
-| `BAN` | the hero was banned out of this match |
+| `APPEARANCE` | the hero was drafted for this match and not banned out — fielded or not |
+| `SELF_BAN` / `OPPONENT_BAN` | the hero was banned out of this match by its own / the opposing side |
 | `WIN` / `LOSS` | took / dropped this game — exhaustive, since every game has a winner |
 | `HEALTH_REMAINING` | health at the end (0 if defeated) |
 | `HEALTH_DIFFERENTIAL` | this hero's health minus the healthiest opponent's |
@@ -285,9 +305,16 @@ it is a schema decision, not a registry one. There is likewise **no** `DRAW`: a 
 is not a recordable result, so a `DRAW` column would price something that cannot happen — it is
 reported as an unknown metric like any other key this build cannot measure.
 
-Metrics are measured per *game*, not per series: a hero that takes game 1 and drops game 2 of a Bo3
-collects one `WIN` and one `LOSS`, two `APPEARANCE`s, and each game's own health numbers. The one
-exception is `BAN`, which is struck once for the whole match.
+Most metrics are measured per *game*, not per series: a hero that takes game 1 and drops game 2 of a
+Bo3 collects one `WIN` and one `LOSS`, plus each game's own health numbers. The exceptions are the
+three that price the *draft* rather than the table — `APPEARANCE`, `SELF_BAN` and `OPPONENT_BAN` —
+which are struck once for the whole match, because the draft happens once before game 1.
+
+`APPEARANCE` is deliberately not "the hero played". A match's draft is recorded in full: `hero_ban`
+holds the heroes struck out of it and `match_hero_pick` holds the heroes each side took, and a
+recorded draft has to cover every hero that side then fielded (`MatchResultPolicy`'s
+`PLAYED_HERO_NOT_DRAFTED`). So a hero drafted and left on the bench through a 2-0 sweep still scores
+its appearance, and a hero that plays all three games of a Bo3 scores exactly one.
 
 Each metric's contribution is rounded to 2dp *before* it is summed, so a displayed total is exactly
 the sum of its displayed breakdown. Coefficients may be negative — a penalty is a legitimate rule.

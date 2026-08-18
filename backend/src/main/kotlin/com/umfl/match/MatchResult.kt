@@ -17,6 +17,19 @@ data class MatchParticipantResult(
     val side: Int,
     /** Who piloted this side, as free text. Null when recorded unattributed. */
     val playerLabel: String?,
+    /**
+     * The heroes this side drafted for the series, whether or not it fielded
+     * them. Every hero that played one of the games is in here — a recorded
+     * draft is complete ([MatchRule.PLAYED_HERO_NOT_DRAFTED]) — so the ones
+     * that appear in no game are the picks that never hit the table.
+     */
+    val draftedHeroes: List<DraftedHeroResult> = emptyList(),
+)
+
+/** One hero on one side's draft board. */
+data class DraftedHeroResult(
+    val heroId: Long,
+    val heroName: String,
 )
 
 data class GameParticipantResult(
@@ -68,18 +81,30 @@ data class MatchResult(
     fun playerLabelForSide(side: Int): String? =
         participants.firstOrNull { it.side == side }?.playerLabel
 
+    /** Every hero either side drafted, once for the series however many sides took it. */
+    fun draftedHeroIds(): List<Long> =
+        participants.flatMap { it.draftedHeroes }.map { it.heroId }.distinct()
+
     /**
-     * Every (hero, game) this match's games touched, once per game played --
-     * a hero played in two games of a Bo3 yields two `Played` contexts, each
-     * scoring independently -- plus every banned hero exactly once for the
-     * whole series, regardless of how many games it has: a ban is struck once,
-     * before any game is played, so it must not be multiplied by game count.
+     * The match's contexts, in the three shapes a hero can have here.
      *
-     * A hero cannot both play (in any game) and be banned in the same match —
-     * [MatchResultPolicy] rejects that submission as `BANNED_HERO_PLAYED`, so
-     * the de-duplication below is a backstop for data that predates the check,
-     * not a supported input. If a record ever says otherwise, playing wins,
-     * because it has real health and a real result attached.
+     * `Played` is per game: every (hero, game) this match's games touched, so
+     * a hero played in two games of a Bo3 yields two contexts, each scoring
+     * independently. `Drafted` and `Banned` are both per *series*, exactly
+     * once each, because the draft happens once before any game is played and
+     * must not be multiplied by game count -- which is why a hero that plays
+     * all three games of a Bo3 still appears once.
+     *
+     * A drafted hero that played therefore yields both: N `Played` contexts
+     * for the per-game metrics, plus the one `Drafted` context APPEARANCE
+     * prices.
+     *
+     * A hero can be none of drafted, played or banned in the same match —
+     * [MatchResultPolicy] rejects those submissions as `BANNED_HERO_DRAFTED`
+     * and `BANNED_HERO_PLAYED` — so the exclusions below are a backstop for
+     * data that predates the checks, not supported input. Playing wins over a
+     * ban, because it has real health and a real result attached, and a hero
+     * that played is credited with the draft that fielded it.
      */
     fun heroContexts(): List<MetricContext> {
         val played = games.flatMap { game ->
@@ -92,6 +117,10 @@ data class MatchResult(
             .filterNot { it.heroId in playedHeroIds }
             .distinctBy { it.heroId }
             .map { MetricContext(this, it.heroId, HeroRole.Banned) }
-        return played + banned
+        val bannedHeroIds = banned.mapTo(mutableSetOf()) { it.heroId }
+        val drafted = draftedHeroIds()
+            .filterNot { it in bannedHeroIds }
+            .map { MetricContext(this, it, HeroRole.Drafted) }
+        return played + drafted + banned
     }
 }

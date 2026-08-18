@@ -92,6 +92,77 @@ describe('MatchResultWizard', () => {
     )
   })
 
+  it('sends each side a complete draft, folding in the heroes it fielded', async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    // Nobody typed a draft, and the submission still carries one: a side that
+    // fields a hero drafted it, which is what PLAYED_HERO_NOT_DRAFTED demands.
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        participants: [
+          expect.objectContaining({ draftedHeroIds: [10] }),
+          expect.objectContaining({ draftedHeroIds: [11] }),
+        ],
+      }),
+    )
+  })
+
+  it('sends a hero drafted and never fielded, which is what earns an appearance', async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    // The first side also drafted Dracula and never brought it to the table.
+    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Drafted Hero')!.trigger('click')
+    await wrapper.find('#draft-0-0').setValue('11')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        participants: [
+          expect.objectContaining({ draftedHeroIds: [10, 11] }),
+          expect.objectContaining({ draftedHeroIds: [11] }),
+        ],
+      }),
+    )
+  })
+
+  it('refuses to save a draft row left on the placeholder', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Drafted Hero')!.trigger('click')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Every drafted hero needs a hero selected')
+  })
+
   it('refuses to save a game with no winner picked, rather than posting a draw', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
@@ -197,8 +268,8 @@ describe('MatchResultWizard', () => {
       playedAt: '2026-08-01T12:00:00Z',
       externalLink: 'https://example.com/bracket/9',
       participants: [
-        { side: 0, playerLabel: 'Alice' },
-        { side: 1 },
+        { side: 0, playerLabel: 'Alice', draftedHeroes: [{ heroId: 10, heroName: 'Sherlock Holmes' }, { heroId: 12, heroName: 'Medusa' }] },
+        { side: 1, draftedHeroes: [{ heroId: 11, heroName: 'Dracula' }] },
       ],
       games: [
         {
@@ -237,7 +308,12 @@ describe('MatchResultWizard', () => {
       42,
       expect.objectContaining({
         externalLink: 'https://example.com/bracket/9',
-        participants: [{ playerLabel: 'Alice' }, { playerLabel: '' }],
+        // Side 0's draft round-trips whole: Sherlock Holmes because it was
+        // fielded, Medusa because it was drafted and never played.
+        participants: [
+          { playerLabel: 'Alice', draftedHeroIds: [10, 12] },
+          { playerLabel: '', draftedHeroIds: [11] },
+        ],
         games: [
           expect.objectContaining({
             gameNumber: 1,

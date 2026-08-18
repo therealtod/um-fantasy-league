@@ -22,7 +22,10 @@ const matches: MatchResultDto[] = [
     tournamentId: 1,
     round: 1,
     playedAt: '2026-08-01T12:00:00Z',
-    participants: [{ side: 0 }, { side: 1 }],
+    participants: [
+      { side: 0, draftedHeroes: [] },
+      { side: 1, draftedHeroes: [] },
+    ],
     games: [
       {
         gameId: 100,
@@ -42,7 +45,10 @@ const matches: MatchResultDto[] = [
     tournamentId: 1,
     round: 2,
     playedAt: '2026-08-02T12:00:00Z',
-    participants: [{ side: 0 }, { side: 1 }],
+    participants: [
+      { side: 0, draftedHeroes: [] },
+      { side: 1, draftedHeroes: [] },
+    ],
     games: [
       {
         gameId: 200,
@@ -130,7 +136,10 @@ describe('MatchListAdmin', () => {
   it('derives a games-won tally per side, falling back to a generic label when unattributed', async () => {
     const withPlayer: MatchResultDto = {
       ...matches[0]!,
-      participants: [{ side: 0, playerLabel: 'Alice' }, { side: 1, playerLabel: 'Bob' }],
+      participants: [
+        { side: 0, playerLabel: 'Alice', draftedHeroes: [] },
+        { side: 1, playerLabel: 'Bob', draftedHeroes: [] },
+      ],
     }
     listMatches.mockResolvedValue([withPlayer, matches[1]!])
     const wrapper = await mountList()
@@ -149,6 +158,29 @@ describe('MatchListAdmin', () => {
     expect(wrapper.text()).toContain('G1 · Center Square')
     expect(wrapper.text()).toContain('Sherlock Holmes')
     expect(wrapper.text()).toContain('WIN')
+  })
+
+  it('names the heroes a side drafted and never fielded, since they appear in no game row', async () => {
+    const withBench: MatchResultDto = {
+      ...matches[0]!,
+      participants: [
+        {
+          side: 0,
+          playerLabel: 'Alice',
+          draftedHeroes: [
+            { heroId: 10, heroName: 'Sherlock Holmes' },
+            { heroId: 12, heroName: 'Medusa' },
+          ],
+        },
+        { side: 1, playerLabel: 'Bob', draftedHeroes: [{ heroId: 11, heroName: 'Dracula' }] },
+      ],
+    }
+    listMatches.mockResolvedValue([withBench])
+    const wrapper = await mountList()
+
+    // Sherlock Holmes played, so it is not on the unplayed line; Medusa is.
+    expect(wrapper.text()).toContain('drafted, unplayed: Medusa')
+    expect(wrapper.text()).not.toContain('drafted, unplayed: Dracula')
   })
 
   it('groups bans by category', async () => {

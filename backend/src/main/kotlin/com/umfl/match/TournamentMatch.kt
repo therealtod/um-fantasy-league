@@ -9,8 +9,8 @@ import java.time.Instant
  * A recorded match — the aggregate root the admin API writes. Read access
  * stays on [MatchResultQuery]'s hand-written projection (see its class doc);
  * this class exists only so an admin write can save participants, games and
- * bans together, exactly like [com.umfl.tournament.TournamentEntry] saves its
- * slots as one unit.
+ * the draft (picks and bans) together, exactly like
+ * [com.umfl.tournament.TournamentEntry] saves its slots as one unit.
  *
  * A match is a series of one or more [games][MatchGame] between the same two
  * [participants][MatchParticipant] — [participants] carries only the two
@@ -40,6 +40,17 @@ data class TournamentMatch(
     val games: Set<MatchGame> = emptySet(),
     @MappedCollection(idColumn = "match_id")
     val bans: Set<HeroBan> = emptySet(),
+    /**
+     * The picks half of the draft, to [bans]' bans half. A [Set] for the same
+     * reason: `side` is real data (a pick belongs to one side, and one side
+     * owns several picks), not a list-position ordinal.
+     *
+     * Hangs off the root rather than off [MatchParticipant], where it would
+     * read more naturally: `match_participant` has a composite key, and Spring
+     * Data JDBC cannot map a child of an entity keyed that way.
+     */
+    @MappedCollection(idColumn = "match_id")
+    val picks: Set<HeroPick> = emptySet(),
 )
 
 /** One side of the series — which human played it, for the whole match. */
@@ -78,3 +89,12 @@ enum class BanType { PRE_BAN, OPPONENT_BAN, SELF_BAN }
 /** No surrogate id: `(match_id, hero_id)` is the natural composite key. */
 @Table("hero_ban")
 data class HeroBan(val heroId: Long, val banType: BanType)
+
+/**
+ * A hero one side drafted for the series, played or not.
+ *
+ * No surrogate id either: `(match_id, side, hero_id)` is the natural key. No
+ * ban category to pair with [HeroBan.banType] -- a pick is a pick.
+ */
+@Table("match_hero_pick")
+data class HeroPick(val side: Int, val heroId: Long)

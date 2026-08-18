@@ -2,6 +2,7 @@ package com.umfl.scoring
 
 import com.umfl.match.BanResult
 import com.umfl.match.BanType
+import com.umfl.match.DraftedHeroResult
 import com.umfl.match.GameParticipantResult
 import com.umfl.match.GameResult
 import com.umfl.match.MatchParticipantResult
@@ -41,17 +42,31 @@ class MatchMetricsTest {
         isWinner = isWinner,
     )
 
-    /** A single-game match: one `GameResult` wrapping [gameParticipants]. */
+    /**
+     * A single-game match: one `GameResult` wrapping [gameParticipants].
+     *
+     * Every side drafts the hero it fielded, since a recorded draft is complete
+     * (`MatchRule.PLAYED_HERO_NOT_DRAFTED`). [unplayedPicks] adds heroes side 0
+     * drafted and never played — the case APPEARANCE exists to catch.
+     */
     private fun match(
         gameParticipants: List<GameParticipantResult>,
         bans: List<BanResult> = emptyList(),
+        unplayedPicks: List<DraftedHeroResult> = emptyList(),
     ) = MatchResult(
         matchId = 6,
         tournamentId = 1,
         round = 2,
         playedAt = played,
         externalLink = null,
-        participants = gameParticipants.map { MatchParticipantResult(side = it.side, playerLabel = "Player ${it.side}") },
+        participants = gameParticipants.map { participant ->
+            MatchParticipantResult(
+                side = participant.side,
+                playerLabel = "Player ${participant.side}",
+                draftedHeroes = listOf(DraftedHeroResult(participant.heroId, participant.heroName)) +
+                    if (participant.side == 0) unplayedPicks else emptyList(),
+            )
+        },
         games = listOf(
             GameResult(gameId = 1, gameNumber = 1, mapId = 3, mapName = "Raptor Paddock", participants = gameParticipants),
         ),
@@ -87,8 +102,25 @@ class MatchMetricsTest {
         ),
     )
 
+    /**
+     * The hero's played-or-banned context — the per-game one for a hero that
+     * played a single-game match, the ban marker for one that did not. Its
+     * `Drafted` context is deliberately excluded: a drafted hero that played
+     * has both, and every per-game metric is measured on the [HeroRole.Played]
+     * one.
+     */
     private fun contextFor(match: MatchResult, heroId: Long): MetricContext =
-        assertNotNull(match.heroContexts().singleOrNull { it.heroId == heroId }, "no unique context for hero $heroId")
+        assertNotNull(
+            match.heroContexts().singleOrNull { it.heroId == heroId && it.role !is HeroRole.Drafted },
+            "no unique play-or-ban context for hero $heroId",
+        )
+
+    /** The hero's once-per-series `Drafted` context — what APPEARANCE prices. */
+    private fun draftContextFor(match: MatchResult, heroId: Long): MetricContext =
+        assertNotNull(
+            match.heroContexts().singleOrNull { it.heroId == heroId && it.role is HeroRole.Drafted },
+            "no draft context for hero $heroId",
+        )
 
     private fun measure(metric: String, context: MetricContext): Double {
         val extractor = assertNotNull(MatchMetrics[metric], "no extractor for $metric")
@@ -285,19 +317,22 @@ class MatchMetricsTest {
         }
 
         @Test
-        fun `a hero that played earns APPEARANCE and never SELF_BAN or OPPONENT_BAN`() {
-            val bigfoot = contextFor(shutoutMatch, heroId = 7)
+        fun `a hero that played earns APPEARANCE off its draft and never SELF_BAN or OPPONENT_BAN`() {
+            val bigfootDraft = draftContextFor(shutoutMatch, heroId = 7)
+            val bigfootPlayed = contextFor(shutoutMatch, heroId = 7)
 
-            assertEquals(1.0, measure("APPEARANCE", bigfoot))
-            assertEquals(0.0, measure("SELF_BAN", bigfoot))
-            assertEquals(0.0, measure("OPPONENT_BAN", bigfoot))
+            assertEquals(1.0, measure("APPEARANCE", bigfootDraft))
+            assertEquals(0.0, measure("APPEARANCE", bigfootPlayed), "appearance is a draft fact, not a game one")
+            assertEquals(0.0, measure("SELF_BAN", bigfootDraft))
+            assertEquals(0.0, measure("OPPONENT_BAN", bigfootDraft))
         }
 
         @Test
-        fun `heroContexts covers every hero a single-game match touched, exactly once`() {
+        fun `heroContexts covers every hero a single-game match touched`() {
             val contexts = shutoutMatch.heroContexts()
 
-            assertEquals(listOf(7L, 11L, 8L), contexts.map { it.heroId })
+            // Both heroes played and were drafted; Sun Wukong was banned out.
+            assertEquals(listOf(7L, 11L, 7L, 11L, 8L), contexts.map { it.heroId })
             assertEquals(3, contexts.distinctBy { it.heroId }.size)
             assertTrue(contexts.single { it.heroId == 8L }.role is HeroRole.Banned)
         }
@@ -308,6 +343,57 @@ class MatchMetricsTest {
 
             assertEquals(HeroRole.Banned, role)
             assertEquals(BanType.PRE_BAN, shutoutMatch.bans.single { it.heroId == 8L }.banType)
+        }
+    }
+
+    @Nested
+    inner class Draft {
+
+        /** Match 6 again, but side 0 also drafted a hero it never fielded. */
+        private val benchedMatch = match(
+            listOf(
+                gameParticipant(side = 0, heroId = 7, heroName = "Bigfoot", health = 11, isWinner = true),
+                gameParticipant(side = 1, heroId = 11, heroName = "Beowulf", health = 0),
+            ),
+            bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.PRE_BAN)),
+            unplayedPicks = listOf(DraftedHeroResult(heroId = 30, heroName = "Tomoe Gozen")),
+        )
+
+        @Test
+        fun `a hero drafted and never fielded still earns APPEARANCE`() {
+            val tomoe = draftContextFor(benchedMatch, heroId = 30)
+
+            assertEquals(1.0, measure("APPEARANCE", tomoe))
+        }
+
+        @Test
+        fun `a hero drafted and never fielded earns nothing a game would have given it`() {
+            val tomoe = draftContextFor(benchedMatch, heroId = 30)
+
+            assertEquals(0.0, measure("WIN", tomoe))
+            assertEquals(0.0, measure("LOSS", tomoe))
+            assertEquals(0.0, measure("HEALTH_REMAINING", tomoe))
+            assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", tomoe))
+            assertEquals(0.0, measure("SHUTOUT", tomoe))
+            assertEquals(0.0, measure("SELF_BAN", tomoe))
+            assertEquals(0.0, measure("OPPONENT_BAN", tomoe))
+        }
+
+        @Test
+        fun `an unfielded pick yields one context, and it is not a game`() {
+            val contexts = benchedMatch.heroContexts().filter { it.heroId == 30L }
+
+            assertEquals(1, contexts.size)
+            assertEquals(HeroRole.Drafted, contexts.single().role)
+            assertNull(contexts.single().participant, "a hero that never played has no participant row")
+        }
+
+        @Test
+        fun `a banned hero is never also drafted, so it earns no APPEARANCE`() {
+            val sunWukong = contextFor(benchedMatch, heroId = 8)
+
+            assertEquals(0.0, measure("APPEARANCE", sunWukong))
+            assertTrue(benchedMatch.heroContexts().none { it.heroId == 8L && it.role is HeroRole.Drafted })
         }
     }
 
@@ -326,7 +412,10 @@ class MatchMetricsTest {
             round = 3,
             playedAt = played,
             externalLink = "https://challonge.com/example-bo3-decider",
-            participants = listOf(MatchParticipantResult(0, "Rina Okafor"), MatchParticipantResult(1, "Dmitri Kovac")),
+            participants = listOf(
+                MatchParticipantResult(0, "Rina Okafor", listOf(DraftedHeroResult(4, "Medusa"))),
+                MatchParticipantResult(1, "Dmitri Kovac", listOf(DraftedHeroResult(20, "Achilles"))),
+            ),
             games = listOf(
                 GameResult(
                     gameId = 101,
@@ -352,9 +441,12 @@ class MatchMetricsTest {
             bans = emptyList(),
         )
 
+        private fun playedContexts(match: MatchResult, heroId: Long) =
+            match.heroContexts().filter { it.heroId == heroId && it.role is HeroRole.Played }
+
         @Test
         fun `a hero played in two games of a series yields two Played contexts, each scoring its own game`() {
-            val medusaContexts = bestOfTwoSoFar.heroContexts().filter { it.heroId == 4L }
+            val medusaContexts = playedContexts(bestOfTwoSoFar, heroId = 4)
 
             assertEquals(2, medusaContexts.size)
             val (game1, game2) = medusaContexts
@@ -364,8 +456,8 @@ class MatchMetricsTest {
 
         @Test
         fun `WIN and LOSS are scoped per game, not per series`() {
-            val (medusaGame1, medusaGame2) = bestOfTwoSoFar.heroContexts().filter { it.heroId == 4L }
-            val (achillesGame1, achillesGame2) = bestOfTwoSoFar.heroContexts().filter { it.heroId == 20L }
+            val (medusaGame1, medusaGame2) = playedContexts(bestOfTwoSoFar, heroId = 4)
+            val (achillesGame1, achillesGame2) = playedContexts(bestOfTwoSoFar, heroId = 20)
 
             // Game 1: Medusa took it, Achilles lost it.
             assertEquals(1.0, measure("WIN", medusaGame1))
@@ -400,6 +492,27 @@ class MatchMetricsTest {
             val banContexts = threeGameSeries.heroContexts().filter { it.heroId == 6L }
             assertEquals(1, banContexts.size, "a ban is struck once, before any game -- it must not multiply by game count")
             assertTrue(banContexts.single().role is HeroRole.Banned)
+        }
+
+        @Test
+        fun `a hero that played every game of a Bo3 is still drafted once, so APPEARANCE is not multiplied`() {
+            val threeGameSeries = bestOfTwoSoFar.copy(
+                games = bestOfTwoSoFar.games + GameResult(
+                    gameId = 103,
+                    gameNumber = 3,
+                    mapId = 1,
+                    mapName = "Baskerville Manor",
+                    participants = listOf(
+                        gameParticipant(side = 0, heroId = 4, heroName = "Medusa", health = 3, isWinner = true),
+                        gameParticipant(side = 1, heroId = 20, heroName = "Achilles", health = 0),
+                    ),
+                ),
+            )
+
+            assertEquals(3, playedContexts(threeGameSeries, heroId = 4).size)
+            val draftContexts = threeGameSeries.heroContexts().filter { it.heroId == 4L && it.role is HeroRole.Drafted }
+            assertEquals(1, draftContexts.size, "a draft happens once for the series, like a ban")
+            assertEquals(1.0, measure("APPEARANCE", draftContexts.single()))
         }
     }
 }

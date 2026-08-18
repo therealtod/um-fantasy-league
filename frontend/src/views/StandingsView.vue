@@ -98,6 +98,11 @@ const currentTournament = computed(() =>
               <span v-if="entry.bannedHeroNames.length" class="ml-1.5 text-ink-dim">
                 · Banned: {{ entry.bannedHeroNames.join(', ') }}
               </span>
+              <!-- Drafted and never fielded: they appear in no game row above, but
+                   they scored an appearance, so the ticker has to name them. -->
+              <span v-if="entry.draftedUnplayedHeroNames.length" class="ml-1.5 text-ink-dim">
+                · Drafted, unplayed: {{ entry.draftedUnplayedHeroNames.join(', ') }}
+              </span>
             </li>
           </ul>
           <p v-else class="px-4 py-3 font-mono text-xs text-ink-dim">

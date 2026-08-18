@@ -7,10 +7,11 @@ import java.sql.ResultSet
 /**
  * Reads recorded matches back out as whole [MatchResult]s.
  *
- * Five flat queries — matches, participants, games, game-participants, bans —
- * grouped in Kotlin, rather than one join. A match has N participants, M
- * games each with their own participants, and K bans, so a single join would
- * fan out to a ragged cross product that then has to be de-duplicated anyway.
+ * Six flat queries — matches, participants, games, game-participants, bans,
+ * picks — grouped in Kotlin, rather than one join. A match has N participants
+ * each with their own draft, M games each with their own participants, and K
+ * bans, so a single join would fan out to a ragged cross product that then has
+ * to be de-duplicated anyway.
  *
  * Read-only by design: the admin API (`com.umfl.match.AdminMatchService`) is
  * the sole write path, via the `TournamentMatch` aggregate — this class never
@@ -105,18 +106,38 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
                 .list()
         )
 
-    /** Attaches participants, games (with their own participants) and bans to a page of match headers. */
+    /**
+     * Attaches participants (with their drafts), games (with their own
+     * participants) and bans to a page of match headers.
+     */
     private fun assemble(headers: List<MatchHeader>): List<MatchResult> {
         if (headers.isEmpty()) return emptyList()
         val matchIds = headers.map { it.matchId }
+
+        // Keyed by (match, side): a pick belongs to the side that drafted it,
+        // which is what MatchParticipantResult hangs it off.
+        val picksByMatchAndSide = jdbcClient
+            .sql(SELECT_PICKS)
+            .param("matchIds", matchIds)
+            .query { rs, _ ->
+                (rs.getLong("match_id") to rs.getInt("side")) to DraftedHeroResult(
+                    heroId = rs.getLong("hero_id"),
+                    heroName = rs.getString("hero_name"),
+                )
+            }
+            .list()
+            .groupBy({ it.first }, { it.second })
 
         val participantsByMatch = jdbcClient
             .sql(SELECT_PARTICIPANTS)
             .param("matchIds", matchIds)
             .query { rs, _ ->
-                rs.getLong("match_id") to MatchParticipantResult(
-                    side = rs.getInt("side"),
+                val matchId = rs.getLong("match_id")
+                val side = rs.getInt("side")
+                matchId to MatchParticipantResult(
+                    side = side,
                     playerLabel = rs.getString("player_label"),
+                    draftedHeroes = picksByMatchAndSide[matchId to side].orEmpty(),
                 )
             }
             .list()
@@ -220,6 +241,14 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
             join heroes h on h.id = mgp.hero_id
             where mg.match_id in (:matchIds)
             order by mgp.game_id, mgp.side
+        """
+
+        const val SELECT_PICKS = """
+            select hp.match_id, hp.side, hp.hero_id, h.name as hero_name
+            from match_hero_pick hp
+            join heroes h on h.id = hp.hero_id
+            where hp.match_id in (:matchIds)
+            order by hp.match_id, hp.side, h.name
         """
 
         const val SELECT_BANS = """

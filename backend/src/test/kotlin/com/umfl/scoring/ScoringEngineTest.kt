@@ -2,6 +2,7 @@ package com.umfl.scoring
 
 import com.umfl.match.BanResult
 import com.umfl.match.BanType
+import com.umfl.match.DraftedHeroResult
 import com.umfl.match.GameParticipantResult
 import com.umfl.match.GameResult
 import com.umfl.match.MatchParticipantResult
@@ -48,8 +49,16 @@ class ScoringEngineTest {
         playedAt = Instant.parse("2026-06-06T11:00:00Z"),
         externalLink = null,
         participants = listOf(
-            MatchParticipantResult(side = 0, playerLabel = "Aurelie Blanc"),
-            MatchParticipantResult(side = 1, playerLabel = "Miles Ashworth"),
+            MatchParticipantResult(
+                side = 0,
+                playerLabel = "Aurelie Blanc",
+                draftedHeroes = listOf(DraftedHeroResult(heroId = 7, heroName = "Bigfoot")),
+            ),
+            MatchParticipantResult(
+                side = 1,
+                playerLabel = "Miles Ashworth",
+                draftedHeroes = listOf(DraftedHeroResult(heroId = 11, heroName = "Beowulf")),
+            ),
         ),
         games = listOf(
             GameResult(
@@ -66,10 +75,16 @@ class ScoringEngineTest {
         bans = listOf(BanResult(heroId = 8, heroName = "Sun Wukong", banType = BanType.OPPONENT_BAN)),
     )
 
-    private fun contextFor(heroId: Long) = match.heroContexts().single { it.heroId == heroId }
+    /** The hero's per-game context — where every metric but APPEARANCE is priced. */
+    private fun contextFor(heroId: Long) =
+        match.heroContexts().single { it.heroId == heroId && it.role !is HeroRole.Drafted }
+
+    /** The hero's once-per-series draft context — where APPEARANCE is priced. */
+    private fun draftContextFor(heroId: Long) =
+        match.heroContexts().single { it.heroId == heroId && it.role is HeroRole.Drafted }
 
     @Test
-    fun `a winning hero banks every metric it earned`() {
+    fun `a winning hero banks every metric its game earned`() {
         val breakdown = ScoringEngine.breakdown(contextFor(7), standard)
 
         assertEquals(
@@ -78,21 +93,30 @@ class ScoringEngineTest {
                 "HEALTH_REMAINING" to 8.25, // 11 * 0.75
                 "HEALTH_DIFFERENTIAL" to 5.5, // (11 - 0) * 0.5
                 "SHUTOUT" to 3.0,
-                "APPEARANCE" to 1.0,
             ),
             breakdown,
         )
-        assertEquals(27.75, ScoringEngine.score(contextFor(7), standard))
+        assertEquals(26.75, ScoringEngine.score(contextFor(7), standard))
+    }
+
+    @Test
+    fun `the appearance point rides on the draft, so the hero's match total is game plus draft`() {
+        assertEquals(mapOf("APPEARANCE" to 1.0), ScoringEngine.breakdown(draftContextFor(7), standard))
+
+        val matchTotal = match.heroContexts()
+            .filter { it.heroId == 7L }
+            .sumOf { ScoringEngine.score(it, standard) }
+        assertEquals(27.75, matchTotal, "26.75 from the game it won, 1.00 for having been drafted")
     }
 
     @Test
     fun `the total is exactly the sum of the breakdown`() {
-        for (heroId in listOf(7L, 11L, 8L)) {
-            val breakdown = ScoringEngine.breakdown(contextFor(heroId), standard)
+        for (context in match.heroContexts()) {
+            val breakdown = ScoringEngine.breakdown(context, standard)
             assertEquals(
                 ScoringEngine.round2(breakdown.values.sum()),
-                ScoringEngine.score(contextFor(heroId), standard),
-                "hero $heroId",
+                ScoringEngine.score(context, standard),
+                "hero ${context.heroId} as ${context.role}",
             )
         }
     }
@@ -119,9 +143,8 @@ class ScoringEngineTest {
     fun `a zero coefficient omits the entry rather than showing a zero`() {
         val noAppearanceBonus = rules("WIN" to "10.0000", "APPEARANCE" to "0.0000")
 
-        val breakdown = ScoringEngine.breakdown(contextFor(7), noAppearanceBonus)
-
-        assertEquals(mapOf("WIN" to 10.0), breakdown)
+        assertEquals(mapOf("WIN" to 10.0), ScoringEngine.breakdown(contextFor(7), noAppearanceBonus))
+        assertEquals(emptyMap(), ScoringEngine.breakdown(draftContextFor(7), noAppearanceBonus))
         assertTrue("APPEARANCE" in noAppearanceBonus.scoredMetrics, "it is still a column, just a worthless one")
     }
 
@@ -129,11 +152,16 @@ class ScoringEngineTest {
     fun `a metric the hero did not earn is absent, not zero`() {
         val breakdown = ScoringEngine.breakdown(contextFor(11), standard)
 
-        assertEquals(mapOf("APPEARANCE" to 1.0), breakdown)
+        assertEquals(emptyMap(), breakdown, "a shut-out loser earns nothing the standard rules price")
         assertFalse("WIN" in breakdown)
         assertFalse("SHUTOUT" in breakdown)
         assertFalse("HEALTH_REMAINING" in breakdown, "zero health times any weight is still zero")
         assertFalse("HEALTH_DIFFERENTIAL" in breakdown, "the losing side has no differential to price")
+        assertEquals(
+            mapOf("APPEARANCE" to 1.0),
+            ScoringEngine.breakdown(draftContextFor(11), standard),
+            "it was drafted, which is what the match still owes it",
+        )
     }
 
     @Test
@@ -157,7 +185,8 @@ class ScoringEngineTest {
         val sloppy = rules(" win " to "10.0000", "Appearance" to "1.0000")
 
         assertEquals(listOf("WIN", "APPEARANCE"), sloppy.scoredMetrics)
-        assertEquals(mapOf("WIN" to 10.0, "APPEARANCE" to 1.0), ScoringEngine.breakdown(contextFor(7), sloppy))
+        assertEquals(mapOf("WIN" to 10.0), ScoringEngine.breakdown(contextFor(7), sloppy))
+        assertEquals(mapOf("APPEARANCE" to 1.0), ScoringEngine.breakdown(draftContextFor(7), sloppy))
         assertTrue(sloppy.unknownMetrics.isEmpty())
     }
 

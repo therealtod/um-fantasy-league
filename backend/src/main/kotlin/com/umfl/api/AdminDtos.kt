@@ -116,6 +116,12 @@ data class AddMapsToPoolRequest(
 data class MatchParticipantRequest(
     /** Who piloted this side for the whole series. Free text, optional — there is no `player` table to validate against. */
     val playerLabel: String? = null,
+    /**
+     * Every hero this side drafted for the series, fielded or not. The side is
+     * this entry's position in `participants`. Must include every hero the
+     * side then played, or the submission is `PLAYED_HERO_NOT_DRAFTED`.
+     */
+    val draftedHeroIds: List<Long> = emptyList(),
 )
 
 data class MatchGameParticipantRequest(

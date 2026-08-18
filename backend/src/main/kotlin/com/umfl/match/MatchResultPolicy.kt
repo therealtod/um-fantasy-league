@@ -22,8 +22,21 @@ enum class MatchRule {
     /** The same hero is banned more than once. */
     DUPLICATE_BAN,
 
+    /** The same hero is drafted more than once by one side. */
+    DUPLICATE_PICK,
+
     /** A banned hero was also played, somewhere in the series. */
     BANNED_HERO_PLAYED,
+
+    /** A banned hero was also drafted — it was struck before either side could take it. */
+    BANNED_HERO_DRAFTED,
+
+    /**
+     * A hero played a game for a side that never drafted it. A recorded draft
+     * is the complete list of what a side brought, so every hero it fielded
+     * has to be on it.
+     */
+    PLAYED_HERO_NOT_DRAFTED,
 
     /**
      * One or more games are not flagged with exactly one winner. Every game is
@@ -35,7 +48,7 @@ enum class MatchRule {
     /** A losing hero finished with positive health. */
     LOSER_HAS_POSITIVE_HEALTH,
 
-    /** A `heroId` referenced by a game participant or a ban does not exist. */
+    /** A `heroId` referenced by a game participant, a pick or a ban does not exist. */
     UNKNOWN_HERO,
 }
 
@@ -46,8 +59,16 @@ data class MatchViolation(val rule: MatchRule, val message: String)
  * there is no `player` table to check it against, and nothing scores it.
  * Nothing validates it here for the same reason: any string, including none
  * at all, is a legal answer.
+ *
+ * [draftedHeroIds] is this side's half of the match's draft — every hero it
+ * took, whether or not it fielded one. The side is the position of this input
+ * in the participants list, exactly as it already is for `player_label`, so an
+ * out-of-range side is unrepresentable and there is no rule policing one.
  */
-data class MatchParticipantInput(val playerLabel: String?)
+data class MatchParticipantInput(
+    val playerLabel: String?,
+    val draftedHeroIds: List<Long> = emptyList(),
+)
 
 data class MatchGameParticipantInput(
     val heroId: Long,
@@ -147,6 +168,55 @@ object MatchResultPolicy {
             )
         }
 
+        val duplicatePicks = participants
+            .flatMap { participant ->
+                participant.draftedHeroIds.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+            }
+            .toSortedSet()
+        if (duplicatePicks.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.DUPLICATE_PICK,
+                    "Hero(es) drafted more than once by one side: ${duplicatePicks.joinToString()}.",
+                )
+            )
+        }
+
+        val draftedHeroIds = participants.flatMapTo(mutableSetOf()) { it.draftedHeroIds }
+        val bannedButDrafted = bans.map { it.heroId }.filter { it in draftedHeroIds }.toSortedSet()
+        if (bannedButDrafted.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.BANNED_HERO_DRAFTED,
+                    "Hero(es) both banned and drafted in this series: ${bannedButDrafted.joinToString()}.",
+                )
+            )
+        }
+
+        // `side` is the list position on both sides of this check -- of the
+        // participants list for the draft, and of a game's participants list
+        // for who fielded the hero. A game with the wrong number of sides is
+        // INVALID_GAME_PARTICIPANT_COUNT's problem, so an unmatched index here
+        // is simply skipped rather than reported twice.
+        val undraftedPlays = games
+            .flatMap { game ->
+                game.participants.withIndex().mapNotNull { (side, played) ->
+                    val draft = participants.getOrNull(side)?.draftedHeroIds ?: return@mapNotNull null
+                    if (played.heroId in draft) null else game.gameNumber to played.heroId
+                }
+            }
+            .toSortedSet(compareBy({ it.first }, { it.second }))
+        if (undraftedPlays.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.PLAYED_HERO_NOT_DRAFTED,
+                    "Hero(es) played by a side that did not draft them: " +
+                        undraftedPlays.joinToString { (gameNumber, heroId) -> "$heroId in game $gameNumber" } +
+                        ". A recorded draft lists every hero a side brought, fielded or not.",
+                )
+            )
+        }
+
         val playedHeroIds = games.flatMapTo(mutableSetOf()) { game -> game.participants.map { it.heroId } }
         val bannedButPlayed = bans.map { it.heroId }.filter { it in playedHeroIds }.toSortedSet()
         if (bannedButPlayed.isNotEmpty()) {
@@ -182,7 +252,9 @@ object MatchResultPolicy {
             )
         }
 
-        val allHeroIds = games.flatMap { game -> game.participants.map { it.heroId } } + bans.map { it.heroId }
+        val allHeroIds = games.flatMap { game -> game.participants.map { it.heroId } } +
+            participants.flatMap { it.draftedHeroIds } +
+            bans.map { it.heroId }
         val unknownHeroes = allHeroIds.filter { it !in validHeroIds }.toSortedSet()
         if (unknownHeroes.isNotEmpty()) {
             add(

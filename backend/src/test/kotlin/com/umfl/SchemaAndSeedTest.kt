@@ -55,6 +55,12 @@ class SchemaAndSeedTest @Autowired constructor(
         assertEquals(15, count("match_game"), "12 single-game matches + the Bo3's 3 games")
         assertEquals(30, count("match_game_participant"), "15 games x 2 sides")
         assertEquals(22, count("hero_ban"), "19 original + the Bo3's one ban per category")
+        assertEquals(
+            28,
+            count("match_hero_pick"),
+            "26 heroes fielded (12 matches x 2 sides, plus the Bo3's one hero per side across its " +
+                "three games) + the Bo3's 2 drafted-and-never-fielded picks",
+        )
     }
 
     @Test
@@ -206,6 +212,46 @@ class SchemaAndSeedTest @Autowired constructor(
             ),
             active,
         )
+    }
+
+    @Test
+    fun `every recorded draft is complete -- no side fielded a hero it never drafted`() {
+        val undrafted = jdbcClient
+            .sql(
+                """
+                select count(*)
+                from match_game_participant mgp
+                    join match_game mg on mg.id = mgp.game_id
+                    left join match_hero_pick hp
+                        on hp.match_id = mg.match_id and hp.side = mgp.side and hp.hero_id = mgp.hero_id
+                where hp.hero_id is null
+                """
+            )
+            .query(Int::class.java)
+            .single()
+
+        assertEquals(
+            0,
+            undrafted,
+            "the same invariant MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED enforces on the way in -- " +
+                "a hero on the table but off the draft board would score no APPEARANCE at all",
+        )
+    }
+
+    @Test
+    fun `no hero is both drafted and banned in the same match`() {
+        val contradictions = jdbcClient
+            .sql(
+                """
+                select count(*)
+                from match_hero_pick hp
+                    join hero_ban hb on hb.match_id = hp.match_id and hb.hero_id = hp.hero_id
+                """
+            )
+            .query(Int::class.java)
+            .single()
+
+        assertEquals(0, contradictions, "a hero struck out of the draft cannot then be taken in it")
     }
 
     @Test

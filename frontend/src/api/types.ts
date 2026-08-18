@@ -123,6 +123,11 @@ export interface TickerEntry {
   /** Ordered by game number — one entry per game played in the series. */
   games: TickerGame[]
   bannedHeroNames: string[]
+  /**
+   * Heroes drafted for this series and never fielded. They appear in no `games`
+   * row, but they still scored an appearance, so the ticker names them.
+   */
+  draftedUnplayedHeroNames: string[]
 }
 
 export interface RosterViolation {
@@ -203,6 +208,12 @@ export type BanType = 'PRE_BAN' | 'OPPONENT_BAN' | 'SELF_BAN'
 export interface MatchParticipantRequest {
   /** Who piloted this side for the whole series, as free text. Optional — there is no `player` entity to reference. */
   playerLabel?: string | null
+  /**
+   * Every hero this side drafted, fielded or not — the side is this entry's
+   * position in `participants`. Must cover every hero the side then played, or
+   * the server answers 422 `PLAYED_HERO_NOT_DRAFTED`.
+   */
+  draftedHeroIds: number[]
 }
 
 export interface MatchGameParticipantRequest {
@@ -236,6 +247,13 @@ export interface MatchParticipantResult {
   side: number
   /** Free text. Absent when the result was recorded unattributed. */
   playerLabel?: string
+  /** This side's draft, played or not. Every hero it fielded is in here too. */
+  draftedHeroes: DraftedHeroResult[]
+}
+
+export interface DraftedHeroResult {
+  heroId: number
+  heroName: string
 }
 
 export interface GameParticipantResult {

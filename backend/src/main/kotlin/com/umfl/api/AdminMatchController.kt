@@ -124,7 +124,10 @@ class AdminMatchController(
     }
 }
 
-private fun MatchParticipantRequest.toInput() = MatchParticipantInput(playerLabel = playerLabel)
+private fun MatchParticipantRequest.toInput() = MatchParticipantInput(
+    playerLabel = playerLabel,
+    draftedHeroIds = draftedHeroIds,
+)
 
 private fun MatchGameParticipantRequest.toInput() = MatchGameParticipantInput(
     heroId = requireNotNull(heroId),
