@@ -1,0 +1,13 @@
+{
+  "name": "tabletopleague-scraper",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Playwright scraper for a Tabletop League competition's public match list (read-only, not part of the Gradle/npm build).",
+  "scripts": {
+    "scrape": "node scrape.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}
