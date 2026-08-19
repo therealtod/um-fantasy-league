@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
@@ -33,8 +33,11 @@ const emit = defineEmits<{
 const tournamentsStore = useTournamentsStore()
 
 const loading = ref(false)
-const error = ref<string | null>(null)
+// What the *server* (or a failed load) said, as opposed to what this form can
+// work out for itself — see `validationError`.
+const serverError = ref<string | null>(null)
 const violations = ref<string[]>([])
+const submitAttempted = ref(false)
 const isInitialized = ref(false)
 
 const banTypes: { value: BanType; label: string }[] = [
@@ -165,7 +168,7 @@ async function loadMatchData() {
   if (props.mode !== 'edit' || !props.tournamentId || !props.matchId) return
 
   loading.value = true
-  error.value = null
+  serverError.value = null
   violations.value = []
 
   try {
@@ -199,7 +202,7 @@ async function loadMatchData() {
       bans: matchData.bans.map((b) => ({ heroId: b.heroId, banType: b.banType })),
     }
   } catch (e) {
-    error.value = describeError(e, 'Failed to load match data')
+    serverError.value = describeError(e, 'Failed to load match data')
     violations.value = violationMessages(e)
   } finally {
     loading.value = false
@@ -285,55 +288,89 @@ function setWinner(gameIndex: number, participantIndex: number) {
   })
 }
 
+/**
+ * Everything this form can rule out on its own, as one message or null.
+ *
+ * It is a computed rather than a sequence of checks inside `saveMatch` on
+ * purpose: an admin who fixes the problem in place sees the banner clear as
+ * they type, instead of a stale complaint that survives until the next save.
+ */
+const validationError = computed<string | null>(() => {
+  const { games, bans, participants } = form.value
+
+  if (games.length === 0) return 'At least one game is required'
+  if (games.some((g) => g.mapId === 0)) return 'Every game needs a map selected'
+  // The player name is deliberately not required: it is a free-text label, and an
+  // unattributed result is still a valid result.
+  if (games.some((g) => g.participants.some((p) => p.heroId === 0))) {
+    return 'Every game needs a hero selected for both sides'
+  }
+  // The server rejects this too (NOT_EXACTLY_ONE_WINNER) — caught here so an
+  // untouched winner radio reads as a prompt rather than a 422.
+  if (games.some((g) => g.participants.filter((p) => p.isWinner).length !== 1)) {
+    return 'Every game needs exactly one winner — a game cannot end in a draw'
+  }
+  if (games.some((g) => g.participants.some((p) => !p.isWinner && p.healthRemaining > 0))) {
+    return 'The losing hero must have 0 or less health'
+  }
+  if (bans.some((b) => b.heroId === 0)) return 'Every ban needs a hero selected'
+  if (participants.some((p) => p.draftedHeroIds.some((heroId) => heroId === 0))) {
+    return 'Every drafted hero needs a hero selected'
+  }
+
+  // DUPLICATE_PICK server-side; caught here so it reads as a prompt, not a 422.
+  // Only the *typed* picks can duplicate anything: `draftFor` de-duplicates
+  // what the games contribute, so a hero piloted in more than one game of a
+  // best-of-N is not a duplicate pick and must not be flagged as one — that is
+  // the ordinary case, and flagging it left the admin with an error no in-place
+  // edit could clear.
+  for (const [side, participant] of participants.entries()) {
+    const fielded = fieldedInForm(side)
+    const seen = new Set<number>()
+    for (const heroId of participant.draftedHeroIds) {
+      if (seen.has(heroId)) {
+        return `Side ${side + 1} drafted ${heroName(heroId)} twice — remove the duplicate row`
+      }
+      if (fielded.includes(heroId)) {
+        return `Side ${side + 1} played ${heroName(heroId)}, so it is already drafted — remove its "drafted, not played" row`
+      }
+      seen.add(heroId)
+    }
+  }
+
+  return null
+})
+
+/** The server's complaint if there is one, otherwise this form's own. */
+const error = computed(() => serverError.value ?? (submitAttempted.value ? validationError.value : null))
+
+// A rejected save describes a payload that no longer exists the moment the
+// admin edits the form, so the banner clears on the correction rather than
+// standing until the next attempt. `validationError` needs no equivalent: it is
+// computed off the form and re-evaluates itself.
+watch(
+  form,
+  () => {
+    if (!isInitialized.value) return
+    serverError.value = null
+    violations.value = []
+  },
+  { deep: true },
+)
+
 async function saveMatch() {
+  submitAttempted.value = true
+  serverError.value = null
   violations.value = []
 
   const tournamentId = props.tournamentId
   if (!tournamentId) {
-    error.value = 'Tournament ID is required'
+    serverError.value = 'Tournament ID is required'
     return
   }
-  if (form.value.games.length === 0) {
-    error.value = 'At least one game is required'
-    return
-  }
-  if (form.value.games.some((g) => g.mapId === 0)) {
-    error.value = 'Every game needs a map selected'
-    return
-  }
-  // The player name is deliberately not required: it is a free-text label, and an
-  // unattributed result is still a valid result.
-  if (form.value.games.some((g) => g.participants.some((p) => p.heroId === 0))) {
-    error.value = 'Every game needs a hero selected for both sides'
-    return
-  }
-  // The server rejects this too (NOT_EXACTLY_ONE_WINNER) — caught here so an
-  // untouched winner radio reads as a prompt rather than a 422.
-  if (form.value.games.some((g) => g.participants.filter((p) => p.isWinner).length !== 1)) {
-    error.value = 'Every game needs exactly one winner — a game cannot end in a draw'
-    return
-  }
-  if (form.value.games.some((g) => g.participants.some((p) => !p.isWinner && p.healthRemaining > 0))) {
-    error.value = 'The losing hero must have 0 or less health'
-    return
-  }
-  if (form.value.bans.some((b) => b.heroId === 0)) {
-    error.value = 'Every ban needs a hero selected'
-    return
-  }
-  if (form.value.participants.some((p) => p.draftedHeroIds.some((heroId) => heroId === 0))) {
-    error.value = 'Every drafted hero needs a hero selected'
-    return
-  }
-  // DUPLICATE_PICK server-side; caught here so it reads as a prompt, not a 422.
-  if (form.value.participants.some((p, side) => draftFor(side).length !== fieldedInForm(side).length + p.draftedHeroIds.length)) {
-    error.value = 'A side cannot draft the same hero twice — a hero it played is already on its draft'
-    return
-  }
+  if (validationError.value) return
 
   loading.value = true
-  error.value = null
-  violations.value = []
 
   const payload: RecordMatchRequest = {
     ...form.value,
@@ -351,7 +388,7 @@ async function saveMatch() {
     }
     emit('success')
   } catch (e) {
-    error.value = describeError(e, 'Failed to save match')
+    serverError.value = describeError(e, 'Failed to save match')
     violations.value = violationMessages(e)
   } finally {
     loading.value = false
@@ -373,7 +410,7 @@ onMounted(async () => {
       resetForm()
     }
   } catch (e) {
-    error.value = describeError(e, 'Failed to load map and hero pools')
+    serverError.value = describeError(e, 'Failed to load map and hero pools')
     violations.value = violationMessages(e)
   } finally {
     loading.value = false

@@ -494,6 +494,11 @@ before save so an untouched winner reads as a prompt instead of a 422. Each side
 **draft**, and the form only asks for the half it cannot derive: the heroes that side fields in the
 games are folded into `draftedHeroIds` at save time by `draftFor`, so the admin types only the picks
 that never played, and `PLAYED_HERO_NOT_DRAFTED` can never fire on a submission this UI built.
+
+Its client-side checks belong in the `validationError` computed, and a `DUPLICATE_PICK` check has to
+read only the *typed* picks: `draftFor` de-duplicates the fielded heroes, so a hero piloted in more
+than one game of a best-of-N is not a duplicate.
+
 `MatchListAdmin` renders the games grouped under their maps, derives the games-won tally per side,
 and names each side's drafted-but-unfielded picks — the heroes that scored an appearance without
 appearing in any game row.

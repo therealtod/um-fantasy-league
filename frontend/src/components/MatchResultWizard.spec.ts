@@ -168,6 +168,97 @@ describe('MatchResultWizard', () => {
     expect(wrapper.text()).toContain('Every drafted hero needs a hero selected')
   })
 
+  it('saves a best-of-three where a side pilots the same hero in more than one game', async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.findAll('button').find((b) => b.text() === '+ Add Game')!.trigger('click')
+
+    for (const game of [0, 1]) {
+      await wrapper.find(`#game-${game}-map`).setValue('5')
+      await wrapper.find(`#game-${game}-hero-0`).setValue('10')
+      await wrapper.find(`#game-${game}-hero-1`).setValue('11')
+      await wrapper.find(`#game-${game}-health-1`).setValue('0')
+      await wrapper.findAll('input[type=radio]')[game * 2]!.setValue()
+    }
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    // Repeating a hero across the games of a series is the ordinary case, not a
+    // duplicate pick: `draftFor` de-duplicates, so the draft carries it once.
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        participants: [
+          expect.objectContaining({ draftedHeroIds: [10] }),
+          expect.objectContaining({ draftedHeroIds: [11] }),
+        ],
+      }),
+    )
+  })
+
+  it('drops its own complaint as soon as the form is corrected, with no second save', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('cannot end in a draw')
+
+    // Fixing it in place clears the banner — the admin never has to guess
+    // whether the message still describes the form in front of them.
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+    expect(wrapper.text()).not.toContain('cannot end in a draw')
+  })
+
+  it('drops a rejected save\'s message once the admin edits the form', async () => {
+    recordMatch.mockRejectedValue(new Error('Hero(es) drafted more than once by one side: 11.'))
+    violationMessagesMock.mockReturnValue(['Hero(es) drafted more than once by one side: 11.'])
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('drafted more than once')
+
+    // The rejection described a payload that no longer exists.
+    await wrapper.find('#match-round').setValue('2')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('drafted more than once')
+  })
+
+  it('flags a hero listed as drafted-not-played that a side actually fielded', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Drafted Hero')!.trigger('click')
+    await wrapper.find('#draft-0-0').setValue('10')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Side 1 played Sherlock Holmes')
+
+    // And removing that row is enough — the fix does not need a fresh match.
+    await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === 'Remove')[0]!.trigger('click')
+    expect(wrapper.text()).not.toContain('Side 1 played Sherlock Holmes')
+  })
+
   it('refuses to save a game with no winner picked, rather than posting a draw', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
