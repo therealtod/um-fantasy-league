@@ -144,4 +144,5 @@ private fun MatchGameRequest.toInput() = MatchGameInput(
 private fun MatchBanRequest.toInput() = MatchBanInput(
     heroId = requireNotNull(heroId),
     banType = requireNotNull(banType),
+    side = side,
 )

@@ -231,6 +231,12 @@ export interface MatchGameRequest {
 export interface MatchBanRequest {
   heroId: number
   banType: BanType
+  /**
+   * Whose draft this hero was struck out of, 0 or 1. `banType` says who struck
+   * it; this says whose hero it was. Omit for a `PRE_BAN` — that happens before
+   * sides are assigned, and sending one anyway is 422 `BAN_SIDE_INVALID`.
+   */
+  side?: number | null
 }
 
 export interface RecordMatchRequest {
@@ -300,6 +306,8 @@ export interface ImportedBan {
   heroId?: number
   heroName?: string
   banType: BanType
+  /** Whose draft it came out of. Absent for a `PRE_BAN`. */
+  side?: number
 }
 
 export interface MatchImportPreviewDto {
@@ -354,6 +362,11 @@ export interface BanResult {
   heroId: number
   heroName: string
   banType: BanType
+  /**
+   * Whose draft it came out of. Absent for a `PRE_BAN`, and for anything
+   * recorded before `hero_ban.side` existed — Jackson omits nulls.
+   */
+  side?: number
 }
 
 export interface MatchResultDto {

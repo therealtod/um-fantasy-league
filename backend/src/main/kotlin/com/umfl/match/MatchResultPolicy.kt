@@ -22,6 +22,15 @@ enum class MatchRule {
     /** The same hero is banned more than once. */
     DUPLICATE_BAN,
 
+    /**
+     * A ban names a side that cannot exist -- one outside 0..1, or any side at
+     * all on a `PRE_BAN`, which is struck before sides are assigned. A typed
+     * ban with *no* side is deliberately not a violation: every row recorded
+     * before `hero_ban.side` existed looks like that, and rejecting them would
+     * make an already-recorded match uncorrectable.
+     */
+    BAN_SIDE_INVALID,
+
     /** The same hero is drafted more than once by one side. */
     DUPLICATE_PICK,
 
@@ -82,7 +91,13 @@ data class MatchGameInput(
     val participants: List<MatchGameParticipantInput>,
 )
 
-data class MatchBanInput(val heroId: Long, val banType: BanType)
+/**
+ * [side] is whose draft the hero was struck out of, not who struck it --
+ * [banType] already says that. Null means either a `PRE_BAN` (there are no
+ * sides yet) or a ban recorded before the column existed; both are legal, see
+ * [MatchRule.BAN_SIDE_INVALID].
+ */
+data class MatchBanInput(val heroId: Long, val banType: BanType, val side: Int? = null)
 
 /**
  * Pre-validates a match result before the service attempts to save it, so a
@@ -164,6 +179,20 @@ object MatchResultPolicy {
                 MatchViolation(
                     MatchRule.DUPLICATE_BAN,
                     "Hero(es) banned more than once: ${duplicateBans.sorted().joinToString()}.",
+                )
+            )
+        }
+
+        val badBanSides = bans.filter { ban ->
+            ban.side != null && (ban.side !in 0..1 || ban.banType == BanType.PRE_BAN)
+        }
+        if (badBanSides.isNotEmpty()) {
+            add(
+                MatchViolation(
+                    MatchRule.BAN_SIDE_INVALID,
+                    "Ban(s) with an impossible side: " +
+                        badBanSides.joinToString { "hero ${it.heroId} (${it.banType}, side ${it.side})" } +
+                        ". A side is 0 or 1, and a PRE_BAN precedes both.",
                 )
             )
         }

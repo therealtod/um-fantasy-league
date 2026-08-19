@@ -61,7 +61,10 @@ const matches: MatchResultDto[] = [
         ],
       },
     ],
-    bans: [{ heroId: 14, heroName: 'Achilles', banType: 'PRE_BAN' }],
+    bans: [
+      { heroId: 14, heroName: 'Achilles', banType: 'PRE_BAN' },
+      { heroId: 15, heroName: 'Bigfoot', banType: 'OPPONENT_BAN', side: 1 },
+    ],
   },
 ]
 
@@ -183,11 +186,25 @@ describe('MatchListAdmin', () => {
     expect(wrapper.text()).not.toContain('drafted, unplayed: Dracula')
   })
 
-  it('groups bans by category', async () => {
+  it('reads a sided ban next to the draft it came out of, not in the pre-ban column', async () => {
     const wrapper = await mountList()
 
+    // A ban is per series like a pick and now names the arsenal it was struck
+    // from, so it belongs with that side rather than in a column of its own.
+    expect(wrapper.text()).toContain('struck: Bigfoot (Opponent ban)')
+    // The pre-ban belongs to neither side and keeps the column.
     expect(wrapper.text()).toContain('Achilles')
-    expect(wrapper.text()).toContain('Pre-ban')
+  })
+
+  it('shows a ban recorded before sides existed rather than dropping it', async () => {
+    listMatches.mockResolvedValue([
+      { ...matches[1]!, bans: [{ heroId: 15, heroName: 'Bigfoot', banType: 'SELF_BAN' }] },
+    ])
+    const wrapper = await mountList()
+
+    // It scored points, so it is listed — flagged rather than silently placed.
+    expect(wrapper.text()).toContain('Bigfoot (Self ban)')
+    expect(wrapper.text()).toContain('side not recorded')
   })
 
   it('renders an external link when present, and a dash otherwise', async () => {

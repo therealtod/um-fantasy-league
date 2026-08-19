@@ -335,7 +335,7 @@ class MatchResultPolicyTest {
             validHeroIds = validHeroes,
             participants = participants(drafted1 = listOf(10, 11, 12), drafted2 = listOf(10, 11)),
             games = oneLegalGame(),
-            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN)),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN, side = 0)),
         )
 
         assertEquals(listOf(MatchRule.BANNED_HERO_DRAFTED), violations.map { it.rule })
@@ -365,11 +365,88 @@ class MatchResultPolicyTest {
             games = oneLegalGame(),
             bans = listOf(
                 MatchBanInput(heroId = 12, banType = BanType.PRE_BAN),
-                MatchBanInput(heroId = 12, banType = BanType.SELF_BAN),
+                MatchBanInput(heroId = 12, banType = BanType.SELF_BAN, side = 0),
             ),
         )
 
         assertEquals(listOf(MatchRule.DUPLICATE_BAN), violations.map { it.rule })
+    }
+
+    @Test
+    fun `a typed ban carries the side whose draft it came out of`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN, side = 0)),
+        )
+        val otherSide = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.SELF_BAN, side = 1)),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+        assertTrue(otherSide.isEmpty(), "expected no violations but got $otherSide")
+    }
+
+    @Test
+    fun `a pre-ban with no side is legal - it is struck before sides exist`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.PRE_BAN, side = null)),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
+    }
+
+    @Test
+    fun `a pre-ban that names a side is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.PRE_BAN, side = 0)),
+        )
+
+        assertEquals(listOf(MatchRule.BAN_SIDE_INVALID), violations.map { it.rule })
+    }
+
+    @Test
+    fun `a ban naming a side outside 0 and 1 is rejected`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.SELF_BAN, side = 2)),
+        )
+
+        assertEquals(listOf(MatchRule.BAN_SIDE_INVALID), violations.map { it.rule })
+        assertTrue(violations.single().message.contains("side 2"))
+    }
+
+    // Every `hero_ban` row written before V7 added the column looks like this.
+    // Rejecting it would make an already-recorded match uncorrectable, which is
+    // why BAN_SIDE_INVALID polices only an impossible side, never a missing one.
+    @Test
+    fun `a typed ban with no side at all is legal, so already-recorded matches stay correctable`() {
+        val violations = MatchResultPolicy.validate(
+            validMapIds = validMaps,
+            validHeroIds = validHeroes,
+            participants = participants(),
+            games = oneLegalGame(),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN, side = null)),
+        )
+
+        assertTrue(violations.isEmpty(), "expected no violations but got $violations")
     }
 
     @Test
@@ -379,7 +456,7 @@ class MatchResultPolicyTest {
             validHeroIds = validHeroes,
             participants = participants(),
             games = oneLegalGame(),
-            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN)),
+            bans = listOf(MatchBanInput(heroId = 12, banType = BanType.OPPONENT_BAN, side = 0)),
         )
 
         assertTrue(violations.isEmpty(), "expected no violations but got $violations")

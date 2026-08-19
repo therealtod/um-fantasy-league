@@ -32,8 +32,8 @@ class SchemaAndSeedTest @Autowired constructor(
     private val jdbcClient: JdbcClient,
 ) : PostgresIntegrationTest() {
 
-    private fun count(table: String): Int =
-        jdbcClient.sql("select count(*) from $table").query(Int::class.java).single()
+    private fun count(table: String, where: String = "true"): Int =
+        jdbcClient.sql("select count(*) from $table where $where").query(Int::class.java).single()
 
     @Test
     fun `every table is seeded to its expected size`() {
@@ -236,6 +236,34 @@ class SchemaAndSeedTest @Autowired constructor(
             "the same invariant MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED enforces on the way in -- " +
                 "a hero on the table but off the draft board would score no APPEARANCE at all",
         )
+    }
+
+    @Test
+    fun `every seeded ban is sided exactly when its category allows one`() {
+        val misfiled = jdbcClient
+            .sql(
+                """
+                select count(*)
+                from hero_ban
+                where (ban_type = 'PRE_BAN') <> (side is null)
+                """
+            )
+            .query(Int::class.java)
+            .single()
+
+        assertEquals(
+            0,
+            misfiled,
+            "a PRE_BAN precedes side assignment and carries no side, and V8 gave every other " +
+                "seeded ban the side whose draft it came out of",
+        )
+
+        assertEquals(
+            13,
+            count("hero_ban", "side is null"),
+            "one pre-ban per seeded match",
+        )
+        assertEquals(9, count("hero_ban", "side is not null"), "the 8 opponent bans + the Bo3's self ban")
     }
 
     @Test

@@ -86,9 +86,16 @@ data class MatchGameParticipant(
 
 enum class BanType { PRE_BAN, OPPONENT_BAN, SELF_BAN }
 
-/** No surrogate id: `(match_id, hero_id)` is the natural composite key. */
+/**
+ * No surrogate id: `(match_id, hero_id)` is the natural composite key -- a
+ * hero is struck at most once per series however many sides wanted it.
+ *
+ * [side] is the draft this hero came out of, while [banType] says who struck
+ * it. Null for a `PRE_BAN`, which precedes side assignment, and for rows
+ * recorded before the column existed -- see `V7__hero_ban_side.sql`.
+ */
 @Table("hero_ban")
-data class HeroBan(val heroId: Long, val banType: BanType)
+data class HeroBan(val heroId: Long, val banType: BanType, val side: Int? = null)
 
 /**
  * A hero one side drafted for the series, played or not.

@@ -60,11 +60,18 @@ data class GameResult(
         participants.filter { it.heroId != heroId }
 }
 
-/** A hero banned out of the series, categorized by when/why it was struck. */
+/**
+ * A hero banned out of the series, categorized by when/why it was struck.
+ *
+ * [side] is whose draft it came out of; [banType] is who struck it. Null for a
+ * `PRE_BAN` -- struck before sides were assigned, so it belongs to neither --
+ * and for anything recorded before `hero_ban.side` existed.
+ */
 data class BanResult(
     val heroId: Long,
     val heroName: String,
     val banType: BanType,
+    val side: Int? = null,
 )
 
 data class MatchResult(

@@ -131,19 +131,30 @@ class MatchImportService(
         }
 
         // Both sides' typed bans and the shared pre-ban pool flatten into one
-        // list, as `hero_ban` stores them. That table is keyed
-        // (match_id, hero_id), so the same hero cannot be banned twice in one
-        // series even if both sides struck it — de-duplicating here matches
-        // DUPLICATE_BAN's view and avoids handing the admin a draft that cannot
-        // be saved.
+        // list, as `hero_ban` stores them — but the side survives now. The
+        // source already groups a typed ban under the side that owned the hero,
+        // and `hero_ban.side` finally has somewhere to put it; a pre-ban
+        // precedes side assignment and so carries none.
+        //
+        // The table is still keyed (match_id, hero_id), so the same hero cannot
+        // be banned twice in one series even if both sides struck it —
+        // de-duplicating here matches DUPLICATE_BAN's view and avoids handing
+        // the admin a draft that cannot be saved. That the survivor keeps the
+        // first side rather than merging the two is inherent to that key, not a
+        // choice made here.
         val bans = buildList {
-            for (side in listOf(sideA, sideB)) {
-                for (ban in side.bans) {
+            for ((side, scrapedSide) in listOf(sideA, sideB).withIndex()) {
+                for (ban in scrapedSide.bans) {
+                    val banType = parseBanType(ban.banType)
                     add(
                         ImportedBan(
                             heroId = resolveHero(ban.heroName),
                             heroName = ban.heroName,
-                            banType = parseBanType(ban.banType),
+                            banType = banType,
+                            // A source filing a pre-ban under a side is mistaken
+                            // about what a pre-ban is; dropping the side keeps
+                            // BAN_SIDE_INVALID from firing on the import.
+                            side = side.takeUnless { banType == BanType.PRE_BAN },
                         ),
                     )
                 }
@@ -154,6 +165,7 @@ class MatchImportService(
                         heroId = resolveHero(heroName),
                         heroName = heroName,
                         banType = BanType.PRE_BAN,
+                        side = null,
                     ),
                 )
             }

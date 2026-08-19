@@ -87,6 +87,36 @@ function unplayedPicks(match: MatchResultDto, side: number): string[] {
 }
 
 /**
+ * The heroes struck out of one side's draft, labelled with who struck them.
+ *
+ * A ban is per series like a pick, and now carries the side whose arsenal it
+ * came out of — so it reads next to that side's unplayed picks rather than in a
+ * column of its own. A `PRE_BAN` has no side by definition and is listed
+ * separately by `preBans`.
+ */
+function sidedBans(match: MatchResultDto, side: number): string[] {
+  return match.bans
+    .filter(ban => ban.banType !== 'PRE_BAN' && ban.side === side)
+    .map(ban => `${ban.heroName} (${banTypeLabels[ban.banType]})`)
+}
+
+/** Struck before sides were assigned, so on neither draft. */
+function preBans(match: MatchResultDto): string[] {
+  return match.bans.filter(ban => ban.banType === 'PRE_BAN').map(ban => ban.heroName)
+}
+
+/**
+ * Bans recorded before `hero_ban.side` existed, so they name no side. Shown
+ * rather than dropped — a ban that scored points should not vanish from the
+ * list because its attribution is missing.
+ */
+function unsidedBans(match: MatchResultDto): string[] {
+  return match.bans
+    .filter(ban => ban.banType !== 'PRE_BAN' && ban.side === undefined)
+    .map(ban => `${ban.heroName} (${banTypeLabels[ban.banType]})`)
+}
+
+/**
  * Games won per side, derived client-side from each game's own `isWinner`
  * flags — there is no stored series winner (nothing about "best of N" is
  * tracked), consistent with this app's rule that anything derivable is
@@ -227,7 +257,7 @@ watch(
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Played At</th>
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Series</th>
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Games</th>
-            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Bans</th>
+            <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Pre-bans</th>
             <th class="border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Link</th>
             <th class="w-[180px] border-b-2 border-edge bg-surface-lowest px-3 py-3 text-left font-mono text-sm text-ink-dim uppercase tracking-wide md:px-4">Actions</th>
           </tr>
@@ -252,11 +282,17 @@ watch(
                 <span v-if="unplayedPicks(match, 0).length" class="text-xs text-ink-dim">
                   drafted, unplayed: {{ unplayedPicks(match, 0).join(', ') }}
                 </span>
+                <span v-if="sidedBans(match, 0).length" class="text-xs text-ink-dim">
+                  struck: {{ sidedBans(match, 0).join(', ') }}
+                </span>
                 <span :class="won[1] > won[0] ? 'font-bold text-lime' : 'text-ink-dim'">
                   {{ sideLabel(match, 1) }} — {{ won[1] }}
                 </span>
                 <span v-if="unplayedPicks(match, 1).length" class="text-xs text-ink-dim">
                   drafted, unplayed: {{ unplayedPicks(match, 1).join(', ') }}
+                </span>
+                <span v-if="sidedBans(match, 1).length" class="text-xs text-ink-dim">
+                  struck: {{ sidedBans(match, 1).join(', ') }}
                 </span>
               </div>
             </td>
@@ -284,9 +320,12 @@ watch(
               </div>
             </td>
             <td class="px-3 py-3 align-top md:px-4">
-              <div v-if="match.bans.length > 0" class="flex flex-col gap-1">
-                <div v-for="ban in match.bans" :key="ban.heroId" class="font-mono text-sm text-ink-dim">
-                  {{ ban.heroName }} <span class="text-xs">({{ banTypeLabels[ban.banType] }})</span>
+              <div v-if="preBans(match).length || unsidedBans(match).length" class="flex flex-col gap-1">
+                <div v-for="heroName in preBans(match)" :key="heroName" class="font-mono text-sm text-ink-dim">
+                  {{ heroName }}
+                </div>
+                <div v-for="label in unsidedBans(match)" :key="label" class="font-mono text-sm text-ink-dim">
+                  {{ label }} <span class="text-xs">— side not recorded</span>
                 </div>
               </div>
               <span v-else class="text-ink-dim italic">—</span>

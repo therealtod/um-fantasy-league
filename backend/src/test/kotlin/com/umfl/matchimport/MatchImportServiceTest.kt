@@ -136,6 +136,33 @@ class MatchImportServiceTest @Autowired constructor(
     }
 
     /**
+     * Flat list, but not side-blind: the source files a typed ban under the side
+     * that owned the hero, and `hero_ban.side` now keeps it. A pre-ban is struck
+     * before sides are assigned and carries none, which is also what
+     * `MatchRule.BAN_SIDE_INVALID` insists on.
+     */
+    @Test
+    fun `keeps the side a typed ban was struck from, and leaves a pre-ban unsided`() {
+        stubScrape()
+        val tournamentId = tournamentId("Summer of Legends")
+
+        val preview = service.preview(tournamentId, sourceUrl)
+
+        assertTrue(
+            preview.bans.filter { it.banType == BanType.PRE_BAN }.all { it.side == null },
+            "a pre-ban belongs to neither side",
+        )
+        val sideByHero: Map<String?, Int?> = preview.bans
+            .filterNot { it.banType == BanType.PRE_BAN }
+            .associate { it.heroName to it.side }
+        assertEquals(
+            mapOf<String?, Int?>("Alice" to 0, "Daredevil" to 0, "John Henry" to 1, "Dr. Jill Trent" to 1),
+            sideByHero,
+            "side A's two bans came out of side A's draft, side B's out of side B's",
+        )
+    }
+
+    /**
      * The board exists in `game_map` but not in this tournament's pool. It is
      * reported, not invented — `match_game`'s composite FK onto `tournament_map`
      * means recording a game on it would fail at the database.

@@ -69,6 +69,12 @@ data class ImportedBan(
     val heroId: Long?,
     val heroName: String?,
     val banType: BanType,
+    /**
+     * Whose draft this hero was struck out of, or null for a `PRE_BAN`. The
+     * source groups its typed bans under the side that owned the hero
+     * ([ScrapedSide.bans]), which is exactly what `hero_ban.side` stores.
+     */
+    val side: Int?,
 )
 
 /** What kind of row a name failed to resolve to. */

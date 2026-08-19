@@ -5,10 +5,11 @@ import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type {
   BanType,
-  GameResult,
   Hero,
   MapAdminDto,
   MatchImportPreviewDto,
+  MatchGameRequest,
+  MatchResultDto,
   RecordMatchRequest,
 } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -40,18 +41,62 @@ const violations = ref<string[]>([])
 const submitAttempted = ref(false)
 const isInitialized = ref(false)
 
-const banTypes: { value: BanType; label: string }[] = [
-  { value: 'PRE_BAN', label: 'Pre-ban' },
+/** A ban struck out of one side's draft. A `PRE_BAN` belongs to neither and lives in `preBans`. */
+type SidedBanType = Extract<BanType, 'OPPONENT_BAN' | 'SELF_BAN'>
+
+const sidedBanTypes: { value: SidedBanType; label: string }[] = [
   { value: 'OPPONENT_BAN', label: 'Opponent ban' },
   { value: 'SELF_BAN', label: 'Self ban' },
 ]
+
+const banTypeLabels: Record<BanType, string> = {
+  PRE_BAN: 'Pre-ban',
+  OPPONENT_BAN: 'Opponent ban',
+  SELF_BAN: 'Self ban',
+}
 
 // The tournament's legal boards and priced hero pool — what the match actually
 // scores against — so the admin picks from a list instead of typing a raw id.
 const mapPool = ref<MapAdminDto[]>([])
 const heroPool = ref<Hero[]>([])
 
-function blankGame(gameNumber: number) {
+/**
+ * One side of the series, as this form holds it.
+ *
+ * `draftedHeroIds` is that side's *whole* arsenal — every hero it took, whether
+ * it went on to field the hero, leave it on the bench, or lose it to a ban. That
+ * is deliberately a superset of what the API's own `draftedHeroIds` carries,
+ * which excludes bans (`BANNED_HERO_DRAFTED` keeps picks and bans disjoint);
+ * `toPayload` subtracts them back out at save time. Holding the superset here is
+ * the whole point of the screen: it is the list the admin reads off the match
+ * card, and it is what every hero dropdown below filters down to.
+ */
+interface SideForm {
+  playerLabel: string
+  draftedHeroIds: number[]
+  /** Struck out of *this* side's draft. Every `heroId` here is also on `draftedHeroIds`. */
+  bans: { heroId: number; banType: SidedBanType }[]
+}
+
+interface MatchForm {
+  round: number
+  playedAt: string
+  externalLink: string
+  sides: SideForm[]
+  games: MatchGameRequest[]
+  /** Struck before sides were known, so on neither draft. */
+  preBans: { heroId: number }[]
+  /**
+   * Typed bans that came back with no side — every `hero_ban` row written before
+   * V7 added the column looks like this. The server tolerates them
+   * (`BAN_SIDE_INVALID` polices an impossible side, never a missing one), but
+   * this form cannot show a ban it cannot place, so it asks the admin to assign
+   * one before saving rather than silently dropping or guessing it.
+   */
+  unassignedBans: { heroId: number; banType: SidedBanType }[]
+}
+
+function blankGame(gameNumber: number): MatchGameRequest {
   return {
     gameNumber,
     mapId: 0,
@@ -62,25 +107,23 @@ function blankGame(gameNumber: number) {
   }
 }
 
-function blankForm(): RecordMatchRequest {
+function blankSide(): SideForm {
+  return { playerLabel: '', draftedHeroIds: [], bans: [] }
+}
+
+function blankForm(): MatchForm {
   return {
     round: 1,
     playedAt: new Date().toISOString(),
     externalLink: '',
-    // `draftedHeroIds` here holds only the heroes a side drafted and never
-    // fielded. The ones it did field are unioned in at save time from the games
-    // themselves, so a recorded draft is always complete without the admin
-    // entering the same hero twice — see `draftFor`.
-    participants: [
-      { playerLabel: '', draftedHeroIds: [] },
-      { playerLabel: '', draftedHeroIds: [] },
-    ],
+    sides: [blankSide(), blankSide()],
     games: [blankGame(1)],
-    bans: [],
+    preBans: [],
+    unassignedBans: [],
   }
 }
 
-const form = ref<RecordMatchRequest>(blankForm())
+const form = ref<MatchForm>(blankForm())
 
 const tournaments = computed(() => tournamentsStore.tournaments)
 
@@ -116,40 +159,38 @@ function resetForm() {
 /**
  * Seeds the form from an import preview.
  *
- * The one thing to get right here is the draft. The preview carries each side's
- * *complete* draft, which is what the API wants — but this form holds only the
- * picks a side never fielded, and `draftFor` unions them back with the game
- * heroes at save time. Copying the preview's list in as-is would therefore be
- * harmless to the payload but wrong on screen: every hero that played would
- * also appear as a "drafted, not played" row. So subtract the fielded heroes
- * here, exactly as `loadMatchData` does when it reads a saved match back.
+ * The preview splits a side's arsenal the way the *API* does — `draftedHeroIds`
+ * without the banned heroes, and the bans in their own list carrying the side
+ * they came out of. This form holds the two together, so the seeding here is a
+ * union rather than the subtraction the old partial-draft model needed.
  *
  * `round` is never in a preview — the source site names its rounds rather than
  * numbering them — so it keeps the blank form's default for the admin to set.
  * `playedAt` falls back the same way when the source's timezone was unreadable.
  */
-function formFromPreview(preview: MatchImportPreviewDto): RecordMatchRequest {
+function formFromPreview(preview: MatchImportPreviewDto): MatchForm {
   const blank = blankForm()
-  const fielded = (side: number): number[] =>
-    preview.games.flatMap((game) => {
-      const heroId = game.participants[side]?.heroId
-      return heroId ? [heroId] : []
-    })
 
   return {
     round: blank.round,
     playedAt: preview.playedAt ?? blank.playedAt,
     externalLink: preview.sourceUrl,
-    participants: [0, 1].map((side) => {
+    sides: [0, 1].map((side) => {
       const participant = preview.participants[side]
-      const played = fielded(side)
+      // 0 is this form's "nothing selected" sentinel, so a ban the importer
+      // could not resolve becomes an unfilled row rather than a broken option.
+      const bans = preview.bans
+        .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === side)
+        .map((ban) => ({ heroId: ban.heroId ?? 0, banType: ban.banType as SidedBanType }))
       return {
         playerLabel: participant?.playerLabel ?? '',
-        draftedHeroIds: (participant?.draftedHeroIds ?? []).filter((id) => !played.includes(id)),
+        draftedHeroIds: [
+          ...(participant?.draftedHeroIds ?? []),
+          ...bans.map((ban) => ban.heroId).filter((heroId) => heroId !== 0),
+        ],
+        bans,
       }
     }),
-    // 0 is this form's "nothing selected" sentinel, so an id the importer could
-    // not resolve renders as an unfilled dropdown rather than a broken option.
     games: preview.games.map((game) => ({
       gameNumber: game.gameNumber,
       mapId: game.mapId ?? 0,
@@ -159,7 +200,57 @@ function formFromPreview(preview: MatchImportPreviewDto): RecordMatchRequest {
         isWinner: game.participants[side]?.isWinner ?? false,
       })),
     })),
-    bans: preview.bans.map((ban) => ({ heroId: ban.heroId ?? 0, banType: ban.banType })),
+    preBans: preview.bans
+      .filter((ban) => ban.banType === 'PRE_BAN')
+      .map((ban) => ({ heroId: ban.heroId ?? 0 })),
+    // The importer always attributes a typed ban, since the source groups them
+    // under the side that owned the hero — so this is empty in practice and
+    // exists only so an unsided one could never vanish silently.
+    unassignedBans: preview.bans
+      .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === undefined)
+      .map((ban) => ({ heroId: ban.heroId ?? 0, banType: ban.banType as SidedBanType })),
+  }
+}
+
+/** Reads a saved match back into the form, the same union `formFromPreview` does. */
+function formFromMatch(matchData: MatchResultDto): MatchForm {
+  const sidedBans = (side: number) =>
+    matchData.bans
+      .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === side)
+      .map((ban) => ({ heroId: ban.heroId, banType: ban.banType as SidedBanType }))
+
+  return {
+    round: matchData.round,
+    playedAt: matchData.playedAt,
+    externalLink: matchData.externalLink ?? '',
+    sides: [...matchData.participants]
+      .sort((a, b) => a.side - b.side)
+      .map((participant) => {
+        const bans = sidedBans(participant.side)
+        return {
+          playerLabel: participant.playerLabel ?? '',
+          // The stored draft plus the heroes banned out of it — together, the
+          // arsenal this side actually brought.
+          draftedHeroIds: [
+            ...participant.draftedHeroes.map((hero) => hero.heroId),
+            ...bans.map((ban) => ban.heroId),
+          ],
+          bans,
+        }
+      }),
+    games: [...matchData.games]
+      .sort((a, b) => a.gameNumber - b.gameNumber)
+      .map((game) => ({
+        gameNumber: game.gameNumber,
+        mapId: game.mapId,
+        participants: [...game.participants]
+          .sort((a, b) => a.side - b.side)
+          .map((p) => ({ heroId: p.heroId, healthRemaining: p.healthRemaining, isWinner: p.isWinner })),
+      })),
+    preBans: matchData.bans.filter((ban) => ban.banType === 'PRE_BAN').map((ban) => ({ heroId: ban.heroId })),
+    unassignedBans: matchData.bans
+      .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === undefined)
+      .map((ban) => ({ heroId: ban.heroId, banType: ban.banType as SidedBanType })),
   }
 }
 
@@ -172,35 +263,7 @@ async function loadMatchData() {
   violations.value = []
 
   try {
-    const matchData = await api.admin.getMatch(props.tournamentId, props.matchId)
-
-    // Convert MatchResultDto to RecordMatchRequest
-    form.value = {
-      round: matchData.round,
-      playedAt: matchData.playedAt,
-      externalLink: matchData.externalLink ?? '',
-      participants: [...matchData.participants]
-        .sort((a, b) => a.side - b.side)
-        .map((p) => ({
-          playerLabel: p.playerLabel ?? '',
-          // Split the stored draft back into the halves the form works in: the
-          // heroes this side fielded come back from the games, so only the
-          // unplayed picks belong in the editable list.
-          draftedHeroIds: p.draftedHeroes
-            .map((h) => h.heroId)
-            .filter((heroId) => !fieldedHeroIds(matchData.games, p.side).includes(heroId)),
-        })),
-      games: [...matchData.games]
-        .sort((a, b) => a.gameNumber - b.gameNumber)
-        .map((g) => ({
-          gameNumber: g.gameNumber,
-          mapId: g.mapId,
-          participants: [...g.participants]
-            .sort((a, b) => a.side - b.side)
-            .map((p) => ({ heroId: p.heroId, healthRemaining: p.healthRemaining, isWinner: p.isWinner })),
-        })),
-      bans: matchData.bans.map((b) => ({ heroId: b.heroId, banType: b.banType })),
-    }
+    form.value = formFromMatch(await api.admin.getMatch(props.tournamentId, props.matchId))
   } catch (e) {
     serverError.value = describeError(e, 'Failed to load match data')
     violations.value = violationMessages(e)
@@ -233,20 +296,32 @@ function removeGame(index: number) {
   })
 }
 
-function addBan() {
-  form.value.bans.push({ heroId: 0, banType: 'PRE_BAN' })
+function addPreBan() {
+  form.value.preBans.push({ heroId: 0 })
 }
 
-function removeBan(index: number) {
-  form.value.bans.splice(index, 1)
+function removePreBan(index: number) {
+  form.value.preBans.splice(index, 1)
 }
 
-/** The heroes a side fielded in a *saved* match, where `side` is a real field. */
-function fieldedHeroIds(games: GameResult[], side: number): number[] {
-  return games.flatMap((game) => game.participants.filter((p) => p.side === side).map((p) => p.heroId))
+function addSideBan(side: number) {
+  form.value.sides[side].bans.push({ heroId: 0, banType: 'OPPONENT_BAN' })
 }
 
-/** The same, read off the form, where a side is the participant's list position. */
+function removeSideBan(side: number, index: number) {
+  form.value.sides[side].bans.splice(index, 1)
+}
+
+/** Moves an unsided ban onto the side whose draft it came out of. */
+function assignBanToSide(index: number, side: number) {
+  const [ban] = form.value.unassignedBans.splice(index, 1)
+  form.value.sides[side].bans.push(ban)
+  if (ban.heroId !== 0 && !form.value.sides[side].draftedHeroIds.includes(ban.heroId)) {
+    form.value.sides[side].draftedHeroIds.push(ban.heroId)
+  }
+}
+
+/** The heroes a side fielded, read off the form — a side is the participant's list position. */
 function fieldedInForm(side: number): number[] {
   return form.value.games.flatMap((game) => {
     const participant = game.participants[side]
@@ -254,23 +329,70 @@ function fieldedInForm(side: number): number[] {
   })
 }
 
+/** The heroes this side lost to a ban — off its arsenal, and so off every dropdown below. */
+function bannedBySide(side: number): number[] {
+  return form.value.sides[side]?.bans.map((ban) => ban.heroId) ?? []
+}
+
+const preBannedHeroIds = computed(() => form.value.preBans.map((ban) => ban.heroId))
+
 /**
- * One side's complete draft as the API wants it: everything it fielded, plus
- * the picks it never played. Building the union here rather than making the
- * admin re-enter each game's hero is what keeps PLAYED_HERO_NOT_DRAFTED from
- * ever firing on a form the UI itself produced.
+ * What a side can actually field: its arsenal, less anything struck out of it.
+ * This is the option list for that side's per-game hero dropdowns, and the
+ * reason `PLAYED_HERO_NOT_DRAFTED` cannot fire on a submission this form built.
  */
-function draftFor(side: number): number[] {
-  const unplayed = form.value.participants[side]?.draftedHeroIds ?? []
-  return [...new Set([...fieldedInForm(side), ...unplayed])]
+function fieldableHeroes(side: number): Hero[] {
+  const drafted = form.value.sides[side]?.draftedHeroIds ?? []
+  const struck = new Set([...bannedBySide(side), ...preBannedHeroIds.value])
+  return heroPool.value.filter((hero) => drafted.includes(hero.id) && !struck.has(hero.id))
+}
+
+/** A side's own ban options: its arsenal, less the heroes it has already struck on another row. */
+function bannableHeroes(side: number, currentHeroId: number): Hero[] {
+  const drafted = form.value.sides[side]?.draftedHeroIds ?? []
+  const alreadyStruck = bannedBySide(side).filter((heroId) => heroId !== currentHeroId)
+  return heroPool.value.filter((hero) => drafted.includes(hero.id) && !alreadyStruck.includes(hero.id))
+}
+
+/**
+ * A pre-ban precedes the draft, so it can only name a hero neither side took.
+ * Offering the drafted ones would be offering a `BANNED_HERO_DRAFTED` 422.
+ */
+function preBannableHeroes(currentHeroId: number): Hero[] {
+  const drafted = new Set(form.value.sides.flatMap((side) => side.draftedHeroIds))
+  const alreadyStruck = preBannedHeroIds.value.filter((heroId) => heroId !== currentHeroId)
+  return heroPool.value.filter((hero) => !drafted.has(hero.id) && !alreadyStruck.includes(hero.id))
+}
+
+/** Heroes not yet on this side's arsenal — everything is draftable until it is drafted. */
+function draftableHeroes(side: number, currentHeroId: number): Hero[] {
+  const alreadyDrafted = (form.value.sides[side]?.draftedHeroIds ?? []).filter(
+    (heroId) => heroId !== currentHeroId,
+  )
+  return heroPool.value.filter((hero) => !alreadyDrafted.includes(hero.id))
 }
 
 function addDraftPick(side: number) {
-  form.value.participants[side].draftedHeroIds.push(0)
+  form.value.sides[side].draftedHeroIds.push(0)
 }
 
+/**
+ * Dropping a hero off a side's arsenal drops it everywhere that arsenal fed.
+ *
+ * Without the cascade a game select would keep a value no longer in its own
+ * option list — the browser renders that as blank while the model still holds
+ * the id, so the form would look filled and submit a hero the side never
+ * drafted.
+ */
 function removeDraftPick(side: number, index: number) {
-  form.value.participants[side].draftedHeroIds.splice(index, 1)
+  const [heroId] = form.value.sides[side].draftedHeroIds.splice(index, 1)
+  if (heroId === 0) return
+
+  form.value.sides[side].bans = form.value.sides[side].bans.filter((ban) => ban.heroId !== heroId)
+  form.value.games.forEach((game) => {
+    const participant = game.participants[side]
+    if (participant?.heroId === heroId) participant.heroId = 0
+  })
 }
 
 function heroName(heroId: number): string {
@@ -289,14 +411,89 @@ function setWinner(gameIndex: number, participantIndex: number) {
 }
 
 /**
+ * The form's shape, translated to the API's.
+ *
+ * The one real conversion is the draft: this form holds a side's whole arsenal,
+ * the API wants it without the banned heroes, since `BANNED_HERO_DRAFTED` keeps
+ * picks and bans disjoint. Subtracting here rather than making the admin keep
+ * two lists in their head is the point of the screen.
+ */
+function toPayload(): RecordMatchRequest {
+  return {
+    round: form.value.round,
+    playedAt: form.value.playedAt,
+    externalLink: form.value.externalLink,
+    participants: form.value.sides.map((side) => ({
+      playerLabel: side.playerLabel,
+      draftedHeroIds: side.draftedHeroIds.filter(
+        (heroId) => !side.bans.some((ban) => ban.heroId === heroId),
+      ),
+    })),
+    games: form.value.games,
+    bans: [
+      ...form.value.sides.flatMap((sideForm, side) =>
+        sideForm.bans.map((ban) => ({ heroId: ban.heroId, banType: ban.banType, side })),
+      ),
+      // A pre-ban is struck before sides exist, so it carries none — the server
+      // rejects one that does (`BAN_SIDE_INVALID`).
+      ...form.value.preBans.map((ban) => ({ heroId: ban.heroId, banType: 'PRE_BAN' as const, side: null })),
+    ],
+  }
+}
+
+/**
  * Everything this form can rule out on its own, as one message or null.
  *
  * It is a computed rather than a sequence of checks inside `saveMatch` on
  * purpose: an admin who fixes the problem in place sees the banner clear as
  * they type, instead of a stale complaint that survives until the next save.
+ *
+ * Most of what the old partial-draft form had to police is now unrepresentable:
+ * a game dropdown only offers heroes that side drafted and did not lose to a
+ * ban, so `PLAYED_HERO_NOT_DRAFTED` and `BANNED_HERO_PLAYED` cannot be built
+ * here at all. What remains is either a half-filled row or a conflict the
+ * dropdowns cannot see, because it spans two of them.
  */
 const validationError = computed<string | null>(() => {
-  const { games, bans, participants } = form.value
+  const { games, sides, preBans, unassignedBans } = form.value
+
+  if (unassignedBans.length > 0) {
+    return `Assign ${heroName(unassignedBans[0].heroId)}'s ban to the side it was struck from — this match predates per-side bans`
+  }
+
+  for (const [side, sideForm] of sides.entries()) {
+    if (sideForm.draftedHeroIds.some((heroId) => heroId === 0)) {
+      return `Every hero on side ${side + 1}'s draft needs to be chosen`
+    }
+    // DUPLICATE_PICK server-side; caught here so it reads as a prompt, not a 422.
+    const seen = new Set<number>()
+    for (const heroId of sideForm.draftedHeroIds) {
+      if (seen.has(heroId)) {
+        return `Side ${side + 1} drafted ${heroName(heroId)} twice — remove the duplicate row`
+      }
+      seen.add(heroId)
+    }
+    if (sideForm.bans.some((ban) => ban.heroId === 0)) return `Every ban on side ${side + 1} needs a hero selected`
+  }
+
+  if (preBans.some((ban) => ban.heroId === 0)) return 'Every pre-ban needs a hero selected'
+
+  // DUPLICATE_BAN server-side: `hero_ban` is keyed (match_id, hero_id), so one
+  // hero is struck at most once per series however many sides wanted it. Spans
+  // three lists, so no single dropdown can prevent it.
+  const allBans = [...sides.flatMap((side) => side.bans.map((ban) => ban.heroId)), ...preBans.map((ban) => ban.heroId)]
+  const bannedTwice = allBans.find((heroId, index) => heroId !== 0 && allBans.indexOf(heroId) !== index)
+  if (bannedTwice !== undefined) {
+    return `${heroName(bannedTwice)} is banned twice — a hero can only be struck once per series`
+  }
+
+  // BANNED_HERO_DRAFTED server-side. A side's own bans come off its draft at
+  // save time, but a pre-ban does not, so it must name a hero neither side took.
+  const drafted = new Set(sides.flatMap((side) => side.draftedHeroIds))
+  const preBannedButDrafted = preBans.find((ban) => ban.heroId !== 0 && drafted.has(ban.heroId))
+  if (preBannedButDrafted) {
+    return `${heroName(preBannedButDrafted.heroId)} is pre-banned, so neither side can have drafted it — a pre-ban precedes the draft`
+  }
 
   if (games.length === 0) return 'At least one game is required'
   if (games.some((g) => g.mapId === 0)) return 'Every game needs a map selected'
@@ -305,6 +502,16 @@ const validationError = computed<string | null>(() => {
   if (games.some((g) => g.participants.some((p) => p.heroId === 0))) {
     return 'Every game needs a hero selected for both sides'
   }
+  // A backstop, not a prompt the admin should ever see: the dropdowns cannot
+  // offer an undrafted hero. It fires only if a hero left a draft while a game
+  // still named it and the cascade in `removeDraftPick` somehow missed it.
+  for (const [side] of sides.entries()) {
+    const fieldable = fieldableHeroes(side).map((hero) => hero.id)
+    const stray = fieldedInForm(side).find((heroId) => !fieldable.includes(heroId))
+    if (stray !== undefined) {
+      return `Side ${side + 1} fields ${heroName(stray)}, which is not on its draft — add it or pick another hero`
+    }
+  }
   // The server rejects this too (NOT_EXACTLY_ONE_WINNER) — caught here so an
   // untouched winner radio reads as a prompt rather than a 422.
   if (games.some((g) => g.participants.filter((p) => p.isWinner).length !== 1)) {
@@ -312,30 +519,6 @@ const validationError = computed<string | null>(() => {
   }
   if (games.some((g) => g.participants.some((p) => !p.isWinner && p.healthRemaining > 0))) {
     return 'The losing hero must have 0 or less health'
-  }
-  if (bans.some((b) => b.heroId === 0)) return 'Every ban needs a hero selected'
-  if (participants.some((p) => p.draftedHeroIds.some((heroId) => heroId === 0))) {
-    return 'Every drafted hero needs a hero selected'
-  }
-
-  // DUPLICATE_PICK server-side; caught here so it reads as a prompt, not a 422.
-  // Only the *typed* picks can duplicate anything: `draftFor` de-duplicates
-  // what the games contribute, so a hero piloted in more than one game of a
-  // best-of-N is not a duplicate pick and must not be flagged as one — that is
-  // the ordinary case, and flagging it left the admin with an error no in-place
-  // edit could clear.
-  for (const [side, participant] of participants.entries()) {
-    const fielded = fieldedInForm(side)
-    const seen = new Set<number>()
-    for (const heroId of participant.draftedHeroIds) {
-      if (seen.has(heroId)) {
-        return `Side ${side + 1} drafted ${heroName(heroId)} twice — remove the duplicate row`
-      }
-      if (fielded.includes(heroId)) {
-        return `Side ${side + 1} played ${heroName(heroId)}, so it is already drafted — remove its "drafted, not played" row`
-      }
-      seen.add(heroId)
-    }
   }
 
   return null
@@ -372,19 +555,11 @@ async function saveMatch() {
 
   loading.value = true
 
-  const payload: RecordMatchRequest = {
-    ...form.value,
-    participants: form.value.participants.map((participant, side) => ({
-      ...participant,
-      draftedHeroIds: draftFor(side),
-    })),
-  }
-
   try {
     if (props.mode === 'create') {
-      await api.admin.recordMatch(tournamentId, payload)
+      await api.admin.recordMatch(tournamentId, toPayload())
     } else if (props.mode === 'edit' && props.matchId) {
-      await api.admin.correctMatch(tournamentId, props.matchId, payload)
+      await api.admin.correctMatch(tournamentId, props.matchId, toPayload())
     }
     emit('success')
   } catch (e) {
@@ -480,12 +655,52 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Participants -->
+      <!-- Bans that predate per-side attribution. Nothing else can be filled in
+           sensibly until these are placed, so they sit above the drafts. -->
+      <div
+        v-if="form.unassignedBans.length"
+        class="flex flex-col gap-3 border border-magenta bg-surface-lowest p-4"
+      >
+        <h4 class="headline text-base text-magenta">Bans with no side</h4>
+        <p class="font-mono text-xs leading-relaxed text-ink-dim">
+          This match was recorded before a ban stored which draft it came out of. Place each one on
+          the side whose hero it was — the type already says who struck it.
+        </p>
+        <div
+          v-for="(ban, index) in form.unassignedBans"
+          :key="index"
+          class="flex flex-col gap-2 border border-edge bg-surface-low p-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <span class="font-mono text-sm">
+            {{ heroName(ban.heroId) }}
+            <span class="text-xs text-ink-dim">({{ banTypeLabels[ban.banType] }})</span>
+          </span>
+          <div class="flex gap-2">
+            <button
+              v-for="side in [0, 1]"
+              :key="side"
+              type="button"
+              class="btn-ghost px-4 py-2 text-xs"
+              @click="assignBanToSide(index, side)"
+            >
+              Side {{ side + 1 }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- The draft comes first, and everything below it is filtered to what it
+           says. A side's list is its whole arsenal: the heroes it fielded, the
+           ones it benched, and the ones it lost to a ban. -->
       <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
-        <h4 class="headline text-base text-cyan">Participants (exactly 2 required, for the whole series)</h4>
+        <h4 class="headline text-base text-cyan">Drafts (exactly 2 sides, for the whole series)</h4>
+        <p class="font-mono text-xs leading-relaxed text-ink-dim">
+          Enter every hero each side took, whether or not it reached the table. The games and bans
+          below only offer that side's own heroes.
+        </p>
 
         <div
-          v-for="(participant, index) in form.participants"
+          v-for="(side, index) in form.sides"
           :key="index"
           class="flex flex-col gap-4 border border-edge bg-surface-low p-4"
         >
@@ -497,7 +712,7 @@ onMounted(async () => {
               <label :for="`player-${index}`" class="label-caps">Player name (optional)</label>
               <input
                 :id="`player-${index}`"
-                v-model="participant.playerLabel"
+                v-model="side.playerLabel"
                 type="text"
                 class="field-input-sm"
                 placeholder="Who piloted this side"
@@ -505,34 +720,29 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- This side's draft. The heroes it fields below are already on it —
-               they are listed read-only and added to the submission for you —
-               so this list is for the picks that never reach the table. They
-               still score an appearance, which is the point of recording them. -->
           <div class="flex flex-col gap-3 border-t border-edge pt-3">
-            <span class="label-caps">Draft</span>
-            <p class="font-mono text-xs text-ink-dim">
-              Played:
-              <template v-if="fieldedInForm(index).length">
-                {{ fieldedInForm(index).map(heroName).join(', ') }}
-              </template>
-              <template v-else>— pick heroes in the games below</template>
-            </p>
+            <span class="label-caps">Drafted heroes</span>
 
             <div
-              v-for="(_heroId, pickIndex) in participant.draftedHeroIds"
+              v-for="(_heroId, pickIndex) in side.draftedHeroIds"
               :key="pickIndex"
               class="flex flex-col gap-2 sm:flex-row sm:items-end"
             >
               <div class="flex flex-1 flex-col gap-2">
-                <label :for="`draft-${index}-${pickIndex}`" class="label-caps">Drafted, not played</label>
+                <label :for="`draft-${index}-${pickIndex}`" class="label-caps">Hero {{ pickIndex + 1 }}</label>
                 <select
                   :id="`draft-${index}-${pickIndex}`"
-                  v-model.number="participant.draftedHeroIds[pickIndex]"
+                  v-model.number="side.draftedHeroIds[pickIndex]"
                   class="field-input-sm"
                 >
                   <option :value="0" disabled>Select a hero…</option>
-                  <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
+                  <option
+                    v-for="hero in draftableHeroes(index, side.draftedHeroIds[pickIndex])"
+                    :key="hero.id"
+                    :value="hero.id"
+                  >
+                    {{ hero.name }}
+                  </option>
                 </select>
               </div>
               <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removeDraftPick(index, pickIndex)">
@@ -541,6 +751,54 @@ onMounted(async () => {
             </div>
 
             <button type="button" class="btn-ghost" @click="addDraftPick(index)">+ Add Drafted Hero</button>
+          </div>
+
+          <!-- This side's bans: heroes struck out of the arsenal above. They
+               score a ban instead of an appearance, which is why they belong on
+               the draft rather than beside it. -->
+          <div class="flex flex-col gap-3 border-t border-edge pt-3">
+            <span class="label-caps">Struck out of this draft (optional)</span>
+
+            <div
+              v-for="(ban, banIndex) in side.bans"
+              :key="banIndex"
+              class="flex flex-col gap-4 sm:flex-row sm:items-end"
+            >
+              <div class="grid flex-1 grid-cols-2 gap-4">
+                <div class="flex flex-col gap-2">
+                  <label :for="`ban-hero-${index}-${banIndex}`" class="label-caps">Hero</label>
+                  <select
+                    :id="`ban-hero-${index}-${banIndex}`"
+                    v-model.number="ban.heroId"
+                    class="field-input-sm"
+                  >
+                    <option :value="0" disabled>
+                      {{ side.draftedHeroIds.length ? 'Select a hero…' : `Draft heroes for side ${index + 1} first` }}
+                    </option>
+                    <option v-for="hero in bannableHeroes(index, ban.heroId)" :key="hero.id" :value="hero.id">
+                      {{ hero.name }}
+                    </option>
+                  </select>
+                </div>
+
+                <div class="flex flex-col gap-2">
+                  <label :for="`ban-type-${index}-${banIndex}`" class="label-caps">Struck by</label>
+                  <select
+                    :id="`ban-type-${index}-${banIndex}`"
+                    v-model="ban.banType"
+                    class="field-input-sm"
+                  >
+                    <option v-for="type in sidedBanTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removeSideBan(index, banIndex)">
+                Remove
+              </button>
+            </div>
+
+            <button type="button" class="btn-ghost" @click="addSideBan(index)">+ Add Ban</button>
           </div>
         </div>
       </div>
@@ -587,13 +845,23 @@ onMounted(async () => {
               <label :for="`game-${gameIndex}-hero-${participantIndex}`" class="label-caps">
                 Side {{ participantIndex + 1 }} Hero
               </label>
+              <!-- Only what this side drafted and did not lose to a ban, which is
+                   what makes PLAYED_HERO_NOT_DRAFTED unreachable from this form. -->
               <select
                 :id="`game-${gameIndex}-hero-${participantIndex}`"
                 v-model.number="participant.heroId"
                 class="field-input-sm"
               >
-                <option :value="0" disabled>Select a hero…</option>
-                <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
+                <option :value="0" disabled>
+                  {{
+                    fieldableHeroes(participantIndex).length
+                      ? 'Select a hero…'
+                      : `Draft heroes for side ${participantIndex + 1} first`
+                  }}
+                </option>
+                <option v-for="hero in fieldableHeroes(participantIndex)" :key="hero.id" :value="hero.id">
+                  {{ hero.name }}
+                </option>
               </select>
             </div>
 
@@ -626,46 +894,40 @@ onMounted(async () => {
         <button type="button" class="btn-ghost" @click="addGame">+ Add Game</button>
       </div>
 
-      <!-- Bans -->
+      <!-- Pre-bans: struck before sides were assigned, so they belong to neither
+           draft and score neither ban metric. -->
       <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
-        <h4 class="headline text-base text-cyan">Bans (optional, once for the whole series)</h4>
+        <h4 class="headline text-base text-cyan">Pre-bans (optional)</h4>
+        <p class="font-mono text-xs leading-relaxed text-ink-dim">
+          Heroes struck before sides were known. They belong to neither draft, so only heroes nobody
+          drafted are offered.
+        </p>
 
         <div
-          v-for="(ban, index) in form.bans"
+          v-for="(ban, index) in form.preBans"
           :key="index"
-          class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-start"
+          class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-end"
         >
-          <div class="grid flex-1 grid-cols-2 gap-4">
-            <div class="flex flex-col gap-2">
-              <label :for="`ban-hero-${index}`" class="label-caps">Hero</label>
-              <select
-                :id="`ban-hero-${index}`"
-                v-model.number="ban.heroId"
-                class="field-input-sm"
-              >
-                <option :value="0" disabled>Select a hero…</option>
-                <option v-for="hero in heroPool" :key="hero.id" :value="hero.id">{{ hero.name }}</option>
-              </select>
-            </div>
-
-            <div class="flex flex-col gap-2">
-              <label :for="`ban-type-${index}`" class="label-caps">Type</label>
-              <select
-                :id="`ban-type-${index}`"
-                v-model="ban.banType"
-                class="field-input-sm"
-              >
-                <option v-for="type in banTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
-              </select>
-            </div>
+          <div class="flex flex-1 flex-col gap-2">
+            <label :for="`pre-ban-hero-${index}`" class="label-caps">Hero</label>
+            <select
+              :id="`pre-ban-hero-${index}`"
+              v-model.number="ban.heroId"
+              class="field-input-sm"
+            >
+              <option :value="0" disabled>Select a hero…</option>
+              <option v-for="hero in preBannableHeroes(ban.heroId)" :key="hero.id" :value="hero.id">
+                {{ hero.name }}
+              </option>
+            </select>
           </div>
 
-          <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removeBan(index)">
+          <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removePreBan(index)">
             Remove
           </button>
         </div>
 
-        <button type="button" class="btn-ghost" @click="addBan">+ Add Ban</button>
+        <button type="button" class="btn-ghost" @click="addPreBan">+ Add Pre-ban</button>
       </div>
 
       <div class="flex justify-end gap-3 pt-2">

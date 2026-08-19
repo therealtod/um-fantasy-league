@@ -145,7 +145,7 @@ class AdminMatchService(
         }.toSet()
 
     private fun toBans(bans: List<MatchBanInput>): Set<HeroBan> =
-        bans.map { HeroBan(heroId = it.heroId, banType = it.banType) }.toSet()
+        bans.map { HeroBan(heroId = it.heroId, banType = it.banType, side = it.side) }.toSet()
 
     /**
      * The draft rides in on the participants — a pick belongs to a side — but

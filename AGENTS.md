@@ -34,8 +34,10 @@ splits by *kind*, not by environment: `db/migration/V2__reference_data.sql` carr
 hero and board catalogue — facts about Unmatched, not about a league, and the thing an admin prices
 into a pool — so it migrates in **every** profile, while demo/dev fixtures — three tournaments,
 seeded managers, a full recorded result set — live in a second Flyway location,
-`db/seed/` (`V3__demo_fixtures.sql`, plus `V6__demo_draft_picks.sql` — a separate file only because
-Flyway orders every location by version, and `match_hero_pick` does not exist until V5), that only
+`db/seed/` (`V3__demo_fixtures.sql`, plus `V6__demo_draft_picks.sql` and `V8__demo_ban_sides.sql` —
+separate files only because Flyway orders every location by version, and the columns they fill do not
+exist until V5 and V7 respectively; a seed addition that depends on a later migration always gets its
+own version rather than an edit to V3), that only
 `dev` and `test` add to `spring.flyway.locations` (see
 Profiles below). A default start or the `prod` profile therefore comes up with every hero and board
 and no mock league data at all.
@@ -216,14 +218,27 @@ below; nothing outside that surface writes reference data or results.
   less (an overkill hit lands it below zero), and every recorded game in `V3__demo_fixtures.sql`
   respects that. Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side,
   like every other derived number here.
-- **The draft is recorded in full, as picks *and* bans.** `hero_ban` holds the heroes struck out of a
-  series; `match_hero_pick (match_id, side, hero_id)` holds the heroes each side took. Both are per
-  series, never per game. A recorded draft is *complete* — `MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED`
+- **The draft is recorded in full, as picks *and* bans, and both name a side.** `hero_ban
+  (match_id, hero_id, ban_type, side)` holds the heroes struck out of a series;
+  `match_hero_pick (match_id, side, hero_id)` holds the heroes each side took. Both are per series,
+  never per game. A recorded draft is *complete* — `MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED`
   rejects a game whose hero is missing from that side's picks — which is what lets `APPEARANCE` be
   "was drafted and not banned" rather than "played". `BANNED_HERO_DRAFTED` keeps the two halves
   disjoint. There is deliberately no `unique (match_id, hero_id)` on the picks: games are
   independent, so a hero may legitimately go to one side in game 1 and the other in game 2, and
-  `MatchResult.draftedHeroIds` de-duplicates instead.
+  `MatchResult.draftedHeroIds` de-duplicates instead. `hero_ban` *does* keep that key, so a hero is
+  struck at most once per series however many sides wanted it — which is what `DUPLICATE_BAN` means.
+- **A ban's `side` is the draft it came out of, not who struck it.** `ban_type` already says that:
+  `SELF_BAN` is a side striking one of its own, `OPPONENT_BAN` the other side striking it, and a
+  `PRE_BAN` precedes side assignment and so carries no side at all (`BAN_SIDE_INVALID` rejects one
+  that does). The column is **nullable and stays that way**: every row written before
+  `V7__hero_ban_side.sql` has no side and cannot be given one after the fact, so a typed ban without
+  one is legal rather than making an already-recorded match uncorrectable — `BAN_SIDE_INVALID`
+  polices an *impossible* side, never a missing one. Tightening that to "every typed ban names a
+  side" needs a migration that can first attribute the rows already in the table; it cannot be done
+  by editing the baseline, which fails Flyway validation and stops the app booting (see Commands).
+  Scoring never reads the column: `MatchMetrics.banOfType` prices a ban by category alone, because
+  points are per hero and never per player.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
   `match_participant.player_label` — one row per side for the whole series, nullable free text with
@@ -411,7 +426,7 @@ enforce the no-draw invariant above and are the ones to know before touching the
 `LOSER_HAS_POSITIVE_HEALTH` rejects a loser who survived. Three more police the draft:
 `PLAYED_HERO_NOT_DRAFTED` is what makes a recorded draft complete (and so what makes `APPEARANCE`
 measurable), `BANNED_HERO_DRAFTED` keeps picks and bans disjoint, and `DUPLICATE_PICK` mirrors
-`DUPLICATE_BAN`. Activating a scoring rule set deactivates any active sibling in the same transaction, since only one may be active per tournament. An unknown
+`DUPLICATE_BAN`. `BAN_SIDE_INVALID` polices the ban side described in the invariants above. Activating a scoring rule set deactivates any active sibling in the same transaction, since only one may be active per tournament. An unknown
 scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a non-blocking warning on the
 response, never rejected.
 
@@ -454,6 +469,13 @@ parsed best-effort by `ScrapedTimestamps`, which returns **null rather than thro
 abbreviation it can't resolve unambiguously. Losing a whole scraped match over one rendered
 timestamp would be a bad trade; the wizard's date picker already defaults to now.
 
+**A ban's side is scraped, not inferred.** The source groups its "Self ban"/"Opp. ban" chips under
+the side that owned the hero (`ScrapedSide.bans`), and `scraped.preBans` belongs to neither — so
+`MatchImportService` emits each typed ban's side straight through to `hero_ban.side`. It used to
+flatten both sides into one list and throw the attribution away, because the table had nowhere to put
+it. The flattening remains, since `hero_ban` is keyed `(match_id, hero_id)` and the same hero cannot
+be struck twice in one series; only the discarding is gone.
+
 **Name resolution is exact-after-normalisation, with no fuzzy fallback** (`NameResolver`, pure).
 Normalisation covers the drift actually seen — case, whitespace, the `.` in `Dr. Ellie Sattler`,
 `&` versus `and` — and nothing more. A near miss that silently resolves to the wrong hero scores
@@ -487,21 +509,36 @@ price is the whole point of the warning. Keep the array in step when adding an e
 `DRAW` is *not* in it, deliberately, so pricing one is flagged like any other metric this build
 cannot measure.
 
-`MatchResultWizard` records a whole series: one map and two heroes per game, "+ Add Game" for a
-best-of-N, and the two player names once for the match. Each game's winner is a **radio**, not a
-checkbox — exactly one side wins, and there is no "neither" to express — with a client-side check
-before save so an untouched winner reads as a prompt instead of a 422. Each side also carries its
-**draft**, and the form only asks for the half it cannot derive: the heroes that side fields in the
-games are folded into `draftedHeroIds` at save time by `draftFor`, so the admin types only the picks
-that never played, and `PLAYED_HERO_NOT_DRAFTED` can never fire on a submission this UI built.
+`MatchResultWizard` records a whole series, and **the draft comes first**. Each side's block asks for
+its whole arsenal — every hero it took, whether that hero played, sat out, or was struck by a ban —
+and every hero dropdown below is filtered to it: a game's "Side N Hero" offers only that side's
+drafted-and-unstruck heroes, and a side's ban rows offer only its own arsenal. That filtering is what
+makes `PLAYED_HERO_NOT_DRAFTED` and `BANNED_HERO_PLAYED` unreachable from this form, so the wizard
+does not check for them. Games follow: one map and two heroes each, "+ Add Game" for a best-of-N,
+with the winner a **radio** rather than a checkbox — exactly one side wins, and there is no "neither"
+to express — plus a client-side check so an untouched winner reads as a prompt instead of a 422.
+Pre-bans come last, in their own section, offering only heroes neither side drafted.
 
-Its client-side checks belong in the `validationError` computed, and a `DUPLICATE_PICK` check has to
-read only the *typed* picks: `draftFor` de-duplicates the fielded heroes, so a hero piloted in more
-than one game of a best-of-N is not a duplicate.
+The one real conversion is at save. The form holds the arsenal; the API wants
+`draftedHeroIds` *without* the banned heroes (`BANNED_HERO_DRAFTED` keeps picks and bans disjoint),
+so `toPayload` subtracts each side's bans back out and emits them as `bans` carrying their `side`.
+`formFromMatch` and `formFromPreview` do the union in the other direction — keep the three in step.
+`removeDraftPick` cascades: dropping a hero off an arsenal also clears the games and ban rows that
+named it, since a select holding an id no longer in its option list renders blank while still
+submitting.
+
+A ban read back with **no side** (anything recorded before `hero_ban.side` existed) lands in
+`unassignedBans` and blocks the save until the admin places it on a side. It is neither dropped nor
+guessed: the ban already scored points, so losing it would silently move the standings.
+
+Its client-side checks belong in the `validationError` computed. What is left there is what no single
+dropdown can see because it spans two: `DUPLICATE_BAN` across both sides plus the pre-bans, and a
+pre-ban naming a hero someone drafted afterwards.
 
 `MatchListAdmin` renders the games grouped under their maps, derives the games-won tally per side,
-and names each side's drafted-but-unfielded picks — the heroes that scored an appearance without
-appearing in any game row.
+and under each side names both its drafted-but-unfielded picks — the heroes that scored an appearance
+without appearing in any game row — and the heroes struck out of that side's draft. Only pre-bans,
+and any ban still missing a side, keep a column of their own.
 
 `MatchImportPanel` is the front of the Match import flow above: a URL field, then the scrape's
 summary, its unresolved names, and a duplicate warning. "Review and record" is disabled until
@@ -509,11 +546,10 @@ summary, its unresolved names, and a duplicate warning. "Review and record" is d
 `MatchResultWizard` in `create` mode with a `prefill` prop. Two details are load-bearing. A
 `MAP_NOT_IN_POOL` row carries an **"Add to board pool"** button that calls the existing
 `addMapToPool` and re-imports — the admin widens the pool by clicking, the importer never does it
-silently. And the wizard's `formFromPreview` **subtracts the fielded heroes** from each side's
-drafted list: the preview carries the complete draft (what the API wants) while the form holds only
-the picks that never played (`draftFor` re-unions them at save), so copying it in raw would show
-every hero that played a second time as "drafted, not played". `loadMatchData` does the same
-subtraction reading a saved match back — keep the two in step.
+silently. And the wizard's `formFromPreview` **unions each side's bans back onto its drafted list**:
+the preview splits them the way the API does, while the form holds the arsenal whole, so copying the
+preview's `draftedHeroIds` in raw would drop every hero that side lost to a ban off the screen.
+`formFromMatch` does the same union reading a saved match back — keep the two in step.
 
 ## Deliberately not built
 

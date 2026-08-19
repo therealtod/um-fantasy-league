@@ -393,11 +393,67 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         assertNull(recorded.externalLink)
     }
 
+    /**
+     * The half of the draft `hero_ban` could not record before V7: which side's
+     * arsenal a hero was struck out of. A correction has to move it, since
+     * `correct` replaces the ban set outright rather than merging into it.
+     */
+    @Test
+    fun `a ban's side round-trips through record and moves on correct`() {
+        val tournamentId = winterOfChampionsId()
+        val (games, sides, _) = aliceVsRobinHood()
+        val bigfoot = id("heroes", "Bigfoot")
+
+        val recorded = adminMatchService.record(
+            tournamentId,
+            round = 1,
+            playedAt = Instant.now(),
+            externalLink = null,
+            participants = sides,
+            games = games,
+            bans = listOf(MatchBanInput(bigfoot, BanType.OPPONENT_BAN, side = 0)),
+        )
+
+        assertEquals(0, recorded.bans.single().side)
+
+        val corrected = adminMatchService.correct(
+            tournamentId,
+            recorded.matchId,
+            round = 1,
+            playedAt = Instant.now(),
+            externalLink = null,
+            participants = sides,
+            games = games,
+            bans = listOf(MatchBanInput(bigfoot, BanType.OPPONENT_BAN, side = 1)),
+        )
+
+        assertEquals(1, corrected.bans.single().side)
+    }
+
+    /** A pre-ban precedes side assignment, so it stores no side and reads back null. */
+    @Test
+    fun `a pre-ban records with no side`() {
+        val tournamentId = winterOfChampionsId()
+        val (games, sides, _) = aliceVsRobinHood()
+
+        val recorded = adminMatchService.record(
+            tournamentId,
+            round = 1,
+            playedAt = Instant.now(),
+            externalLink = null,
+            participants = sides,
+            games = games,
+            bans = listOf(MatchBanInput(id("heroes", "Bigfoot"), BanType.PRE_BAN)),
+        )
+
+        assertNull(recorded.bans.single().side)
+    }
+
     @Test
     fun `deleting a match removes its participants, games, game participants and bans`() {
         val tournamentId = winterOfChampionsId()
         val (games, sides, _) = aliceVsRobinHood()
-        val bans = listOf(MatchBanInput(id("heroes", "Bigfoot"), BanType.SELF_BAN))
+        val bans = listOf(MatchBanInput(id("heroes", "Bigfoot"), BanType.SELF_BAN, side = 0))
         val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = null, participants = sides, games = games, bans = bans)
         val gameId = recorded.games.single().gameId
 

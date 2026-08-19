@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Hero, MapAdminDto, MatchImportPreviewDto, MatchResultDto } from '@/api/types'
 
@@ -31,6 +32,8 @@ const mapPool: MapAdminDto[] = [{ id: 5, name: 'Center Square' }]
 const heroPool: Hero[] = [
   { id: 10, name: 'Sherlock Holmes', imageUrl: null, cost: 500 },
   { id: 11, name: 'Dracula', imageUrl: null, cost: 400 },
+  { id: 12, name: 'Medusa', imageUrl: null, cost: 300 },
+  { id: 13, name: 'Bigfoot', imageUrl: null, cost: 200 },
 ]
 
 async function mountWizard(props: {
@@ -43,6 +46,28 @@ async function mountWizard(props: {
   const wrapper = mount(MatchResultWizard, { props })
   await flushPromises()
   return wrapper
+}
+
+/**
+ * Fills one side's draft, which every other dropdown on the form is filtered
+ * to. Nothing below the draft can be selected before this runs — that is the
+ * whole design, so almost every test starts here.
+ */
+async function draftSide(wrapper: VueWrapper, side: number, heroIds: number[]) {
+  for (const heroId of heroIds) {
+    // Append, rather than assuming the side started empty — several tests draft
+    // in two passes to set a pre-ban up against a hero drafted afterwards.
+    const index = wrapper.findAll(`[id^="draft-${side}-"]`).length
+    const addButtons = wrapper.findAll('button.btn-ghost').filter((b) => b.text() === '+ Add Drafted Hero')
+    await addButtons[side]!.trigger('click')
+    await wrapper.find(`#draft-${side}-${index}`).setValue(String(heroId))
+  }
+}
+
+/** Both sides at once, for the common one-hero-each case. */
+async function draftBothSides(wrapper: VueWrapper, side0: number[], side1: number[]) {
+  await draftSide(wrapper, 0, side0)
+  await draftSide(wrapper, 1, side1)
 }
 
 beforeEach(() => {
@@ -63,13 +88,55 @@ describe('MatchResultWizard', () => {
     expect(wrapper.find('#game-0-map').element.tagName).toBe('SELECT')
     expect(wrapper.find('#game-0-hero-0').element.tagName).toBe('SELECT')
     expect(wrapper.text()).toContain('Center Square')
-    expect(wrapper.text()).toContain('Sherlock Holmes')
+
+    // The hero pool reaches the *draft* dropdown, which is the only place that
+    // offers the whole pool. A game's dropdown offers a side's draft, and there
+    // is no draft yet, so it starts out empty but for its prompt.
+    await draftSide(wrapper, 0, [])
+    await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === '+ Add Drafted Hero')[0]!.trigger('click')
+    expect(wrapper.find('#draft-0-0').text()).toContain('Sherlock Holmes')
+    expect(wrapper.find('#game-0-hero-0').text()).toContain('Draft heroes for side 1 first')
+    expect(wrapper.find('#game-0-hero-0').text()).not.toContain('Sherlock Holmes')
+  })
+
+  it('offers a game only the heroes that side drafted, never the whole pool', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await draftBothSides(wrapper, [10, 12], [11])
+
+    // Side 1 drafted Sherlock and Medusa, so those are its only two options —
+    // Dracula belongs to the other side and Bigfoot to nobody.
+    const side0 = wrapper.find('#game-0-hero-0').text()
+    expect(side0).toContain('Sherlock Holmes')
+    expect(side0).toContain('Medusa')
+    expect(side0).not.toContain('Dracula')
+    expect(side0).not.toContain('Bigfoot')
+
+    const side1 = wrapper.find('#game-0-hero-1').text()
+    expect(side1).toContain('Dracula')
+    expect(side1).not.toContain('Sherlock Holmes')
+  })
+
+  it('drops a hero from the games and bans it fed when it leaves the draft', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await draftBothSides(wrapper, [10, 12], [11])
+    await wrapper.find('#game-0-hero-0').setValue('12')
+    expect((wrapper.find('#game-0-hero-0').element as HTMLSelectElement).value).toBe('12')
+
+    // Removing Medusa from the draft clears the game that fielded it, rather
+    // than leaving a select that renders blank while still holding the id.
+    await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === 'Remove')[1]!.trigger('click')
+
+    expect((wrapper.find('#game-0-hero-0').element as HTMLSelectElement).value).toBe('0')
+    expect(wrapper.find('#game-0-hero-0').text()).not.toContain('Medusa')
   })
 
   it('maps a filled-in form to RecordMatchRequest on create', async () => {
     recordMatch.mockResolvedValue({})
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -101,6 +168,7 @@ describe('MatchResultWizard', () => {
     recordMatch.mockResolvedValue({})
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -127,24 +195,24 @@ describe('MatchResultWizard', () => {
     recordMatch.mockResolvedValue({})
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    // Side 1 took Medusa as well and never brought it to the table.
+    await draftBothSides(wrapper, [10, 12], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
     await wrapper.find('#game-0-health-1').setValue('0')
     await wrapper.findAll('input[type=radio]')[0]!.setValue()
 
-    // The first side also drafted Dracula and never brought it to the table.
-    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Drafted Hero')!.trigger('click')
-    await wrapper.find('#draft-0-0').setValue('11')
-
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
 
+    // Medusa never reached the table and is still on the draft, which is what
+    // earns it an APPEARANCE.
     expect(recordMatch).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
         participants: [
-          expect.objectContaining({ draftedHeroIds: [10, 11] }),
+          expect.objectContaining({ draftedHeroIds: [10, 12] }),
           expect.objectContaining({ draftedHeroIds: [11] }),
         ],
       }),
@@ -154,24 +222,26 @@ describe('MatchResultWizard', () => {
   it('refuses to save a draft row left on the placeholder', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
     await wrapper.find('#game-0-health-1').setValue('0')
     await wrapper.findAll('input[type=radio]')[0]!.setValue()
-    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Drafted Hero')!.trigger('click')
+    await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === '+ Add Drafted Hero')[0]!.trigger('click')
 
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
 
     expect(recordMatch).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Every drafted hero needs a hero selected')
+    expect(wrapper.text()).toContain("Every hero on side 1's draft needs to be chosen")
   })
 
   it('saves a best-of-three where a side pilots the same hero in more than one game', async () => {
     recordMatch.mockResolvedValue({})
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.findAll('button').find((b) => b.text() === '+ Add Game')!.trigger('click')
 
     for (const game of [0, 1]) {
@@ -186,7 +256,7 @@ describe('MatchResultWizard', () => {
     await flushPromises()
 
     // Repeating a hero across the games of a series is the ordinary case, not a
-    // duplicate pick: `draftFor` de-duplicates, so the draft carries it once.
+    // duplicate pick: the draft names it once and both games draw from it.
     expect(recordMatch).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
@@ -201,6 +271,7 @@ describe('MatchResultWizard', () => {
   it('drops its own complaint as soon as the form is corrected, with no second save', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -221,6 +292,7 @@ describe('MatchResultWizard', () => {
     violationMessagesMock.mockReturnValue(['Hero(es) drafted more than once by one side: 11.'])
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -237,31 +309,92 @@ describe('MatchResultWizard', () => {
     expect(wrapper.text()).not.toContain('drafted more than once')
   })
 
-  it('flags a hero listed as drafted-not-played that a side actually fielded', async () => {
+  it('refuses to pre-ban a hero a side drafted, which the server would reject', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
     await wrapper.find('#game-0-health-1').setValue('0')
     await wrapper.findAll('input[type=radio]')[0]!.setValue()
-    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Drafted Hero')!.trigger('click')
-    await wrapper.find('#draft-0-0').setValue('10')
+
+    // A pre-ban precedes the draft, so it cannot name a drafted hero. The
+    // dropdown does not offer one, but a hero drafted *after* the pre-ban was
+    // set still gets there — which is why the check spans both lists.
+    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Pre-ban')!.trigger('click')
+    await wrapper.find('#pre-ban-hero-0').setValue('13')
+    await draftSide(wrapper, 0, [13])
 
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
 
     expect(recordMatch).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Side 1 played Sherlock Holmes')
+    expect(wrapper.text()).toContain('Bigfoot is pre-banned')
+  })
 
-    // And removing that row is enough — the fix does not need a fresh match.
-    await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === 'Remove')[0]!.trigger('click')
-    expect(wrapper.text()).not.toContain('Side 1 played Sherlock Holmes')
+  it("keeps a side's own ban off the draft it submits, since picks and bans are disjoint", async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    // Side 1 brought three heroes and lost Medusa to the opponent's ban.
+    await draftBothSides(wrapper, [10, 12], [11])
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    await wrapper.findAll('button.btn-ghost').filter((b) => b.text() === '+ Add Ban')[0]!.trigger('click')
+    await wrapper.find('#ban-hero-0-0').setValue('12')
+
+    // A banned hero also drops out of that side's game dropdown — it never
+    // reached the table, so BANNED_HERO_PLAYED cannot be built here either.
+    expect(wrapper.find('#game-0-hero-0').text()).not.toContain('Medusa')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        // Medusa is on the ban list carrying its side, and off the draft.
+        participants: [
+          expect.objectContaining({ draftedHeroIds: [10] }),
+          expect.objectContaining({ draftedHeroIds: [11] }),
+        ],
+        bans: [{ heroId: 12, banType: 'OPPONENT_BAN', side: 0 }],
+      }),
+    )
+  })
+
+  it('sends a pre-ban with no side, since it precedes side assignment', async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    await draftBothSides(wrapper, [10], [11])
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-1').setValue('0')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+
+    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === '+ Add Pre-ban')!.trigger('click')
+    await wrapper.find('#pre-ban-hero-0').setValue('13')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ bans: [{ heroId: 13, banType: 'PRE_BAN', side: null }] }),
+    )
   })
 
   it('refuses to save a game with no winner picked, rather than posting a draw', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -277,6 +410,7 @@ describe('MatchResultWizard', () => {
   it('refuses to save a game with a positive-health loser', async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -294,6 +428,7 @@ describe('MatchResultWizard', () => {
     recordMatch.mockResolvedValue({})
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -379,7 +514,7 @@ describe('MatchResultWizard', () => {
           ],
         },
       ],
-      bans: [{ heroId: 11, heroName: 'Dracula', banType: 'OPPONENT_BAN' }],
+      bans: [{ heroId: 13, heroName: 'Bigfoot', banType: 'OPPONENT_BAN', side: 0 }],
     }
     getMatch.mockResolvedValue(existing)
     correctMatch.mockResolvedValue(existing)
@@ -393,8 +528,13 @@ describe('MatchResultWizard', () => {
     expect((wrapper.find('#game-0-map').element as HTMLSelectElement).value).toBe('5')
     expect((wrapper.find('#game-0-hero-0').element as HTMLSelectElement).value).toBe('10')
     expect((wrapper.find('#game-0-health-0').element as HTMLInputElement).value).toBe('8')
-    expect((wrapper.find('#ban-hero-0').element as HTMLSelectElement).value).toBe('11')
-    expect((wrapper.find('#ban-type-0').element as HTMLSelectElement).value).toBe('OPPONENT_BAN')
+    // The ban reads back onto the side whose draft it came out of, and the hero
+    // is on that side's arsenal — the round trip `hero_ban.side` exists for.
+    expect((wrapper.find('#ban-hero-0-0').element as HTMLSelectElement).value).toBe('13')
+    expect((wrapper.find('#ban-type-0-0').element as HTMLSelectElement).value).toBe('OPPONENT_BAN')
+    expect(wrapper.findAll('[id^="draft-0-"]').map((s) => (s.element as HTMLSelectElement).value))
+      .toEqual(['10', '12', '13'])
+    expect(wrapper.findAll('[id^="ban-hero-1-"]')).toHaveLength(0)
 
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
@@ -405,7 +545,9 @@ describe('MatchResultWizard', () => {
       expect.objectContaining({
         externalLink: 'https://example.com/bracket/9',
         // Side 0's draft round-trips whole: Sherlock Holmes because it was
-        // fielded, Medusa because it was drafted and never played.
+        // fielded, Medusa because it was drafted and never played. Bigfoot is
+        // on the form's arsenal but back off the wire, since a banned hero is
+        // not a pick (BANNED_HERO_DRAFTED).
         participants: [
           { playerLabel: 'Alice', draftedHeroIds: [10, 12] },
           { playerLabel: '', draftedHeroIds: [11] },
@@ -420,8 +562,56 @@ describe('MatchResultWizard', () => {
             ],
           }),
         ],
-        bans: [{ heroId: 11, banType: 'OPPONENT_BAN' }],
+        bans: [{ heroId: 13, banType: 'OPPONENT_BAN', side: 0 }],
       }),
+    )
+  })
+
+  it('asks for a side on a ban recorded before bans had one, instead of dropping it', async () => {
+    getMatch.mockResolvedValue({
+      matchId: 43,
+      tournamentId: 1,
+      round: 1,
+      playedAt: '2026-08-01T12:00:00Z',
+      participants: [
+        { side: 0, playerLabel: 'Alice', draftedHeroes: [{ heroId: 10, heroName: 'Sherlock Holmes' }] },
+        { side: 1, draftedHeroes: [{ heroId: 11, heroName: 'Dracula' }] },
+      ],
+      games: [
+        {
+          gameId: 100,
+          gameNumber: 1,
+          mapId: 5,
+          mapName: 'Center Square',
+          participants: [
+            { side: 0, heroId: 10, heroName: 'Sherlock Holmes', healthRemaining: 8, isWinner: true },
+            { side: 1, heroId: 11, heroName: 'Dracula', healthRemaining: 0, isWinner: false },
+          ],
+        },
+      ],
+      // No `side` — every hero_ban row written before V7 looks like this.
+      bans: [{ heroId: 13, heroName: 'Bigfoot', banType: 'SELF_BAN' }],
+    } as MatchResultDto)
+
+    const wrapper = await mountWizard({ tournamentId: 1, matchId: 43, mode: 'edit' })
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    // It blocks the save rather than guessing a side or silently dropping a ban
+    // that already scored points.
+    expect(correctMatch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Bans with no side')
+
+    // Placing it puts the hero on that side's arsenal and lets the save through.
+    await wrapper.findAll('button.btn-ghost').find((b) => b.text() === 'Side 1')!.trigger('click')
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(correctMatch).toHaveBeenCalledWith(
+      1,
+      43,
+      expect.objectContaining({ bans: [{ heroId: 13, banType: 'SELF_BAN', side: 0 }] }),
     )
   })
 
@@ -436,6 +626,7 @@ describe('MatchResultWizard', () => {
 
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
 
+    await draftBothSides(wrapper, [10], [11])
     await wrapper.find('#game-0-map').setValue('5')
     await wrapper.find('#game-0-hero-0').setValue('10')
     await wrapper.find('#game-0-hero-1').setValue('11')
@@ -454,11 +645,9 @@ describe('MatchResultWizard', () => {
 })
 
 /**
- * The wizard's `draftedHeroIds` holds only the picks a side never fielded —
- * `draftFor` unions them back with the game heroes at save time. An import
- * preview carries the *complete* draft, so seeding it in raw would show every
- * hero that played a second time as a "drafted, not played" row. These tests pin
- * the subtraction that prevents it.
+ * The form holds a side's whole arsenal — what it drafted, plus what it lost to
+ * a ban — while the preview splits those the way the API does. These tests pin
+ * the union that puts them back together, and the ban sides that survive it.
  */
 describe('MatchResultWizard prefilled from an import', () => {
   const preview: MatchImportPreviewDto = {
@@ -483,7 +672,12 @@ describe('MatchResultWizard prefilled from an import', () => {
         ],
       },
     ],
-    bans: [],
+    // Side 1 also brought Medusa and lost it to the opponent's ban; Bigfoot was
+    // struck before sides were known, so it belongs to neither draft.
+    bans: [
+      { heroId: 12, heroName: 'Medusa', banType: 'OPPONENT_BAN', side: 0 },
+      { heroId: 13, heroName: 'Bigfoot', banType: 'PRE_BAN' },
+    ],
     unresolved: [],
   }
 
@@ -497,17 +691,22 @@ describe('MatchResultWizard prefilled from an import', () => {
     expect((wrapper.find('#player-1').element as HTMLInputElement).value).toBe('immortal')
   })
 
-  it('shows only the unfielded picks as drafted-not-played, not the whole draft', async () => {
+  it("shows a side's whole arsenal, banned heroes included", async () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create', prefill: preview })
 
-    // Side 0 drafted 10 and 11 but fielded 10, so exactly one editable pick row
-    // remains — and it is 11, not 10.
-    const side0Picks = wrapper.findAll('[id^="draft-0-"]')
-    expect(side0Picks).toHaveLength(1)
-    expect((side0Picks[0]!.element as HTMLSelectElement).value).toBe('11')
+    // Side 1 played Sherlock, benched Dracula and lost Medusa to a ban — three
+    // rows, in one list, which is the list the admin reads off the match card.
+    expect(wrapper.findAll('[id^="draft-0-"]').map((s) => (s.element as HTMLSelectElement).value))
+      .toEqual(['10', '11', '12'])
+    expect((wrapper.find('#ban-hero-0-0').element as HTMLSelectElement).value).toBe('12')
 
-    // Side 1 drafted only what it played, so it has no leftover picks at all.
-    expect(wrapper.findAll('[id^="draft-1-"]')).toHaveLength(0)
+    // Side 2 drafted only what it played, and struck nothing.
+    expect(wrapper.findAll('[id^="draft-1-"]').map((s) => (s.element as HTMLSelectElement).value))
+      .toEqual(['11'])
+    expect(wrapper.findAll('[id^="ban-hero-1-"]')).toHaveLength(0)
+
+    // The pre-ban belongs to neither, so it sits in its own section.
+    expect((wrapper.find('#pre-ban-hero-0').element as HTMLSelectElement).value).toBe('13')
   })
 
   it('submits each side\'s complete draft exactly once', async () => {
@@ -517,10 +716,18 @@ describe('MatchResultWizard prefilled from an import', () => {
     await wrapper.find('button.btn-primary').trigger('click')
     await flushPromises()
 
-    const payload = recordMatch.mock.calls[0]![1] as { participants: { draftedHeroIds: number[] }[] }
-    // The full draft is restored by draftFor — no hero duplicated by the round trip.
+    const payload = recordMatch.mock.calls[0]![1] as {
+      participants: { draftedHeroIds: number[] }[]
+      bans: { heroId: number; banType: string; side: number | null }[]
+    }
+    // Back to the preview's own split: the arsenal less the banned hero, which
+    // no round trip duplicated or lost.
     expect(payload.participants[0]!.draftedHeroIds.slice().sort()).toEqual([10, 11])
     expect(payload.participants[1]!.draftedHeroIds).toEqual([11])
+    expect(payload.bans).toEqual([
+      { heroId: 12, banType: 'OPPONENT_BAN', side: 0 },
+      { heroId: 13, banType: 'PRE_BAN', side: null },
+    ])
   })
 
   it('carries the source url through as the external link', async () => {

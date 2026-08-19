@@ -93,7 +93,7 @@ class MatchImportEndpointTest @Autowired constructor(
             set("bans", preview["bans"].deepCopy())
         }
 
-        mockMvc.post("/api/admin/tournaments/$tournamentId/matches") {
+        val recordedJson = mockMvc.post("/api/admin/tournaments/$tournamentId/matches") {
             header("X-Manager-Id", adminId)
             contentType = MediaType.APPLICATION_JSON
             content = recordBody.toString()
@@ -103,7 +103,22 @@ class MatchImportEndpointTest @Autowired constructor(
             jsonPath("$.games.length()") { value(3) }
             jsonPath("$.bans.length()") { value(10) }
             jsonPath("$.externalLink") { value(sourceUrl) }
-        }
+        }.andReturn().response.contentAsString
+
+        // The side survives the whole round trip: the source grouped these under
+        // the side that owned the hero, the preview kept it, and `hero_ban.side`
+        // stored it. Asserted off the parsed body rather than with a jsonPath
+        // filter, which returns a length per match rather than a match count.
+        val recordedBans = objectMapper.readTree(recordedJson)["bans"]
+        assertEquals(
+            listOf(2, 2),
+            listOf(0, 1).map { side -> recordedBans.count { it["side"]?.asInt() == side } },
+            "each side's two typed bans came back attributed to it",
+        )
+        assertTrue(
+            recordedBans.filter { it["banType"].asString() == "PRE_BAN" }.all { it["side"] == null },
+            "a pre-ban precedes side assignment, so Jackson omits the null side entirely",
+        )
     }
 
     /** Re-importing a URL already recorded warns instead of silently duplicating it. */

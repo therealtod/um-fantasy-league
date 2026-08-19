@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.simple.JdbcClient
 import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -33,6 +34,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         val robinHood = id("heroes", "Robin Hood")
         val bigfoot = id("heroes", "Bigfoot")
         val medusa = id("heroes", "Medusa")
+        val dracula = id("heroes", "Dracula")
         val baskerville = id("game_map", "Baskerville Manor")
         val playedAt = Instant.parse("2026-08-15T12:00:00Z")
 
@@ -57,7 +59,13 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                         ),
                     ),
                 ),
-                bans = setOf(HeroBan(heroId = bigfoot, banType = BanType.PRE_BAN)),
+                bans = setOf(
+                    HeroBan(heroId = bigfoot, banType = BanType.PRE_BAN),
+                    // Struck out of side 1's draft by side 0 -- the attribution
+                    // `hero_ban.side` exists to keep. A hero on neither side's
+                    // picks, since a ban and a pick are disjoint.
+                    HeroBan(heroId = dracula, banType = BanType.OPPONENT_BAN, side = 1),
+                ),
                 picks = setOf(
                     HeroPick(side = 0, heroId = alice),
                     HeroPick(side = 0, heroId = medusa),
@@ -74,7 +82,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         assertEquals("https://example.com/bracket/42", reloaded.externalLink)
         assertEquals(listOf("Tomas Ferreira", "Rina Okafor"), reloaded.participants.map { it.playerLabel })
         assertEquals(1, reloaded.games.size)
-        assertEquals(1, reloaded.bans.size)
+        assertEquals(2, reloaded.bans.size)
 
         val game = reloaded.games.single()
         assertEquals(1, game.gameNumber)
@@ -83,9 +91,15 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         assertTrue(game.participants.any { it.heroId == alice && it.isWinner && it.healthRemaining == -2 })
         assertTrue(game.participants.any { it.heroId == robinHood && !it.isWinner && it.healthRemaining == 0 })
 
-        val ban = reloaded.bans.single()
-        assertEquals(bigfoot, ban.heroId)
-        assertEquals(BanType.PRE_BAN, ban.banType)
+        val preBan = reloaded.bans.single { it.banType == BanType.PRE_BAN }
+        assertEquals(bigfoot, preBan.heroId)
+        assertNull(preBan.side, "a pre-ban is struck before sides are assigned, so it has none")
+
+        // A sided ban round-trips its side, which is the half of the draft
+        // `hero_ban` could not record before V7.
+        val opponentBan = reloaded.bans.single { it.banType == BanType.OPPONENT_BAN }
+        assertEquals(dracula, opponentBan.heroId)
+        assertEquals(1, opponentBan.side)
 
         // The draft: side 0 took a hero it never fielded, which is the whole
         // reason `match_hero_pick` exists.

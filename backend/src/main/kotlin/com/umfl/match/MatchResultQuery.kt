@@ -204,6 +204,9 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
                     heroId = rs.getLong("hero_id"),
                     heroName = rs.getString("hero_name"),
                     banType = BanType.valueOf(rs.getString("ban_type")),
+                    // getObject rather than getInt: the column is null for a
+                    // pre-ban, and getInt would read that back as side 0.
+                    side = rs.getObject("side", Integer::class.java)?.toInt(),
                 )
             }
             .list()
@@ -276,7 +279,7 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
         """
 
         const val SELECT_BANS = """
-            select hb.match_id, hb.hero_id, h.name as hero_name, hb.ban_type
+            select hb.match_id, hb.hero_id, h.name as hero_name, hb.ban_type, hb.side
             from hero_ban hb
             join heroes h on h.id = hb.hero_id
             where hb.match_id in (:matchIds)

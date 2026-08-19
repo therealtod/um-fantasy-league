@@ -155,6 +155,13 @@ data class MatchBanRequest(
     val heroId: Long?,
     @field:NotNull(message = "banType is required")
     val banType: BanType?,
+    /**
+     * Whose draft this hero was struck out of, 0 or 1. Omit it for a `PRE_BAN`
+     * -- that happens before sides are assigned -- and the server answers 422
+     * `BAN_SIDE_INVALID` if one is sent anyway. Omitting it on a typed ban is
+     * allowed but loses the attribution.
+     */
+    val side: Int? = null,
 )
 
 data class RecordMatchRequest(
@@ -308,7 +315,7 @@ data class MatchImportPreviewDto(
                     },
                 )
             },
-            bans = preview.bans.map { ImportedBanDto(it.heroId, it.heroName, it.banType) },
+            bans = preview.bans.map { ImportedBanDto(it.heroId, it.heroName, it.banType, it.side) },
             unresolved = preview.unresolved.map {
                 UnresolvedNameDto(it.kind, it.sourceName, it.reason, it.mapId, it.message)
             },
@@ -340,6 +347,8 @@ data class ImportedBanDto(
     val heroId: Long?,
     val heroName: String?,
     val banType: BanType,
+    /** Whose draft it came out of; null for a `PRE_BAN`. */
+    val side: Int?,
 )
 
 data class UnresolvedNameDto(
