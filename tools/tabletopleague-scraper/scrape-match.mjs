@@ -39,6 +39,7 @@
  */
 
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   DEFAULT_COMPETITION_MATCHES_URL,
   launchBrowser,
@@ -296,7 +297,12 @@ function extractMatchDetail() {
   };
 }
 
-async function scrapeOne(page, url) {
+/**
+ * Scrapes one match detail page with an already-open Playwright page. Exported so
+ * `server.mjs` can drive it request-by-request against a long-lived browser instead
+ * of launching one per scrape; `run()` below is still the CLI's own caller.
+ */
+export async function scrapeOne(page, url) {
   await politeGoto(page, url);
   const data = await page.evaluate(extractMatchDetail);
   return { matchId: matchIdFromUrl(url), sourceUrl: url, ...data };
@@ -359,7 +365,11 @@ async function run() {
   }
 }
 
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run the CLI when this file *is* the entry point -- `server.mjs` imports
+// `scrapeOne` from here, and an unguarded call would run a full scrape on import.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  run().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

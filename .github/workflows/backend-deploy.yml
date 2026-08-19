@@ -15,10 +15,12 @@ on:
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle/**"
+      - "tools/tabletopleague-scraper/**"
       - ".github/workflows/backend-deploy.yml"
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-backend
+  SCRAPER_IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-scraper
 
 jobs:
   test:
@@ -51,7 +53,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push the backend image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -60,6 +63,21 @@ jobs:
             ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The headless-browser sidecar the admin match import calls. Built here
+      # rather than in its own workflow so `docker compose pull` on the VPS
+      # always finds the two images in step -- they are deployed together and
+      # share the compose file, even though only this one carries a browser.
+      - name: Build and push the scraper image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tools/tabletopleague-scraper
+          push: true
+          tags: |
+            ${{ env.SCRAPER_IMAGE }}:${{ github.sha }}
+            ${{ env.SCRAPER_IMAGE }}:latest
+          cache-from: type=gha,scope=scraper
+          cache-to: type=gha,mode=max,scope=scraper
 
   deploy:
     needs: build-and-push
@@ -74,6 +92,6 @@ jobs:
           script: |
             set -e
             cd /opt/umfl
-            docker compose pull backend
-            docker compose up -d backend
+            docker compose pull backend scraper
+            docker compose up -d backend scraper
             docker image prune -f

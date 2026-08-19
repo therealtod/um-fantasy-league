@@ -3,13 +3,25 @@ import { ref, computed, onMounted } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
-import type { BanType, GameResult, Hero, MapAdminDto, RecordMatchRequest } from '@/api/types'
+import type {
+  BanType,
+  GameResult,
+  Hero,
+  MapAdminDto,
+  MatchImportPreviewDto,
+  RecordMatchRequest,
+} from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
 interface Props {
   tournamentId?: number
   matchId?: number
   mode: 'create' | 'edit'
+  /**
+   * A scraped match to seed the form with, from the import panel. Create mode
+   * only — an import produces a new match, never an edit of an existing one.
+   */
+  prefill?: MatchImportPreviewDto | null
 }
 
 const props = defineProps<Props>()
@@ -95,7 +107,57 @@ const playedAtLocal = computed({
 
 // Reset form based on mode
 function resetForm() {
-  form.value = blankForm()
+  form.value = props.prefill ? formFromPreview(props.prefill) : blankForm()
+}
+
+/**
+ * Seeds the form from an import preview.
+ *
+ * The one thing to get right here is the draft. The preview carries each side's
+ * *complete* draft, which is what the API wants — but this form holds only the
+ * picks a side never fielded, and `draftFor` unions them back with the game
+ * heroes at save time. Copying the preview's list in as-is would therefore be
+ * harmless to the payload but wrong on screen: every hero that played would
+ * also appear as a "drafted, not played" row. So subtract the fielded heroes
+ * here, exactly as `loadMatchData` does when it reads a saved match back.
+ *
+ * `round` is never in a preview — the source site names its rounds rather than
+ * numbering them — so it keeps the blank form's default for the admin to set.
+ * `playedAt` falls back the same way when the source's timezone was unreadable.
+ */
+function formFromPreview(preview: MatchImportPreviewDto): RecordMatchRequest {
+  const blank = blankForm()
+  const fielded = (side: number): number[] =>
+    preview.games.flatMap((game) => {
+      const heroId = game.participants[side]?.heroId
+      return heroId ? [heroId] : []
+    })
+
+  return {
+    round: blank.round,
+    playedAt: preview.playedAt ?? blank.playedAt,
+    externalLink: preview.sourceUrl,
+    participants: [0, 1].map((side) => {
+      const participant = preview.participants[side]
+      const played = fielded(side)
+      return {
+        playerLabel: participant?.playerLabel ?? '',
+        draftedHeroIds: (participant?.draftedHeroIds ?? []).filter((id) => !played.includes(id)),
+      }
+    }),
+    // 0 is this form's "nothing selected" sentinel, so an id the importer could
+    // not resolve renders as an unfilled dropdown rather than a broken option.
+    games: preview.games.map((game) => ({
+      gameNumber: game.gameNumber,
+      mapId: game.mapId ?? 0,
+      participants: [0, 1].map((side) => ({
+        heroId: game.participants[side]?.heroId ?? 0,
+        healthRemaining: game.participants[side]?.healthRemaining ?? 0,
+        isWinner: game.participants[side]?.isWinner ?? false,
+      })),
+    })),
+    bans: preview.bans.map((ban) => ({ heroId: ban.heroId ?? 0, banType: ban.banType })),
+  }
 }
 
 // Load match data for edit mode

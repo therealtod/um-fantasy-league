@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "version": "1.0.0",
-  "description": "Playwright scraper for a Tabletop League competition's public match list (read-only, not part of the Gradle/npm build).",
+  "description": "Playwright scraper for a Tabletop League competition's public match pages -- CLI plus an HTTP server the backend imports matches through (read-only, not part of the Gradle/npm build).",
   "scripts": {
-    "scrape": "node scrape.mjs"
+    "scrape": "node scrape.mjs",
+    "serve": "node server.mjs"
   },
   "dependencies": {
     "playwright": "^1.62.1"

@@ -38,6 +38,15 @@ rate-limit:
     capacity: 300
     refill-period: PT1M
 
+# `scraper.*` is the address of the Tabletop League scraper sidecar
+# (tools/tabletopleague-scraper) that the admin match import calls. Same
+# category as `rate-limit` above and as DB_URL: deployment topology, not domain
+# data -- the application cannot read a hostname out of a database it hasn't
+# reached yet. The default is a bare `npm run serve` on the same host, so a dev
+# session needs no configuration; compose points it at the `scraper` service.
+scraper:
+  base-url: ${SCRAPER_BASE_URL:http://localhost:3000}
+
 logging:
   level:
     com.umfl: INFO

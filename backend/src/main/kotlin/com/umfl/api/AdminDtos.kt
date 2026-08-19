@@ -7,6 +7,9 @@ import com.umfl.match.BanType
 import com.umfl.match.GameResult
 import com.umfl.match.MatchParticipantResult
 import com.umfl.match.MatchResult
+import com.umfl.matchimport.MatchImportPreview
+import com.umfl.matchimport.UnresolvedKind
+import com.umfl.matchimport.UnresolvedReason
 import com.umfl.scoring.ScoringRuleSet
 import com.umfl.tournament.TournamentFormat
 import com.umfl.tournament.TournamentStatus
@@ -252,4 +255,97 @@ data class ScoringCoefficientDto(
     val metric: String,
     val coefficient: BigDecimal,
     val sortOrder: Int,
+)
+
+// ---------------------------------------------------------------------------
+// Match import
+// ---------------------------------------------------------------------------
+
+data class ImportMatchRequest(
+    @field:NotBlank(message = "sourceUrl is required")
+    val sourceUrl: String?,
+)
+
+/**
+ * A scraped match resolved against a tournament, for the admin to review.
+ *
+ * Not a recorded match and not a [RecordMatchRequest]: `round` is missing
+ * because the source names its rounds rather than numbering them, and any id
+ * the importer could not resolve is null with an entry in [unresolved]. The
+ * client fills the gaps and submits the result through the normal record
+ * endpoint, so this never bypasses `MatchResultPolicy`.
+ */
+data class MatchImportPreviewDto(
+    val sourceUrl: String,
+    val roundName: String?,
+    val seriesFormat: String?,
+    val playedAt: Instant?,
+    val playedAtRaw: String?,
+    val alreadyImportedMatchId: Long?,
+    val participants: List<ImportedParticipantDto>,
+    val games: List<ImportedGameDto>,
+    val bans: List<ImportedBanDto>,
+    val unresolved: List<UnresolvedNameDto>,
+) {
+    companion object {
+        fun from(preview: MatchImportPreview) = MatchImportPreviewDto(
+            sourceUrl = preview.sourceUrl,
+            roundName = preview.roundName,
+            seriesFormat = preview.seriesFormat,
+            playedAt = preview.playedAt,
+            playedAtRaw = preview.playedAtRaw,
+            alreadyImportedMatchId = preview.alreadyImportedMatchId,
+            participants = preview.participants.map {
+                ImportedParticipantDto(it.playerLabel, it.draftedHeroIds)
+            },
+            games = preview.games.map { game ->
+                ImportedGameDto(
+                    gameNumber = game.gameNumber,
+                    mapId = game.mapId,
+                    mapName = game.mapName,
+                    participants = game.participants.map {
+                        ImportedGameParticipantDto(it.heroId, it.heroName, it.healthRemaining, it.isWinner)
+                    },
+                )
+            },
+            bans = preview.bans.map { ImportedBanDto(it.heroId, it.heroName, it.banType) },
+            unresolved = preview.unresolved.map {
+                UnresolvedNameDto(it.kind, it.sourceName, it.reason, it.mapId, it.message)
+            },
+        )
+    }
+}
+
+data class ImportedParticipantDto(
+    val playerLabel: String?,
+    /** The full draft, unfielded picks included — the shape `RecordMatchRequest` wants. */
+    val draftedHeroIds: List<Long>,
+)
+
+data class ImportedGameDto(
+    val gameNumber: Int,
+    val mapId: Long?,
+    val mapName: String?,
+    val participants: List<ImportedGameParticipantDto>,
+)
+
+data class ImportedGameParticipantDto(
+    val heroId: Long?,
+    val heroName: String?,
+    val healthRemaining: Int,
+    val isWinner: Boolean,
+)
+
+data class ImportedBanDto(
+    val heroId: Long?,
+    val heroName: String?,
+    val banType: BanType,
+)
+
+data class UnresolvedNameDto(
+    val kind: UnresolvedKind,
+    val sourceName: String,
+    val reason: UnresolvedReason,
+    val mapId: Long?,
+    val message: String,
 )

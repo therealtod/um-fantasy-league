@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      SCRAPER_BASE_URL: http://scraper:3000
     ports:
       - "8080:8080"
     healthcheck:
@@ -17,3 +18,32 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 5
+
+  # Headless-browser sidecar for the admin match import. tabletopleague.com
+  # renders its match pages client-side, so reading one needs a real browser --
+  # which is why this is a separate Ubuntu-based Playwright image rather than
+  # something added to the Alpine JRE backend image.
+  #
+  # Deliberately not published to the host: only `backend` reaches it, over the
+  # compose network. `mem_limit` is its own budget, not shared with the
+  # backend's -- Chromium needs room to render a page, and the whole point of
+  # capping it is that a heavy page can't take the API down with it.
+  #
+  # The backend does not depend_on this: a scraper that is down or restarting
+  # must not hold up the API, and the import endpoint already answers 503 with
+  # a message naming the problem.
+  scraper:
+    image: ghcr.io/therealtod/umfl-scraper:latest
+    container_name: umfl-scraper
+    restart: unless-stopped
+    mem_limit: 640m
+    environment:
+      SCRAPER_HOST: 0.0.0.0
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

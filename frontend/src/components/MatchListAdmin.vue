@@ -12,6 +12,8 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits<{
   create: []
+  /** Record a match by scraping it from the source site instead of typing it. */
+  import: []
   edit: [matchId: number]
 }>()
 
@@ -175,9 +177,14 @@ watch(
             </option>
           </select>
         </div>
-        <button class="btn-primary" @click="handleCreate">
-          + Record New Match
-        </button>
+        <div class="flex gap-2">
+          <button class="btn-ghost" @click="emit('import')">
+            Import from URL
+          </button>
+          <button class="btn-primary" @click="handleCreate">
+            + Record New Match
+          </button>
+        </div>
       </div>
     </div>
 
@@ -206,9 +213,10 @@ watch(
 
     <div v-else-if="filteredMatches.length === 0" class="p-12 text-center text-ink-dim">
       <p>No matches found.</p>
-      <button class="btn-primary mt-4" @click="handleCreate">
-        Record the first match
-      </button>
+      <div class="mt-4 flex flex-wrap justify-center gap-2">
+        <button class="btn-ghost" @click="emit('import')">Import from URL</button>
+        <button class="btn-primary" @click="handleCreate">Record the first match</button>
+      </div>
     </div>
 
     <div v-else class="overflow-x-auto">

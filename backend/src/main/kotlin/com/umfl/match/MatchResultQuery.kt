@@ -31,6 +31,30 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
         ).singleOrNull()
 
     /**
+     * The id of a match in [tournamentId] already recorded against [externalLink],
+     * if there is one — the match importer's duplicate check.
+     *
+     * `external_link` carries no uniqueness constraint (a correction legitimately
+     * reuses the source URL), so this is a warning the admin sees before saving,
+     * not a rule. Newest first, so re-importing a URL that was somehow recorded
+     * twice points at the most recent one.
+     */
+    fun findIdByExternalLink(tournamentId: Long, externalLink: String): Long? =
+        jdbcClient
+            .sql(
+                """
+                select id from tournament_match
+                where tournament_id = :tournamentId and external_link = :externalLink
+                order by id desc limit 1
+                """
+            )
+            .param("tournamentId", tournamentId)
+            .param("externalLink", externalLink)
+            .query(Long::class.java)
+            .optional()
+            .orElse(null)
+
+    /**
      * Every recorded match in a tournament, oldest first — the scoring fold's input.
      * Optionally narrowed to one [round] — the admin match list's filter.
      */

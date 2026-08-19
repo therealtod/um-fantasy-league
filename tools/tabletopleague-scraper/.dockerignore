@@ -1,0 +1,5 @@
+node_modules
+matches.json
+match-details.json
+*.local.json
+README.md

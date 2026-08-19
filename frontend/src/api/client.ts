@@ -11,6 +11,8 @@ import type {
   HeroAdminDto,
   HeroPoolEntryRequest,
   HeroSort,
+  ImportMatchRequest,
+  MatchImportPreviewDto,
   Manager,
   MapAdminDto,
   MatchResultDto,
@@ -268,6 +270,22 @@ export const api = {
 
     deleteMatch: (tournamentId: number, matchId: number): Promise<void> =>
       request(`/admin/tournaments/${tournamentId}/matches/${matchId}`, { method: 'DELETE' }),
+
+    /**
+     * Scrapes a Tabletop League match URL and resolves it against this
+     * tournament's catalogue. Writes nothing — the returned draft is submitted
+     * through `recordMatch` once the admin has reviewed it and supplied the
+     * round number the source page doesn't carry.
+     *
+     * Slow by the standards of every other call here (a real browser renders the
+     * page), so callers should show a loading state rather than assuming it
+     * returns promptly.
+     */
+    importMatch: (tournamentId: number, sourceUrl: string): Promise<MatchImportPreviewDto> =>
+      request(`/admin/tournaments/${tournamentId}/matches/import`, {
+        method: 'POST',
+        body: JSON.stringify({ sourceUrl } satisfies ImportMatchRequest),
+      }),
 
     // Scoring
     listScoringRuleSets: (tournamentId: number): Promise<ScoringRuleSetDto[]> =>

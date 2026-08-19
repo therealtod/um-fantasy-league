@@ -40,6 +40,19 @@ Flyway orders every location by version, and `match_hero_pick` does not exist un
 Profiles below). A default start or the `prod` profile therefore comes up with every hero and board
 and no mock league data at all.
 
+The admin match import needs the scraper sidecar. It is a plain Node process — Docker is only how it
+reaches the VPS — so a dev session runs it directly, and the backend's default `scraper.base-url`
+finds it with no configuration:
+
+```bash
+cd tools/tabletopleague-scraper
+npm install && npx playwright install chromium   # once
+npm run serve                                    # http://127.0.0.1:3000
+```
+
+It is optional: the backend starts and every other feature works without it, and only the import
+endpoint answers 503.
+
 Tests:
 
 ```bash
@@ -93,6 +106,11 @@ Spring Boot is pinned to 4.1.0, which manages Testcontainers 2.0.5 — verified 
 | `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` once at the filter level, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `DevManagerProvider` just reads the result back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
 | `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection`; same `db/seed` addition, since every integration test asserts against the fixtures |
 | `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `manager.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through the Worker proxy) |
+
+The application makes exactly one outbound HTTP call, and only from the admin match import:
+`ScraperClient` → the scraper sidecar (see Match import below). Nothing else in the codebase talks to
+the network, which is why there is no HTTP client or HTML parser on the classpath — `RestClient`
+comes free with `spring-web`, and the sidecar returns JSON, so neither is needed.
 
 There are no scheduled tasks and no background workers in any profile, with one narrow exception:
 `StandingsSseHub` runs a single-thread keep-alive that pings open standings SSE connections every
@@ -182,10 +200,13 @@ below; nothing outside that surface writes reference data or results.
   slots. Do not materialise either.
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
   `scoring_coefficient`, the budget is `tournament.credit_grant` — both retuned with an UPDATE. Don't
-  reintroduce a tunables block in `application.yml`. The one exception is `rate-limit.api.*`
-  (`RateLimitProperties`, see Profiles above): it's operational tuning for how hard a deployed
-  instance throttles per client IP, not domain data, so it doesn't belong in the database the way a
-  scoring weight or a budget does.
+  reintroduce a tunables block in `application.yml`. There are exactly two exceptions, and both are
+  *infrastructure* rather than domain data — the same category as `DB_URL`, and unreadable from a
+  database the app hasn't reached yet: `rate-limit.api.*` (`RateLimitProperties`, see Profiles above),
+  operational tuning for how hard a deployed instance throttles per client IP; and `scraper.*`
+  (`ScraperProperties`, see Match import below), the address of the scraper sidecar. Neither belongs
+  in the database the way a scoring weight or a budget does. A third would want the same
+  justification, not a precedent.
 - **A match is a series, and every game in it has a winner.** `tournament_match` is a best-of-N
   between two humans; each `match_game` carries its own map and its own two
   `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
@@ -403,6 +424,49 @@ database and came back as the `DataIntegrityViolationException` backstop's gener
 nothing. The policy validates the *shape* of a metric name and never the *set* — an unimplemented
 metric stays a warning, per the paragraph above.
 
+## Match import
+
+`POST /api/admin/tournaments/{id}/matches/import` (`AdminMatchImportController` → `MatchImportService`,
+package `com.umfl.matchimport`) turns a tabletopleague.com match URL into a reviewable draft, so an
+admin doesn't re-type a result the source site already has.
+
+**The endpoint writes nothing.** It scrapes, resolves names to ids, and returns a
+`MatchImportPreviewDto`; the client fills the gaps and submits through the ordinary record endpoint.
+That is the whole design — an imported match goes through `MatchResultPolicy` exactly as a typed one
+does, and the importer never needs to know the result rules. `MatchImportEndpointTest` pins it by
+feeding a preview straight back into `POST .../matches` and asserting a 201; that test is the seam
+that fails if the importer ever starts emitting something the policy rejects.
+
+**Why a sidecar.** tabletopleague.com is client-rendered Next.js: fetching a match page from Kotlin
+returns the JS bundle and no data, so a real browser has to render it. That browser is
+`tools/tabletopleague-scraper/server.mjs` — a Node/Playwright HTTP wrapper around the same
+`scrapeOne` the CLI uses, so there is no second extractor to keep in step. The backend reaches it
+with `RestClient` at `scraper.base-url`. It is *not* in the Alpine JRE backend image, which is the
+wrong base for Playwright, and the backend does not `depend_on` it: a scraper that is down costs the
+import endpoint a 503 (`ServiceUnavailableException`, message naming the address and how to start it)
+and nothing else.
+
+**Three things a scrape cannot supply**, by nature rather than by omission: the `tournamentId` (a
+path variable), the `round` — the source names its pools ("The Wayward Sisters") where the schema
+wants a positive `Int`, so the preview carries `roundName` as context and the admin types a number —
+and hero/map **ids**, since the site only ever has names. A fourth is conditional: `playedAt` is
+parsed best-effort by `ScrapedTimestamps`, which returns **null rather than throwing** on a timezone
+abbreviation it can't resolve unambiguously. Losing a whole scraped match over one rendered
+timestamp would be a bad trade; the wizard's date picker already defaults to now.
+
+**Name resolution is exact-after-normalisation, with no fuzzy fallback** (`NameResolver`, pure).
+Normalisation covers the drift actually seen — case, whitespace, the `.` in `Dr. Ellie Sattler`,
+`&` versus `and` — and nothing more. A near miss that silently resolves to the wrong hero scores
+points for the wrong manager and is invisible until someone doubts the standings; an unmatched name
+is merely reported. Don't turn this into an alias table: a genuinely differently-named hero is a
+catalogue question.
+
+Anything unresolved comes back in `unresolved[]` with the source's own spelling and never blocks the
+*import* — only the recording. `MAP_NOT_IN_POOL` is the one that fires in practice, because
+`match_game` carries a composite FK onto `tournament_map`; heroes reference `heroes(id)` directly and
+have no equivalent constraint. `external_link` (which already existed) stores the source URL, which
+is also the duplicate check — a warning, not a rule, since a correction legitimately reuses it.
+
 ## Admin frontend
 
 `/admin` (`AdminDashboardView.vue`) is a manager-gated dashboard, not a separate app — it composes
@@ -434,6 +498,18 @@ that never played, and `PLAYED_HERO_NOT_DRAFTED` can never fire on a submission 
 and names each side's drafted-but-unfielded picks — the heroes that scored an appearance without
 appearing in any game row.
 
+`MatchImportPanel` is the front of the Match import flow above: a URL field, then the scrape's
+summary, its unresolved names, and a duplicate warning. "Review and record" is disabled until
+`unresolved` is empty, and emits the preview up to `AdminDashboardView`, which reopens
+`MatchResultWizard` in `create` mode with a `prefill` prop. Two details are load-bearing. A
+`MAP_NOT_IN_POOL` row carries an **"Add to board pool"** button that calls the existing
+`addMapToPool` and re-imports — the admin widens the pool by clicking, the importer never does it
+silently. And the wizard's `formFromPreview` **subtracts the fielded heroes** from each side's
+drafted list: the preview carries the complete draft (what the API wants) while the form holds only
+the picks that never played (`draftFor` re-unions them at save), so copying it in raw would show
+every hero that played a second time as "drafted, not played". `loadMatchData` does the same
+subtraction reading a saved match back — keep the two in step.
+
 ## Deliberately not built
 
 A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched stats — `heroes` is only
@@ -444,7 +520,9 @@ A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched sta
 GitHub Actions. `.github/workflows/backend-ci.yml` runs `:backend:ktlintCheck` then `:backend:test` (Testcontainers
 included — GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master`
 branches, as the merge gate. `.github/workflows/backend-deploy.yml` re-runs the same tests, then on a green push to
-`master` builds the root `Dockerfile`, pushes `ghcr.io/<owner>/umfl-backend:{sha,latest}`, and SSHes
+`master` builds the root `Dockerfile`, pushes `ghcr.io/<owner>/umfl-backend:{sha,latest}` *and*
+`ghcr.io/<owner>/umfl-scraper:{sha,latest}` (the Playwright sidecar, built from
+`tools/tabletopleague-scraper/`, which is also on the workflow's path filter), and SSHes
 into the VPS to `docker compose pull && up -d` against `deploy/docker-compose.prod.yml` (which the
 VPS keeps a copy of at `/opt/umfl`, alongside a `.env` — modeled on `deploy/.env.example` — that is
 managed by hand on the box, never passed through CI). The `prod` profile there talks to Supabase

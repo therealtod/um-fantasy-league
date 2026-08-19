@@ -8,6 +8,8 @@ import MapPoolWizard from '@/components/MapPoolWizard.vue'
 import ScoringRuleSetWizard from '@/components/ScoringRuleSetWizard.vue'
 import MatchResultWizard from '@/components/MatchResultWizard.vue'
 import MatchListAdmin from '@/components/MatchListAdmin.vue'
+import MatchImportPanel from '@/components/MatchImportPanel.vue'
+import type { MatchImportPreviewDto } from '@/api/types'
 import TournamentSelect from '@/components/TournamentSelect.vue'
 import { useTournamentsStore } from '@/stores/tournaments'
 
@@ -23,12 +25,16 @@ type AdminSection =
   | 'scoring'
   | 'matches'
 
-type MatchViewMode = 'list' | 'create' | 'edit'
+type MatchViewMode = 'list' | 'create' | 'edit' | 'import'
 
 const currentSection = ref<AdminSection | null>(null)
 const matchViewMode = ref<MatchViewMode>('list')
 const selectedTournamentId = ref<number | null>(null)
 const selectedMatchId = ref<number | null>(null)
+// A scraped match handed from MatchImportPanel to MatchResultWizard. Cleared on
+// every return to the list so a later manual "Record match" never starts from a
+// stale import.
+const importPrefill = ref<MatchImportPreviewDto | null>(null)
 
 const sections = [
   { id: 'heroes' as const, label: 'Heroes', description: 'Manage hero identities' },
@@ -74,6 +80,7 @@ function startMatchCreation(tournamentId: number) {
   matchViewMode.value = 'create'
   selectedTournamentId.value = tournamentId
   selectedMatchId.value = null
+  importPrefill.value = null
 }
 
 function startMatchEdit(tournamentId: number, matchId: number) {
@@ -82,9 +89,23 @@ function startMatchEdit(tournamentId: number, matchId: number) {
   selectedMatchId.value = matchId
 }
 
+function startMatchImport(tournamentId: number) {
+  matchViewMode.value = 'import'
+  selectedTournamentId.value = tournamentId
+  selectedMatchId.value = null
+  importPrefill.value = null
+}
+
+/** The import panel resolved a match — open the ordinary wizard seeded with it. */
+function reviewImportedMatch(preview: MatchImportPreviewDto) {
+  importPrefill.value = preview
+  matchViewMode.value = 'create'
+}
+
 function returnToMatchList() {
   matchViewMode.value = 'list'
   selectedMatchId.value = null
+  importPrefill.value = null
 }
 </script>
 
@@ -166,15 +187,24 @@ function returnToMatchList() {
               <MatchListAdmin
                 :tournament-id="selectedTournamentId"
                 @create="() => startMatchCreation(selectedTournamentId!)"
+                @import="() => startMatchImport(selectedTournamentId!)"
                 @edit="(matchId) => startMatchEdit(selectedTournamentId!, matchId)"
               />
             </div>
           </div>
 
+          <MatchImportPanel
+            v-else-if="matchViewMode === 'import' && selectedTournamentId"
+            :tournament-id="selectedTournamentId"
+            @review="reviewImportedMatch"
+            @cancel="returnToMatchList"
+          />
+
           <MatchResultWizard
             v-else-if="matchViewMode === 'create' && selectedTournamentId"
             :tournament-id="selectedTournamentId"
             :mode="'create'"
+            :prefill="importPrefill"
             @success="returnToMatchList"
             @cancel="returnToMatchList"
           />

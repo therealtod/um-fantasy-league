@@ -242,6 +242,84 @@ export interface RecordMatchRequest {
   bans: MatchBanRequest[]
 }
 
+/* -------------------------------------------------------------------------
+ * Match import
+ *
+ * A scraped match resolved against a tournament, for an admin to review. This
+ * is deliberately NOT a `RecordMatchRequest`: `round` is missing because the
+ * source site names its rounds rather than numbering them, and any id the
+ * importer could not resolve is null with an entry in `unresolved`. The client
+ * fills those gaps and submits through the normal record endpoint, so importing
+ * never bypasses the server's match rules.
+ * ------------------------------------------------------------------------- */
+
+export interface ImportMatchRequest {
+  sourceUrl: string
+}
+
+export type UnresolvedKind = 'HERO' | 'MAP'
+
+/**
+ * `MAP_NOT_IN_POOL` is the one that fires in practice: a board this league knows
+ * about but that isn't in *this tournament's* pool cannot carry a recorded game.
+ * Heroes have no equivalent constraint.
+ */
+export type UnresolvedReason = 'UNKNOWN_HERO' | 'UNKNOWN_MAP' | 'MAP_NOT_IN_POOL'
+
+export interface UnresolvedName {
+  kind: UnresolvedKind
+  /** The name exactly as the source site rendered it. */
+  sourceName: string
+  reason: UnresolvedReason
+  /** Present for `MAP_NOT_IN_POOL` — the board exists, it just isn't in the pool. */
+  mapId?: number
+  message: string
+}
+
+export interface ImportedParticipant {
+  playerLabel?: string
+  /** The full draft, unfielded picks included — the shape `RecordMatchRequest` wants. */
+  draftedHeroIds: number[]
+}
+
+export interface ImportedGameParticipant {
+  heroId?: number
+  heroName?: string
+  healthRemaining: number
+  isWinner: boolean
+}
+
+export interface ImportedGame {
+  gameNumber: number
+  mapId?: number
+  mapName?: string
+  participants: ImportedGameParticipant[]
+}
+
+export interface ImportedBan {
+  heroId?: number
+  heroName?: string
+  banType: BanType
+}
+
+export interface MatchImportPreviewDto {
+  sourceUrl: string
+  /** The source's own name for the round, e.g. "The Wayward Sisters". Context only. */
+  roundName?: string
+  /** e.g. "BO3". Context only — nothing here records a series format. */
+  seriesFormat?: string
+  /** Absent when the source's timestamp carried a timezone that couldn't be resolved. */
+  playedAt?: string
+  playedAtRaw?: string
+  /** Set when this tournament already has a match recorded against this URL. A warning, not a block. */
+  alreadyImportedMatchId?: number
+  participants: ImportedParticipant[]
+  games: ImportedGame[]
+  bans: ImportedBan[]
+  /** Non-empty means the draft is incomplete and cannot be recorded yet. */
+  unresolved: UnresolvedName[]
+}
+
 export interface MatchParticipantResult {
   /** 0 or 1 — a stable ordinal for the whole series. */
   side: number

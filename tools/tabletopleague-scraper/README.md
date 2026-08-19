@@ -4,16 +4,18 @@ Read-only Playwright scripts that scrape [tabletopleague.com](https://www.tablet
 competition pages into JSON — e.g. a real Unmatched tournament running on that platform, whose
 results you might want to hand-enter through this repo's `/api/admin/matches`.
 
-Two scripts, one shared library:
+Two scripts and an HTTP server, over one shared library:
 
-| Script | Scrapes | Gets you |
+| Entry point | Scrapes | Gets you |
 |---|---|---|
 | `scrape.mjs` | A competition's `/matches` list page, all pages | Every match's score, per-game hero/map/health, at whatever volume the page allows |
 | `scrape-match.mjs` | One match's `/matches/<uuid>` detail page | Everything the list has, **plus** the round/group name, draft format, timezone-qualified timestamp, and the full draft — every pick in order and every ban, typed `PRE_BAN`/`OPPONENT_BAN`/`SELF_BAN` |
-| `lib.mjs` | — | Browser lifecycle, CLI arg parsing, and URL helpers shared by both |
+| `server.mjs` | The same single match, over HTTP | The `scrape-match.mjs` payload as a `POST /scrape/match` response — this is what the backend's admin match import calls |
+| `lib.mjs` | — | Browser lifecycle, CLI arg parsing, and URL helpers shared by all three |
 
-This is a standalone tool, not part of the Gradle build or the `frontend/` npm project — it has its
-own `package.json` and is meant to be run manually, on demand.
+The two scripts are standalone tools, not part of the Gradle build or the `frontend/` npm project —
+they have their own `package.json` and are meant to be run manually, on demand. `server.mjs` is the
+one piece this repo's backend depends on at runtime: see [Server mode](#server-mode-scrapermjs).
 
 ## Why a headless browser, not `curl`
 
@@ -106,6 +108,45 @@ with `jq` etc.
 Playwright's Chromium build is downloaded into `node_modules` on `npm install`; if that ever fails in
 a sandboxed environment, run `npx playwright install chromium` once.
 
+### Server mode (`server.mjs`)
+
+The same single-match scrape, exposed over HTTP so this repo's backend can offer "import a match from
+a URL" in the admin panel instead of an admin re-typing a result the source site already has. It
+imports `scrapeOne` from `scrape-match.mjs` directly, so the payload is identical to that script's —
+there is no second extractor to keep in step.
+
+```bash
+npm install && npx playwright install chromium   # once
+npm run serve                                    # http://127.0.0.1:3000
+```
+
+| Route | Body | Returns |
+|---|---|---|
+| `GET /health` | — | `{"status":"UP"}` |
+| `POST /scrape/match` | `{"url": "<match detail url>"}` | The `scrape-match.mjs` payload, or `{"error": "..."}` |
+
+| Environment | Default | Meaning |
+|---|---|---|
+| `SCRAPER_HOST` | `127.0.0.1` | Bind address. The Dockerfile sets `0.0.0.0`, but the port is never published to the host — only to the compose network |
+| `SCRAPER_PORT` | `3000` | Port |
+| `SCRAPER_DELAY_MS` | `1500` | Minimum gap enforced between scrapes |
+
+Differences from the CLI, all of them about being a long-lived service rather than a one-shot script:
+
+- **One browser for the process lifetime**, launched lazily on the first request and relaunched if
+  Chromium dies. Launching Chromium costs far more than the scrape itself.
+- **Requests are queued, never concurrent**, with `SCRAPER_DELAY_MS` enforced between them — the same
+  sequential-and-polite behaviour `--delay-ms` gives the CLI, for the same reason (see Scope and
+  etiquette above). Concurrent tabs would also multiply the container's memory footprint.
+- **The URL is validated before it is fetched**: host must be `www.tabletopleague.com` and the path
+  must look like `/o/<org>/<competition>/matches/<id>`. The CLI's "only public match pages" etiquette
+  is a convention an operator follows; a server that takes a URL from a caller would otherwise be a
+  general-purpose fetcher for anything the container can reach, so here it is a check.
+
+It runs equally well as a bare Node process (above) or as a container — see the `Dockerfile` next to
+this README, and the `scraper` service in the repo's two compose files. Docker is only how it reaches
+the VPS; there is no separate code path for it.
+
 ## Output shape
 
 ### `scrape.mjs`
@@ -197,13 +238,18 @@ that piloted it — so `sideA`/`sideB` attribution here doesn't need the list sc
 name against game-order position" heuristic; it just matches the label text directly, with a
 left/right DOM-position fallback if a label ever fails to match either side exactly.
 
-## This is not a ready-made `/api/admin/matches` request body
+## The gap between this JSON and an admin request body
 
 `TournamentMatch` (`backend/src/main/kotlin/com/umfl/match/TournamentMatch.kt`) needs a
 `tournamentId`, a `round` (an `Int`, not this org's named pools), and hero and map **ids** — this
-scraper only ever has names. `scrape-match.mjs` now covers the picks/bans data that the list page
-was missing entirely, closing the gap called out in this repo's "draft is recorded in full"
-invariant — but it still can't invent the ids your database assigns to those hero/map names, or
-know which of your tournaments and which numbered round a scraped match belongs to. Treat this
-JSON as raw source material for whatever maps site names onto this league's `hero`/`game_map` rows,
-not as a drop-in request body.
+scraper only ever has names. So the JSON above is source material, not a drop-in request body.
+
+Closing that gap is what the backend's `com.umfl.matchimport` package does, driven by `server.mjs`:
+it resolves hero and map names against this league's own `heroes`/`game_map` rows, flags anything it
+cannot resolve rather than guessing, and hands the admin a prefilled match form to review. The two
+things it still cannot know — which tournament, and which numbered round — the admin supplies there.
+`playedAtRaw` is parsed best-effort; a timezone it can't read leaves the field for the admin instead
+of failing the import.
+
+If you are consuming this JSON yourself rather than through that path, the same three gaps are yours
+to fill.

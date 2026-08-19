@@ -27,8 +27,22 @@ services:
       DB_URL: jdbc:postgresql://db:5432/umfl
       DB_USER: umfl
       DB_PASSWORD: umfl
+      SCRAPER_BASE_URL: http://scraper:3000
     ports:
       - "8080:8080"
+
+  # Renders tabletopleague.com match pages so the admin match import can read
+  # them -- those pages are client-side React, so a plain HTTP fetch from the
+  # backend returns the JS bundle and no data. Optional: the backend starts and
+  # runs fine without it, and only the import endpoint fails (503) when it's
+  # down. Not published to the host -- only `backend` talks to it.
+  scraper:
+    build: ./tools/tabletopleague-scraper
+    container_name: umfl-scraper
+    environment:
+      SCRAPER_HOST: 0.0.0.0
+    expose:
+      - "3000"
 
 volumes:
   umfl-pgdata:
