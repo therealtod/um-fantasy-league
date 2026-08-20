@@ -135,7 +135,7 @@ class MatchMetricsTest {
             assertEquals(
                 setOf(
                     "APPEARANCE", "SELF_BAN", "OPPONENT_BAN", "WIN", "LOSS",
-                    "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "SHUTOUT",
+                    "HEALTH_REMAINING", "HEALTH_DIFFERENTIAL", "HEALTH_DIFFERENTIAL_TWO_WAY", "SHUTOUT",
                 ),
                 MatchMetrics.known,
             )
@@ -240,6 +240,51 @@ class MatchMetricsTest {
             assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 2)))
             assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", contextFor(threeWay, 3)))
         }
+
+        @Test
+        fun `HEALTH_DIFFERENTIAL_TWO_WAY prices the loser at the exact negative of the winner`() {
+            val sherlock = contextFor(decisiveMatch, 5)
+            val dracula = contextFor(decisiveMatch, 6)
+
+            assertEquals(7.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", sherlock))
+            assertEquals(-7.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", dracula))
+
+            // The win-gated original is the whole difference between the two keys:
+            // same winner, but nothing at all for the side that lost.
+            assertEquals(7.0, measure("HEALTH_DIFFERENTIAL", sherlock))
+            assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", dracula))
+        }
+
+        @Test
+        fun `HEALTH_DIFFERENTIAL_TWO_WAY measures every side against the healthiest opponent`() {
+            val threeWay = match(
+                listOf(
+                    gameParticipant(side = 0, heroId = 1, heroName = "Alice", health = 6, isWinner = true),
+                    gameParticipant(side = 1, heroId = 2, heroName = "Medusa", health = 4),
+                    gameParticipant(side = 2, heroId = 3, heroName = "Sinbad", health = 0),
+                ),
+            )
+
+            // Past two sides the pairing stops being zero-sum, by design: each hero
+            // is priced against the best of the rest, so both losers measure against
+            // Alice's 6 rather than against each other.
+            assertEquals(2.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", contextFor(threeWay, 1)))
+            assertEquals(-2.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", contextFor(threeWay, 2)))
+            assertEquals(-6.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", contextFor(threeWay, 3)))
+        }
+
+        @Test
+        fun `an overkill finish widens HEALTH_DIFFERENTIAL_TWO_WAY on both sides alike`() {
+            val overkill = match(
+                listOf(
+                    gameParticipant(side = 0, heroId = 7, heroName = "Bigfoot", health = 11, isWinner = true),
+                    gameParticipant(side = 1, heroId = 11, heroName = "Beowulf", health = -3),
+                ),
+            )
+
+            assertEquals(14.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", contextFor(overkill, 7)))
+            assertEquals(-14.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", contextFor(overkill, 11)))
+        }
     }
 
     @Nested
@@ -295,6 +340,7 @@ class MatchMetricsTest {
             assertEquals(0.0, measure("LOSS", sunWukong))
             assertEquals(0.0, measure("HEALTH_REMAINING", sunWukong))
             assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", sunWukong))
+            assertEquals(0.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", sunWukong))
             assertEquals(0.0, measure("SHUTOUT", sunWukong))
         }
 
@@ -374,6 +420,7 @@ class MatchMetricsTest {
             assertEquals(0.0, measure("LOSS", tomoe))
             assertEquals(0.0, measure("HEALTH_REMAINING", tomoe))
             assertEquals(0.0, measure("HEALTH_DIFFERENTIAL", tomoe))
+            assertEquals(0.0, measure("HEALTH_DIFFERENTIAL_TWO_WAY", tomoe))
             assertEquals(0.0, measure("SHUTOUT", tomoe))
             assertEquals(0.0, measure("SELF_BAN", tomoe))
             assertEquals(0.0, measure("OPPONENT_BAN", tomoe))

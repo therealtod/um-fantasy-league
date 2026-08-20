@@ -290,16 +290,24 @@ implements:
 | `SELF_BAN` / `OPPONENT_BAN` | the hero was banned out of this match by its own / the opposing side |
 | `WIN` / `LOSS` | took / dropped this game — exhaustive, since every game has a winner |
 | `HEALTH_REMAINING` | health at the end (0 if defeated) |
-| `HEALTH_DIFFERENTIAL` | this hero's health minus the healthiest opponent's |
+| `HEALTH_DIFFERENTIAL` | this hero's health minus the healthiest opponent's, **in a game it won** |
+| `HEALTH_DIFFERENTIAL_TWO_WAY` | the same gap, won or lost — so the loser scores the negative of it |
 | `SHUTOUT` | every opponent finished on zero |
 
 Anything else **contributes nothing, is dropped from the leaderboard's columns, and throws nothing**.
 The seed ships a deliberately unimplemented `CROWD_FAVOURITE` weighted at 5.0 as standing proof of
 that; do not implement it.
 
-`HEALTH_DIFFERENTIAL` is symmetric in a two-sided match — if one side is +4 the other is −4 — so the
-coefficient rewards a clean victory by exactly as much as it penalises a heavy defeat, and neither
-creates nor destroys points across the match as a whole. There is deliberately **no** `DAMAGE_DEALT`:
+The two health-differential keys measure the same gap and differ only over the losing side, which is
+the admin's choice to make: `HEALTH_DIFFERENTIAL` is **win-gated**, so a losing hero scores 0.0
+however much health it had left, while `HEALTH_DIFFERENTIAL_TWO_WAY` is symmetric in a two-sided
+match — if one side is +4 the other is −4 — so its coefficient rewards a clean victory by exactly as
+much as it penalises a heavy defeat, and neither creates nor destroys points across the game as a
+whole. They are two registry keys rather than a flag on one because a rule set is a set of weighted
+metric rows: an admin prices whichever behaviour they want by naming it, and pricing both is legal
+(the winner then earns both, the loser only the two-way one). Past two sides neither is zero-sum,
+since every hero is measured against the *healthiest* opponent rather than against one designated
+loser. There is deliberately **no** `DAMAGE_DEALT`:
 `heroes` carries no starting-health column, so damage is not derivable from `health_remaining`. Adding
 it is a schema decision, not a registry one. There is likewise **no** `DRAW`: a game with no winner
 is not a recordable result, so a `DRAW` column would price something that cannot happen — it is

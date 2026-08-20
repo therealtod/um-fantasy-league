@@ -268,7 +268,8 @@ codes are the `RosterRule` enum, documented constant by constant.
 
 `MatchMetrics` is a registry keyed by the free-form `scoring_coefficient.metric` string. It
 implements `APPEARANCE`, `SELF_BAN`, `OPPONENT_BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`,
-`HEALTH_DIFFERENTIAL`, `SHUTOUT`, and **silently ignores everything else** — unknown keys score
+`HEALTH_DIFFERENTIAL`, `HEALTH_DIFFERENTIAL_TWO_WAY`, `SHUTOUT`, and **silently ignores everything
+else** — unknown keys score
 zero, are dropped from the leaderboard's columns and throw nothing. The seed's `CROWD_FAVOURITE` is
 the deliberate proof of that; leave it unimplemented. There is deliberately no `DRAW`: every game
 has exactly one winner (see the invariant above), so `WIN` and `LOSS` are exhaustive within a game
@@ -280,7 +281,12 @@ participant row at all — they price the draft, reading `hero_ban.ban_type` off
 itself, so a hero banned `PRE_BAN` (struck before sides are known) scores neither ban metric.
 `HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not win
 the game scores 0.0 rather than a negative differential, since there is no losing side of that
-metric to price. `WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and
+metric to price. `HEALTH_DIFFERENTIAL_TWO_WAY` is the ungated half of that pair and the *only*
+difference between them — same gap (both share the private `healthGap` helper), but the loser scores
+its negative, so a heavy defeat costs what a clean victory earns. They are two registry keys rather
+than one key with a flag because a rule set is a set of weighted metric rows: an admin picks the
+behaviour by naming it, and pricing both is legal. Don't collapse them back into one extractor.
+`WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and
 drops game 2 of a Bo3 collects one of each.
 
 `MatchResult.heroContexts()` is where per-game and per-series part ways, and the split is the whole
