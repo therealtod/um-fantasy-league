@@ -64,12 +64,17 @@ export const useStandingsStore = defineStore('standings', () => {
    * either.
    */
   async function refresh() {
-    if (tournamentId.value === null) return
+    const id = tournamentId.value
+    if (id === null) return
     try {
       const [standings, matches] = await Promise.all([
-        api.standings(tournamentId.value),
-        api.matches(tournamentId.value, 0, MAX_TICKER_ENTRIES),
+        api.standings(id),
+        api.matches(id, 0, MAX_TICKER_ENTRIES),
       ])
+      // A tournament switch (or another refresh) may have landed while this
+      // one was in flight — an out-of-order response must not clobber the
+      // newer selection's board.
+      if (tournamentId.value !== id) return
       board.value = standings
       ticker.value = matches
     } catch {
