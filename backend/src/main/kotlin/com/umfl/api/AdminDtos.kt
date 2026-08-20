@@ -83,7 +83,7 @@ data class HeroPoolEntryRequest(
 
 data class AddHeroesToPoolRequest(
     @field:Valid
-    @field:Size(min = 1, message = "at least one hero is required")
+    @field:Size(min = 1, max = 128, message = "heroes must contain between 1 and 128 entries")
     val heroes: List<HeroPoolEntryRequest>?,
 )
 
@@ -108,7 +108,7 @@ data class MapAdminDto(
 }
 
 data class AddMapsToPoolRequest(
-    @field:Size(min = 1, message = "at least one map is required")
+    @field:Size(min = 1, max = 64, message = "mapIds must contain between 1 and 64 entries")
     val mapIds: List<Long>?,
 )
 
@@ -124,6 +124,7 @@ data class MatchParticipantRequest(
      * this entry's position in `participants`. Must include every hero the
      * side then played, or the submission is `PLAYED_HERO_NOT_DRAFTED`.
      */
+    @field:Size(max = 128, message = "draftedHeroIds must not exceed 128 entries")
     val draftedHeroIds: List<Long> = emptyList(),
 )
 
@@ -181,9 +182,10 @@ data class RecordMatchRequest(
     @field:Size(min = 2, max = 2, message = "exactly two participants are required")
     val participants: List<MatchParticipantRequest>?,
     @field:Valid
-    @field:Size(min = 1, message = "at least one game is required")
+    @field:Size(min = 1, max = 20, message = "games must contain between 1 and 20 entries")
     val games: List<MatchGameRequest>?,
     @field:Valid
+    @field:Size(max = 64, message = "bans must not exceed 64 entries")
     val bans: List<MatchBanRequest> = emptyList(),
 )
 

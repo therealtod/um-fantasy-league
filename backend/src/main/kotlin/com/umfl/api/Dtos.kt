@@ -11,6 +11,7 @@ import com.umfl.tournament.Tournament
 import com.umfl.tournament.TournamentFormat
 import com.umfl.tournament.TournamentStatus
 import jakarta.validation.constraints.NotNull
+import jakarta.validation.constraints.Size
 import java.time.Instant
 import java.time.LocalDate
 
@@ -141,5 +142,6 @@ data class RosterDto(
 
 data class SetSlotsRequest(
     @field:NotNull(message = "heroIds is required")
+    @field:Size(max = 64, message = "heroIds must not exceed 64 entries")
     val heroIds: List<Long>?,
 )
