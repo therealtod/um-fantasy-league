@@ -62,6 +62,17 @@ export const useRosterStore = defineStore('roster', () => {
     error.value = null
   }
 
+  /**
+   * Drops the whole session's roster state, including which tournament it was
+   * for. Called on sign-out — `reset()` alone leaves `tournamentId` set, which
+   * would make `RosterBuilderView`'s "already selected" guard skip re-fetching
+   * for a manager who signs in after and lands on the same tournament's roster.
+   */
+  function clearSession() {
+    tournamentId.value = null
+    reset()
+  }
+
   function adopt(next: Roster) {
     roster.value = next
     selectedIds.value = next.heroes.map((hero) => hero.id)
@@ -189,5 +200,6 @@ export const useRosterStore = defineStore('roster', () => {
     register,
     toggle,
     lock,
+    clearSession,
   }
 })

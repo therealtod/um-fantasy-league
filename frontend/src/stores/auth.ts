@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabaseClient'
 import { isDevelopmentIdentityMode } from '@/lib/developmentIdentity'
 import { isSafeRedirectPath } from '@/lib/redirectPath'
+import { useManagerStore } from '@/stores/manager'
+import { useRosterStore } from '@/stores/roster'
 
 // Supabase reports a failed OAuth callback (e.g. the provider rejecting the
 // code exchange) as `error`/`error_description` query and hash params on the
@@ -33,6 +35,25 @@ export const useAuthStore = defineStore('auth', () => {
   const initialized = ref(false)
   const error = ref<string | null>(null)
   const isAuthenticated = computed(() => isDevelopmentIdentityMode || session.value !== null)
+
+  // A session dropping — an explicit sign-out or a token expiring underneath
+  // the app, both delivered through `onAuthStateChange` above — must clear
+  // every store that holds the previous manager's identity or private data.
+  // A watcher here is the one place that can't be forgotten at a call site;
+  // scattering `reset()` calls across `signOut()` callers would miss the
+  // expiry path.
+  watch(
+    session,
+    (next, previous) => {
+      if (previous && !next) {
+        useManagerStore().reset()
+        useRosterStore().clearSession()
+      }
+    },
+    // Synchronous: there is no DOM to batch against, and the header must stop
+    // showing the previous manager's handle the instant the session drops.
+    { flush: 'sync' },
+  )
 
   async function init() {
     if (isDevelopmentIdentityMode) {

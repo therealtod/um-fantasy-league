@@ -20,5 +20,11 @@ export const useManagerStore = defineStore('manager', () => {
     }
   }
 
-  return { manager, loading, error, load }
+  /** Drops the loaded identity. Called on sign-out so the header stops showing the previous manager. */
+  function reset() {
+    manager.value = null
+    error.value = null
+  }
+
+  return { manager, loading, error, load, reset }
 })
