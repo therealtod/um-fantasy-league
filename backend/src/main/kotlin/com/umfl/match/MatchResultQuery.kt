@@ -31,13 +31,16 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
         ).singleOrNull()
 
     /**
-     * The id of a match in [tournamentId] already recorded against [externalLink],
-     * if there is one — the match importer's duplicate check.
+     * The id of the match in [tournamentId] already recorded against
+     * [externalLink], if there is one.
      *
-     * `external_link` carries no uniqueness constraint (a correction legitimately
-     * reuses the source URL), so this is a warning the admin sees before saving,
-     * not a rule. Newest first, so re-importing a URL that was somehow recorded
-     * twice points at the most recent one.
+     * `uq_tournament_match_external_link` makes that at most one row, so this is
+     * the pre-check behind a rule rather than the warning it used to be: the
+     * importer shows it before the admin fills anything in, and
+     * [com.umfl.match.AdminMatchService] refuses the write. Correcting a match
+     * still reuses its own URL legitimately — that updates the row in place and
+     * never meets the index — so `correct` excludes the match under correction
+     * from the result.
      */
     fun findIdByExternalLink(tournamentId: Long, externalLink: String): Long? =
         jdbcClient
@@ -45,7 +48,6 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
                 """
                 select id from tournament_match
                 where tournament_id = :tournamentId and external_link = :externalLink
-                order by id desc limit 1
                 """
             )
             .param("tournamentId", tournamentId)
@@ -294,7 +296,7 @@ private data class MatchHeader(
     val tournamentId: Long,
     val round: Int,
     val playedAt: java.time.Instant,
-    val externalLink: String?,
+    val externalLink: String,
 )
 
 /** A `match_game` row before its own participants are attached. */
@@ -311,5 +313,5 @@ private fun mapMatchRow(rs: ResultSet, @Suppress("UNUSED_PARAMETER") rowNum: Int
         tournamentId = rs.getLong("tournament_id"),
         round = rs.getInt("round"),
         playedAt = rs.getTimestamp("played_at").toInstant(),
-        externalLink = rs.getString("external_link"),
+        externalLink = rs.getString("external_link")!!,
     )

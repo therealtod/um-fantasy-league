@@ -28,9 +28,14 @@ data class MatchImportPreview(
     val playedAtRaw: String?,
     /**
      * Set when this tournament already has a match whose `external_link` is
-     * [sourceUrl]. A warning, not a block: correcting an imported match by
-     * re-importing it is legitimate, and nothing in the schema makes the link
-     * unique.
+     * [sourceUrl] — which `uq_tournament_match_external_link` makes at most one.
+     *
+     * A block, not a warning: recording it again would double-count everything
+     * the match scores, and `AdminMatchService` refuses the write. The panel
+     * shows this so the admin is sent to correct that match rather than
+     * discovering the conflict after filling the wizard in. Correcting an
+     * imported match by re-importing it stays legitimate — that path updates
+     * the existing row instead of creating a second one.
      */
     val alreadyImportedMatchId: Long?,
     val participants: List<ImportedParticipant>,

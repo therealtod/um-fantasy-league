@@ -168,15 +168,23 @@ describe('MatchImportPanel', () => {
     expect(wrapper.text()).toContain('Add the missing entries under Heroes or Maps')
   })
 
-  it('warns when this url was already imported, without blocking', async () => {
+  it('blocks recording a url already imported, and offers to correct that match instead', async () => {
     importMatch.mockResolvedValue({ ...resolvedPreview, alreadyImportedMatchId: 42 })
     const wrapper = await mountPanel()
     await runImport(wrapper)
 
     expect(wrapper.text()).toContain('Already imported')
     expect(wrapper.text()).toContain('#42')
-    // Still recordable — a correction legitimately reuses the URL.
-    expect(wrapper.findAll('button.btn-primary').at(-1)!.attributes('disabled')).toBeUndefined()
+    // Recording a second copy would double-count every point the match scores,
+    // and the server refuses it — so the panel refuses to offer it.
+    expect(wrapper.findAll('button.btn-primary').at(-1)!.attributes('disabled')).toBeDefined()
+
+    // The way out is the existing match, not a second one.
+    const correct = wrapper.findAll('button').find((b) => b.text().includes('Open match #42'))
+    expect(correct).toBeDefined()
+    await correct!.trigger('click')
+    expect(wrapper.emitted('correctExisting')).toEqual([[42]])
+    expect(wrapper.emitted('review')).toBeUndefined()
   })
 
   /** A scraper that isn't running has to read as something the admin can act on. */

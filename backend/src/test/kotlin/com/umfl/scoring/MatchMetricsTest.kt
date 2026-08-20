@@ -58,7 +58,7 @@ class MatchMetricsTest {
         tournamentId = 1,
         round = 2,
         playedAt = played,
-        externalLink = null,
+        externalLink = "https://example.com/match/metrics",
         participants = gameParticipants.map { participant ->
             MatchParticipantResult(
                 side = participant.side,

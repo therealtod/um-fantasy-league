@@ -22,6 +22,7 @@ const matches: MatchResultDto[] = [
     tournamentId: 1,
     round: 1,
     playedAt: '2026-08-01T12:00:00Z',
+    externalLink: 'https://example.com/match/1',
     participants: [
       { side: 0, draftedHeroes: [] },
       { side: 1, draftedHeroes: [] },
@@ -45,6 +46,7 @@ const matches: MatchResultDto[] = [
     tournamentId: 1,
     round: 2,
     playedAt: '2026-08-02T12:00:00Z',
+    externalLink: 'https://example.com/match/2',
     participants: [
       { side: 0, draftedHeroes: [] },
       { side: 1, draftedHeroes: [] },

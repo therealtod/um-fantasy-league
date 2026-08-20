@@ -79,7 +79,7 @@ data class MatchResult(
     val tournamentId: Long,
     val round: Int,
     val playedAt: Instant,
-    val externalLink: String?,
+    val externalLink: String,
     val participants: List<MatchParticipantResult>,
     /** Ordered by [GameResult.gameNumber]. */
     val games: List<GameResult>,

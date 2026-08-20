@@ -152,6 +152,7 @@ describe('tournament lifecycle (frontend stores)', () => {
         matchId: 4,
         round: 2,
         playedAt: '2026-10-02T00:00:00Z',
+        externalLink: 'https://example.com/match/1',
         games: [
           {
             gameNumber: 1,

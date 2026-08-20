@@ -1,5 +1,6 @@
 package com.umfl.match
 
+import com.umfl.common.ConflictException
 import com.umfl.common.MatchRuleException
 import com.umfl.common.NotFoundException
 import com.umfl.hero.HeroRepository
@@ -7,6 +8,7 @@ import com.umfl.map.MapPoolAdminRepository
 import com.umfl.standings.StandingsUpdateEvent
 import com.umfl.tournament.TournamentService
 import org.springframework.context.ApplicationEventPublisher
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -32,7 +34,7 @@ class AdminMatchService(
         tournamentId: Long,
         round: Int,
         playedAt: Instant,
-        externalLink: String?,
+        externalLink: String,
         participants: List<MatchParticipantInput>,
         games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
@@ -40,18 +42,23 @@ class AdminMatchService(
         tournamentService.requireTournament(tournamentId)
         validate(tournamentId, participants, games, bans)
 
-        val saved = tournamentMatchRepository.save(
-            TournamentMatch(
-                tournamentId = tournamentId,
-                round = round,
-                playedAt = playedAt,
-                externalLink = blankToNull(externalLink),
-                participants = toParticipants(participants),
-                games = toGames(tournamentId, games),
-                bans = toBans(bans),
-                picks = toPicks(participants),
+        val link = externalLink.trim()
+        requireLinkUnused(tournamentId, link, correctingMatchId = null)
+
+        val saved = savingLinkConflictAsConflict(link) {
+            tournamentMatchRepository.save(
+                TournamentMatch(
+                    tournamentId = tournamentId,
+                    round = round,
+                    playedAt = playedAt,
+                    externalLink = link,
+                    participants = toParticipants(participants),
+                    games = toGames(tournamentId, games),
+                    bans = toBans(bans),
+                    picks = toPicks(participants),
+                )
             )
-        )
+        }
         eventPublisher.publishEvent(StandingsUpdateEvent(tournamentId))
         return requireNotNull(matchResultQuery.findById(requireNotNull(saved.id))) { "Just-saved match not found" }
     }
@@ -62,7 +69,7 @@ class AdminMatchService(
         matchId: Long,
         round: Int,
         playedAt: Instant,
-        externalLink: String?,
+        externalLink: String,
         participants: List<MatchParticipantInput>,
         games: List<MatchGameInput>,
         bans: List<MatchBanInput>,
@@ -70,17 +77,22 @@ class AdminMatchService(
         val existing = requireMatch(tournamentId, matchId)
         validate(tournamentId, participants, games, bans)
 
-        tournamentMatchRepository.save(
-            existing.copy(
-                round = round,
-                playedAt = playedAt,
-                externalLink = blankToNull(externalLink),
-                participants = toParticipants(participants),
-                games = toGames(tournamentId, games),
-                bans = toBans(bans),
-                picks = toPicks(participants),
+        val link = externalLink.trim()
+        requireLinkUnused(tournamentId, link, correctingMatchId = matchId)
+
+        savingLinkConflictAsConflict(link) {
+            tournamentMatchRepository.save(
+                existing.copy(
+                    round = round,
+                    playedAt = playedAt,
+                    externalLink = link,
+                    participants = toParticipants(participants),
+                    games = toGames(tournamentId, games),
+                    bans = toBans(bans),
+                    picks = toPicks(participants),
+                )
             )
-        )
+        }
         eventPublisher.publishEvent(StandingsUpdateEvent(tournamentId))
         return requireNotNull(matchResultQuery.findById(matchId)) { "Just-saved match not found" }
     }
@@ -91,6 +103,54 @@ class AdminMatchService(
         tournamentMatchRepository.delete(existing)
         eventPublisher.publishEvent(StandingsUpdateEvent(tournamentId))
     }
+
+    /**
+     * The source link is what stops the same match being imported twice, so a
+     * link already spent in this tournament is refused rather than warned about
+     * — a duplicated match silently double-counts every appearance, win and ban
+     * it carries, and nothing surfaces it until someone doubts the standings.
+     *
+     * [correctingMatchId] is the match being corrected, excluded from the
+     * search: re-saving a match under the URL it already holds is the ordinary
+     * correction path and updates the row in place. Only moving one match's
+     * link onto another's is a conflict.
+     */
+    private fun requireLinkUnused(tournamentId: Long, link: String, correctingMatchId: Long?) {
+        val collision = matchResultQuery.findIdByExternalLink(tournamentId, link)
+        if (collision != null && collision != correctingMatchId) {
+            throw duplicateLinkConflict(collision, link)
+        }
+    }
+
+    /**
+     * The check above and the write are two statements, so a match recorded in
+     * between slips past the check and is stopped by
+     * `uq_tournament_match_external_link` instead. That window is narrow but
+     * real, so the violation is translated into a [ConflictException] naming the
+     * link rather than left to `GlobalExceptionHandler`'s catch-all, which
+     * renders the generic "should never fire" 409 and names nothing the admin
+     * can act on. Mirrors [com.umfl.map.AdminMapService.removeFromPool].
+     *
+     * The offending match cannot be named here the way [requireLinkUnused]
+     * names it: the failed insert has already aborted the transaction, so no
+     * further query can run inside it. Only that one index is translated —
+     * every other integrity violation is still a bug worth surfacing as itself,
+     * not mislabelled a duplicate link.
+     */
+    private fun <T> savingLinkConflictAsConflict(link: String, save: () -> T): T =
+        try {
+            save()
+        } catch (e: DataIntegrityViolationException) {
+            if (e.mostSpecificCause.message?.contains(LINK_INDEX) != true) throw e
+            throw ConflictException(
+                "Another match in this tournament was just recorded against $link. " +
+                    "Correct that match instead of recording a second one."
+            )
+        }
+
+    private fun duplicateLinkConflict(matchId: Long, link: String) = ConflictException(
+        "Match $matchId is already recorded against $link. Correct that match instead of recording a second one."
+    )
 
     private fun requireMatch(tournamentId: Long, matchId: Long): TournamentMatch =
         tournamentMatchRepository.findById(matchId)
@@ -157,4 +217,9 @@ class AdminMatchService(
         participants.flatMapIndexed { side, participant ->
             participant.draftedHeroIds.distinct().map { HeroPick(side = side, heroId = it) }
         }.toSet()
+
+    private companion object {
+        /** Named in `V9__external_link_required.sql`; Postgres quotes it in the violation message. */
+        const val LINK_INDEX = "uq_tournament_match_external_link"
+    }
 }

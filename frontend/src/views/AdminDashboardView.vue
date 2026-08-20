@@ -197,6 +197,7 @@ function returnToMatchList() {
             v-else-if="matchViewMode === 'import' && selectedTournamentId"
             :tournament-id="selectedTournamentId"
             @review="reviewImportedMatch"
+            @correct-existing="(matchId) => startMatchEdit(selectedTournamentId!, matchId)"
             @cancel="returnToMatchList"
           />
 

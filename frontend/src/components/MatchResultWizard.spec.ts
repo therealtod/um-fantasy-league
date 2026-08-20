@@ -45,6 +45,12 @@ async function mountWizard(props: {
   const MatchResultWizard = (await import('./MatchResultWizard.vue')).default
   const wrapper = mount(MatchResultWizard, { props })
   await flushPromises()
+  // `external_link` is required on every save and unique per tournament. A
+  // create with no prefill starts blank, so give it one here rather than in
+  // every test — a prefill or an edit arrives with its own.
+  if (props.mode === 'create' && !props.prefill) {
+    await wrapper.find('#match-external-link').setValue('https://example.com/match/spec')
+  }
   return wrapper
 }
 
@@ -573,6 +579,7 @@ describe('MatchResultWizard', () => {
       tournamentId: 1,
       round: 1,
       playedAt: '2026-08-01T12:00:00Z',
+      externalLink: 'https://example.com/match/43',
       participants: [
         { side: 0, playerLabel: 'Alice', draftedHeroes: [{ heroId: 10, heroName: 'Sherlock Holmes' }] },
         { side: 1, draftedHeroes: [{ heroId: 11, heroName: 'Dracula' }] },

@@ -118,8 +118,8 @@ export interface TickerEntry {
   matchId: number
   round: number
   playedAt: string
-  /** Absent when the match has no external link. */
-  externalLink?: string
+  /** Always present: required by the schema, and unique within the tournament. */
+  externalLink: string
   /** Ordered by game number — one entry per game played in the series. */
   games: TickerGame[]
   bannedHeroNames: string[]
@@ -242,7 +242,12 @@ export interface MatchBanRequest {
 export interface RecordMatchRequest {
   round: number
   playedAt: string // Instant as ISO string
-  externalLink?: string | null
+  /**
+   * Required, and unique within the tournament — it is the duplicate check that
+   * stops the same match being recorded twice. A match with no page anywhere
+   * still needs an identifier of its own.
+   */
+  externalLink: string
   participants: MatchParticipantRequest[]
   games: MatchGameRequest[]
   bans: MatchBanRequest[]
@@ -319,7 +324,11 @@ export interface MatchImportPreviewDto {
   /** Absent when the source's timestamp carried a timezone that couldn't be resolved. */
   playedAt?: string
   playedAtRaw?: string
-  /** Set when this tournament already has a match recorded against this URL. A warning, not a block. */
+  /**
+   * Set when this tournament already has a match recorded against this URL.
+   * A block, not a warning: recording it again is refused server-side, so the
+   * panel sends the admin to correct that match instead.
+   */
   alreadyImportedMatchId?: number
   participants: ImportedParticipant[]
   games: ImportedGame[]
@@ -374,8 +383,8 @@ export interface MatchResultDto {
   tournamentId: number
   round: number
   playedAt: string
-  /** Absent when the match has no external link. */
-  externalLink?: string
+  /** Always present: required by the schema, and unique within the tournament. */
+  externalLink: string
   participants: MatchParticipantResult[]
   /** Ordered by game number. */
   games: GameResult[]

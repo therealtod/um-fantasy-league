@@ -1,5 +1,6 @@
 package com.umfl.match
 
+import com.umfl.common.ConflictException
 import com.umfl.common.MatchRuleException
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
@@ -7,6 +8,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.simple.JdbcClient
 import java.time.Instant
+import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
@@ -23,6 +25,13 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     private val tournamentRepository: TournamentRepository,
     private val jdbcClient: JdbcClient,
 ) : PostgresIntegrationTest() {
+
+    /**
+     * A source link no other match holds. `external_link` is required and unique
+     * within a tournament, so every recorded match needs one; the value itself is
+     * beside the point for tests that assert on something else.
+     */
+    private fun aLink() = "https://example.com/match/${UUID.randomUUID()}"
 
     private fun winterOfChampionsId() = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
 
@@ -77,7 +86,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         val (games, sides, bans) = aliceVsRobinHood()
 
         val recorded = adminMatchService.record(
-            tournamentId, round = 1, playedAt = Instant.now(), externalLink = null,
+            tournamentId, round = 1, playedAt = Instant.now(), externalLink = aLink(),
             participants = sides, games = games, bans = bans,
         )
 
@@ -92,8 +101,8 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         val tournamentId = winterOfChampionsId()
         val mapId = id("game_map", "Baskerville Manor")
         val (games, sides, bans) = aliceVsRobinHood(mapId)
-        adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = null, participants = sides, games = games, bans = bans)
-        adminMatchService.record(tournamentId, round = 2, playedAt = Instant.now(), externalLink = null, participants = sides, games = games, bans = bans)
+        adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
+        adminMatchService.record(tournamentId, round = 2, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
 
         assertEquals(2, matchResultQuery.findByTournament(tournamentId).size)
         val roundOneOnly = matchResultQuery.findByTournament(tournamentId, round = 1)
@@ -109,7 +118,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         repeat(3) { round ->
             adminMatchService.record(
                 tournamentId, round = round + 1, playedAt = playedAt.plusSeconds(3600L * round),
-                externalLink = null, participants = sides, games = games, bans = bans,
+                externalLink = aLink(), participants = sides, games = games, bans = bans,
             )
         }
 
@@ -161,7 +170,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         val games = oneGame(raptorPaddock, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"))
 
         val error = assertFailsWith<MatchRuleException> {
-            adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = null, participants = sides, games = games, bans = bans)
+            adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
         }
         assertEquals(listOf(MatchRule.MAP_NOT_IN_POOL), error.violations.map { it.rule })
     }
@@ -177,7 +186,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = participants(),
                 games = oneGame(mapId, heroA = alice, heroB = alice),
                 bans = emptyList(),
@@ -196,7 +205,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = participants(),
                 games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), winnerB = true),
                 bans = emptyList(),
@@ -215,7 +224,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = participants(drafted = fixtureDraft() + 999_999L),
                 games = oneGame(mapId, heroA = 999_999L, heroB = id("heroes", "Robin Hood")),
                 bans = emptyList(),
@@ -237,7 +246,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = participants(drafted = fixtureDraft() + bigfoot),
                 games = listOf(
                     MatchGameInput(1, mapId, listOf(MatchGameParticipantInput(alice, 6, true), MatchGameParticipantInput(robinHood, 0, false))),
@@ -269,7 +278,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             tournamentId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = participants("A. N. Other", null),
             games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood")),
             bans = emptyList(),
@@ -283,7 +292,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             recorded.matchId,
             round = 1,
             playedAt = recorded.playedAt,
-            externalLink = null,
+            externalLink = aLink(),
             participants = participants("   ", "Rina Okafor"),
             games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood")),
             bans = emptyList(),
@@ -303,7 +312,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = participants(),
                 games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 0, winnerA = false, healthB = 0),
                 bans = emptyList(),
@@ -322,7 +331,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = participants(),
                 games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, healthB = 5),
                 bans = emptyList(),
@@ -341,7 +350,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             tournamentId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = participants(),
             games = oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"), healthA = 7, healthB = -3),
             bans = emptyList(),
@@ -355,8 +364,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     fun `correcting a match fully replaces its participants and games, and persists an external link`() {
         val tournamentId = winterOfChampionsId()
         val (games, sides, bans) = aliceVsRobinHood()
-        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = null, participants = sides, games = games, bans = bans)
-        assertNull(recorded.externalLink)
+        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
 
         val corrected = adminMatchService.correct(
             tournamentId,
@@ -381,16 +389,76 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `a blank external link is stored as null, the same way a blank player label is`() {
+    fun `an external link is trimmed before it is stored and compared`() {
         val tournamentId = winterOfChampionsId()
         val (games, sides, bans) = aliceVsRobinHood()
+        val link = aLink()
 
-        // What the admin form posts for an untouched optional text input. Left as
-        // "", it would come back out of the API as an external link that is there
-        // for a null check and absent for a human.
-        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = "  ", participants = sides, games = games, bans = bans)
+        // Whitespace around the pasted URL must not buy a second copy of the
+        // match: the stored value and the duplicate check see the same string.
+        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = "  $link  ", participants = sides, games = games, bans = bans)
+        assertEquals(link, recorded.externalLink)
 
-        assertNull(recorded.externalLink)
+        assertFailsWith<ConflictException> {
+            adminMatchService.record(tournamentId, round = 2, playedAt = Instant.now(), externalLink = link, participants = sides, games = games, bans = bans)
+        }
+    }
+
+    @Test
+    fun `recording a second match against a link already used in the tournament is rejected`() {
+        val tournamentId = winterOfChampionsId()
+        val (games, sides, bans) = aliceVsRobinHood()
+        val link = aLink()
+
+        val first = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = link, participants = sides, games = games, bans = bans)
+
+        val conflict = assertFailsWith<ConflictException> {
+            adminMatchService.record(tournamentId, round = 2, playedAt = Instant.now(), externalLink = link, participants = sides, games = games, bans = bans)
+        }
+        assertTrue(
+            conflict.message!!.contains(first.matchId.toString()),
+            "the conflict has to name the match to correct, since the admin UI links to it: ${conflict.message}",
+        )
+    }
+
+    @Test
+    fun `the same link may be recorded in a different tournament`() {
+        val (games, sides, bans) = aliceVsRobinHood()
+        val link = aLink()
+        adminMatchService.record(winterOfChampionsId(), round = 1, playedAt = Instant.now(), externalLink = link, participants = sides, games = games, bans = bans)
+
+        // Uniqueness is scoped to the tournament, matching the importer's own
+        // per-tournament duplicate check.
+        val otherTournamentId = requireNotNull(tournamentRepository.findByName("Summer of Legends")?.id)
+        val otherMapId = id("game_map", "Baskerville Manor")
+        jdbcClient
+            .sql("insert into tournament_map (tournament_id, map_id) values (:t, :m) on conflict do nothing")
+            .param("t", otherTournamentId)
+            .param("m", otherMapId)
+            .update()
+        val (otherGames, otherSides, otherBans) = aliceVsRobinHood(otherMapId)
+
+        val recorded = adminMatchService.record(otherTournamentId, round = 1, playedAt = Instant.now(), externalLink = link, participants = otherSides, games = otherGames, bans = otherBans)
+        assertEquals(link, recorded.externalLink)
+    }
+
+    @Test
+    fun `correcting a match keeps its own link, but cannot steal another match's`() {
+        val tournamentId = winterOfChampionsId()
+        val (games, sides, bans) = aliceVsRobinHood()
+        val ownLink = aLink()
+        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = ownLink, participants = sides, games = games, bans = bans)
+        val sibling = adminMatchService.record(tournamentId, round = 2, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
+
+        // The ordinary correction path: the row is updated in place, so re-saving
+        // it under the link it already holds never meets the unique index.
+        val corrected = adminMatchService.correct(tournamentId, recorded.matchId, round = 3, playedAt = recorded.playedAt, externalLink = ownLink, participants = sides, games = games, bans = bans)
+        assertEquals(ownLink, corrected.externalLink)
+        assertEquals(3, corrected.round)
+
+        assertFailsWith<ConflictException> {
+            adminMatchService.correct(tournamentId, recorded.matchId, round = 1, playedAt = recorded.playedAt, externalLink = sibling.externalLink, participants = sides, games = games, bans = bans)
+        }
     }
 
     /**
@@ -408,7 +476,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             tournamentId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = sides,
             games = games,
             bans = listOf(MatchBanInput(bigfoot, BanType.OPPONENT_BAN, side = 0)),
@@ -421,7 +489,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             recorded.matchId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = sides,
             games = games,
             bans = listOf(MatchBanInput(bigfoot, BanType.OPPONENT_BAN, side = 1)),
@@ -440,7 +508,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             tournamentId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = sides,
             games = games,
             bans = listOf(MatchBanInput(id("heroes", "Bigfoot"), BanType.PRE_BAN)),
@@ -454,7 +522,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         val tournamentId = winterOfChampionsId()
         val (games, sides, _) = aliceVsRobinHood()
         val bans = listOf(MatchBanInput(id("heroes", "Bigfoot"), BanType.SELF_BAN, side = 0))
-        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = null, participants = sides, games = games, bans = bans)
+        val recorded = adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
         val gameId = recorded.games.single().gameId
 
         adminMatchService.delete(tournamentId, recorded.matchId)
@@ -482,7 +550,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             tournamentId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = listOf(
                 MatchParticipantInput("Tomas Ferreira", listOf(alice, medusa)),
                 MatchParticipantInput("Rina Okafor", listOf(robinHood)),
@@ -512,7 +580,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
                 tournamentId,
                 round = 1,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = aLink(),
                 participants = listOf(
                     MatchParticipantInput("Tomas Ferreira", listOf(alice)),
                     MatchParticipantInput("Rina Okafor", listOf(alice)),
@@ -538,7 +606,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             tournamentId,
             round = 1,
             playedAt = Instant.now(),
-            externalLink = null,
+            externalLink = aLink(),
             participants = listOf(
                 MatchParticipantInput("Tomas Ferreira", listOf(alice, medusa)),
                 MatchParticipantInput("Rina Okafor", listOf(robinHood)),
@@ -552,7 +620,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             recorded.matchId,
             round = 1,
             playedAt = recorded.playedAt,
-            externalLink = null,
+            externalLink = aLink(),
             participants = listOf(
                 MatchParticipantInput("Tomas Ferreira", listOf(alice)),
                 MatchParticipantInput("Rina Okafor", listOf(robinHood)),

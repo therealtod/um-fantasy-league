@@ -23,7 +23,12 @@ data class TournamentMatch(
     val tournamentId: Long,
     val round: Int,
     val playedAt: Instant,
-    val externalLink: String? = null,
+    /**
+     * Required, and unique within the tournament — `uq_tournament_match_external_link`
+     * is what stops the same match being imported twice. A match with no page
+     * anywhere carries a synthetic `urn:umfl:match:<id>` placeholder instead.
+     */
+    val externalLink: String,
     /**
      * `side` (0 or 1) is the list position, persisted to `match_participant.side` —
      * the same `keyColumn` idiom [com.umfl.tournament.EntrySlot] uses for

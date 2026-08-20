@@ -21,6 +21,8 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   /** The admin accepted the draft — the parent opens the wizard seeded with it. */
   review: [preview: MatchImportPreviewDto]
+  /** This URL is already recorded — the parent opens that match for correction. */
+  correctExisting: [matchId: number]
   cancel: []
 }>()
 
@@ -33,6 +35,11 @@ const violations = ref<string[]>([])
 
 const canImport = computed(() => sourceUrl.value.trim().length > 0 && !loading.value)
 const isResolved = computed(() => preview.value !== null && preview.value.unresolved.length === 0)
+// Recording a second copy of a match already imported is refused server-side —
+// it would double-count every point the match scores. Blocked here so the admin
+// is sent to correct the existing one instead of filling the wizard in first.
+const alreadyImported = computed(() => preview.value?.alreadyImportedMatchId ?? null)
+const canRecord = computed(() => isResolved.value && alreadyImported.value === null)
 
 /**
  * Boards that exist but aren't in this tournament's pool. These are the only
@@ -117,17 +124,24 @@ function playerLabels(p: MatchImportPreviewDto): string {
     </div>
 
     <div v-if="preview" class="space-y-4">
-      <!-- Duplicate warning: a link is not unique, so this informs rather than blocks. -->
+      <!-- The link is unique per tournament, so this blocks rather than informs. -->
       <div
-        v-if="preview.alreadyImportedMatchId"
+        v-if="alreadyImported !== null"
         class="panel border-magenta/50 p-4"
       >
         <p class="label-caps text-magenta">Already imported</p>
         <p class="mt-1 text-sm text-ink-dim">
           This tournament already has a match recorded against this URL (match
-          #{{ preview.alreadyImportedMatchId }}). Importing again will create a second one — correct
-          the existing match instead if that's what you meant.
+          #{{ alreadyImported }}). Recording a second copy would count every point it scores
+          twice, so it is refused — correct the existing match instead.
         </p>
+        <button
+          type="button"
+          class="btn-ghost mt-3"
+          @click="emit('correctExisting', alreadyImported)"
+        >
+          Open match #{{ alreadyImported }} to correct
+        </button>
       </div>
 
       <div class="panel p-4 md:p-6 space-y-3">
@@ -198,7 +212,7 @@ function playerLabels(p: MatchImportPreviewDto): string {
         <button
           type="button"
           class="btn-primary"
-          :disabled="!isResolved"
+          :disabled="!canRecord"
           @click="emit('review', preview)"
         >
           Review and record
@@ -206,6 +220,9 @@ function playerLabels(p: MatchImportPreviewDto): string {
       </div>
       <p v-if="!isResolved" class="text-right text-xs text-ink-dim">
         Every name has to resolve before this match can be recorded.
+      </p>
+      <p v-else-if="alreadyImported !== null" class="text-right text-xs text-ink-dim">
+        This match is already recorded — correct match #{{ alreadyImported }} instead.
       </p>
     </div>
   </div>

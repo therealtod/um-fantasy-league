@@ -406,7 +406,7 @@ class StandingsIntegrationTest @Autowired constructor(
             tournamentId = tournamentId,
             round = 3,
             playedAt = Instant.parse("2026-06-20T12:00:00Z"),
-            externalLink = null,
+            externalLink = "https://example.com/match/late-round-3",
             participants = listOf(
                 MatchParticipantInput("Hana Sato", listOf(heroId("Medusa"), heroId("Bigfoot"))),
                 MatchParticipantInput("Dmitri Kovac", listOf(heroId("Achilles"))),

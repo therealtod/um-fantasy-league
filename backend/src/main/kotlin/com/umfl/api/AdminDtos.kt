@@ -170,7 +170,13 @@ data class RecordMatchRequest(
     val round: Int?,
     @field:NotNull(message = "playedAt is required")
     val playedAt: Instant?,
-    val externalLink: String? = null,
+    /**
+     * Required and unique within the tournament: it is the duplicate check that
+     * stops the same match being imported twice. A match with no page anywhere
+     * still needs an identifier of its own — see `V9__external_link_required.sql`.
+     */
+    @field:NotBlank(message = "externalLink is required")
+    val externalLink: String?,
     @field:Valid
     @field:Size(min = 2, max = 2, message = "exactly two participants are required")
     val participants: List<MatchParticipantRequest>?,
@@ -186,7 +192,7 @@ data class MatchResultDto(
     val tournamentId: Long,
     val round: Int,
     val playedAt: Instant,
-    val externalLink: String?,
+    val externalLink: String,
     val participants: List<MatchParticipantResult>,
     val games: List<GameResult>,
     val bans: List<BanResult>,

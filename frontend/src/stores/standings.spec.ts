@@ -29,6 +29,7 @@ function entry(matchId: number, points: number): TickerEntry {
     matchId,
     round: 1,
     playedAt: '2026-08-01T00:00:00Z',
+    externalLink: 'https://example.com/match/1',
     games: [
       {
         gameNumber: 1,

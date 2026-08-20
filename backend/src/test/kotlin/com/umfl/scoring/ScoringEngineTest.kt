@@ -47,7 +47,7 @@ class ScoringEngineTest {
         tournamentId = 1,
         round = 2,
         playedAt = Instant.parse("2026-06-06T11:00:00Z"),
-        externalLink = null,
+        externalLink = "https://example.com/match/scoring",
         participants = listOf(
             MatchParticipantResult(
                 side = 0,

@@ -5,6 +5,7 @@ import com.umfl.map.GameMapRepository
 import com.umfl.map.MapPoolAdminRepository
 import com.umfl.support.PostgresIntegrationTest
 import com.umfl.tournament.TournamentRepository
+import org.hamcrest.Matchers.containsString
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
@@ -121,9 +122,14 @@ class MatchImportEndpointTest @Autowired constructor(
         )
     }
 
-    /** Re-importing a URL already recorded warns instead of silently duplicating it. */
+    /**
+     * Re-importing a URL already recorded names the existing match instead of
+     * silently duplicating it — and recording a second copy is refused outright
+     * by `uq_tournament_match_external_link`, so the preview's warning and the
+     * write path agree rather than the admin discovering the conflict on save.
+     */
     @Test
-    fun `a second import of the same url reports the existing match`() {
+    fun `a second import of the same url reports the existing match and cannot be recorded twice`() {
         stubScrape()
         val tournamentId = tournamentId
         stockPool(tournamentId)
@@ -162,6 +168,47 @@ class MatchImportEndpointTest @Autowired constructor(
             status { isOk() }
             jsonPath("$.alreadyImportedMatchId") { value(matchId) }
         }
+
+        // The link is what makes the duplicate detectable, so posting the same
+        // draft again is a 409 that names the match to correct — not a second
+        // row quietly double-counting every point this match scores.
+        mockMvc.post("/api/admin/tournaments/$tournamentId/matches") {
+            header("X-Manager-Id", adminId)
+            contentType = MediaType.APPLICATION_JSON
+            content = recordBody.toString()
+        }.andExpect {
+            status { isConflict() }
+            jsonPath("$.detail") { value(containsString(matchId.toString())) }
+        }
+    }
+
+    /** The link is the duplicate check, so it is required rather than optional. */
+    @Test
+    fun `recording a match without an external link is rejected`() {
+        stockPool(tournamentId)
+        stubScrape()
+
+        val previewJson = mockMvc.post("/api/admin/tournaments/$tournamentId/matches/import") {
+            header("X-Manager-Id", adminId)
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"sourceUrl": "$sourceUrl"}"""
+        }.andReturn().response.contentAsString
+        val preview = objectMapper.readTree(previewJson)
+
+        val body = objectMapper.createObjectNode().apply {
+            put("round", 1)
+            put("playedAt", preview["playedAt"].asString())
+            put("externalLink", "   ")
+            set("participants", preview["participants"].deepCopy())
+            set("games", preview["games"].deepCopy())
+            set("bans", preview["bans"].deepCopy())
+        }
+
+        mockMvc.post("/api/admin/tournaments/$tournamentId/matches") {
+            header("X-Manager-Id", adminId)
+            contentType = MediaType.APPLICATION_JSON
+            content = body.toString()
+        }.andExpect { status { isBadRequest() } }
     }
 
     @Test

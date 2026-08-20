@@ -209,6 +209,16 @@ below; nothing outside that surface writes reference data or results.
   (`ScraperProperties`, see Match import below), the address of the scraper sidecar. Neither belongs
   in the database the way a scoring weight or a budget does. A third would want the same
   justification, not a precedent.
+- **A match names where it is recorded elsewhere, and that link is its identity.**
+  `tournament_match.external_link` is `not null` with a unique index per tournament
+  (`uq_tournament_match_external_link`, added by `V9__external_link_required.sql`). It is what stops
+  an admin importing the same match twice — a duplicate would silently double every point the match
+  scores, and nothing would surface it until someone doubted the standings. So it is required even
+  for a match typed by hand: a game with no page anywhere carries an identifier of the admin's own,
+  and rows predating the migration were backfilled with a synthetic `urn:umfl:match:<id>`. The
+  uniqueness is scoped to the tournament rather than global, matching the importer's own
+  per-tournament check, so the preview never reports "no duplicate" and then fails the save.
+  Correcting a match reuses its link freely — `correct` updates the row in place.
 - **A match is a series, and every game in it has a winner.** `tournament_match` is a best-of-N
   between two humans; each `match_game` carries its own map and its own two
   `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
@@ -486,8 +496,13 @@ catalogue question.
 Anything unresolved comes back in `unresolved[]` with the source's own spelling and never blocks the
 *import* — only the recording. `MAP_NOT_IN_POOL` is the one that fires in practice, because
 `match_game` carries a composite FK onto `tournament_map`; heroes reference `heroes(id)` directly and
-have no equivalent constraint. `external_link` (which already existed) stores the source URL, which
-is also the duplicate check — a warning, not a rule, since a correction legitimately reuses it.
+have no equivalent constraint. `external_link` stores the source URL, which is also the duplicate
+check — and since `V9__external_link_required.sql` it is a rule rather than a warning: the column is
+`not null` with a unique index per tournament, `MatchImportService` reports the clash as
+`alreadyImportedMatchId`, and `AdminMatchService` refuses the write with a `ConflictException` naming
+the match to correct. A correction still reuses the URL legitimately — `correct` re-saves the same
+aggregate root, so the row is updated in place and never meets the index; only moving one match's
+link onto another's conflicts.
 
 ## Admin frontend
 
@@ -541,9 +556,12 @@ without appearing in any game row — and the heroes struck out of that side's d
 and any ban still missing a side, keep a column of their own.
 
 `MatchImportPanel` is the front of the Match import flow above: a URL field, then the scrape's
-summary, its unresolved names, and a duplicate warning. "Review and record" is disabled until
-`unresolved` is empty, and emits the preview up to `AdminDashboardView`, which reopens
-`MatchResultWizard` in `create` mode with a `prefill` prop. Two details are load-bearing. A
+summary, its unresolved names, and a duplicate block. "Review and record" is disabled until
+`unresolved` is empty **and** `alreadyImportedMatchId` is absent, and emits the preview up to
+`AdminDashboardView`, which reopens `MatchResultWizard` in `create` mode with a `prefill` prop. An
+already-imported URL instead offers "Open match #N to correct", which emits `correctExisting` and
+lands on the same `startMatchEdit` the match list uses — the admin is sent to the existing match
+rather than discovering the conflict after filling the wizard in. Two details are load-bearing. A
 `MAP_NOT_IN_POOL` row carries an **"Add to board pool"** button that calls the existing
 `addMapToPool` and re-imports — the admin widens the pool by clicking, the importer never does it
 silently. And the wizard's `formFromPreview` **unions each side's bans back onto its drafted list**:

@@ -70,7 +70,7 @@ data class TickerEntry(
     val matchId: Long,
     val round: Int,
     val playedAt: Instant,
-    val externalLink: String?,
+    val externalLink: String,
     /** Ordered by game number — one entry per game played in the series. */
     val games: List<TickerGame>,
     val bannedHeroNames: List<String>,

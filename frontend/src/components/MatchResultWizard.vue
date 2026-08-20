@@ -222,7 +222,7 @@ function formFromMatch(matchData: MatchResultDto): MatchForm {
   return {
     round: matchData.round,
     playedAt: matchData.playedAt,
-    externalLink: matchData.externalLink ?? '',
+    externalLink: matchData.externalLink,
     sides: [...matchData.participants]
       .sort((a, b) => a.side - b.side)
       .map((participant) => {
@@ -422,7 +422,7 @@ function toPayload(): RecordMatchRequest {
   return {
     round: form.value.round,
     playedAt: form.value.playedAt,
-    externalLink: form.value.externalLink,
+    externalLink: form.value.externalLink.trim(),
     participants: form.value.sides.map((side) => ({
       playerLabel: side.playerLabel,
       draftedHeroIds: side.draftedHeroIds.filter(
@@ -456,6 +456,12 @@ function toPayload(): RecordMatchRequest {
  */
 const validationError = computed<string | null>(() => {
   const { games, sides, preBans, unassignedBans } = form.value
+
+  // Required server-side, and the duplicate check depends on it. Caught here so
+  // an untouched box reads as a prompt rather than a 400.
+  if (form.value.externalLink.trim().length === 0) {
+    return 'This match needs an external link — it is what stops the same match being recorded twice'
+  }
 
   if (unassignedBans.length > 0) {
     return `Assign ${heroName(unassignedBans[0].heroId)}'s ban to the side it was struck from — this match predates per-side bans`
@@ -644,7 +650,7 @@ onMounted(async () => {
         </div>
 
         <div class="flex flex-col gap-2 sm:col-span-2">
-          <label for="match-external-link" class="label-caps">External Link (optional)</label>
+          <label for="match-external-link" class="label-caps">External Link</label>
           <input
             id="match-external-link"
             v-model="form.externalLink"
@@ -652,6 +658,11 @@ onMounted(async () => {
             placeholder="https://…"
             class="field-input"
           />
+          <p class="text-xs text-ink-dim">
+            Where this match is recorded elsewhere — the import source, a bracket page, a VOD. It
+            has to be unique within the tournament: it is what stops the same match being recorded
+            twice. For a match with no page anywhere, any identifier of your own will do.
+          </p>
         </div>
       </div>
 

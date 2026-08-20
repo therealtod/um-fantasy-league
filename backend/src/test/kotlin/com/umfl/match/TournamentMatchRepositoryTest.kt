@@ -122,6 +122,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                 tournamentId = tournamentId,
                 round = 2,
                 playedAt = Instant.parse("2026-08-16T09:00:00Z"),
+                externalLink = "https://example.com/match/bo3-series",
                 participants = listOf(
                     MatchParticipant(playerLabel = "Rina Okafor"),
                     MatchParticipant(playerLabel = "Dmitri Kovac"),
@@ -194,6 +195,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                 tournamentId = tournamentId,
                 round = 1,
                 playedAt = Instant.parse("2026-08-15T12:00:00Z"),
+                externalLink = "https://example.com/match/single-game",
                 participants = listOf(
                     MatchParticipant(playerLabel = "Tomas Ferreira"),
                     MatchParticipant(playerLabel = "Rina Okafor"),

@@ -149,7 +149,7 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
                 tournamentId = tournamentId,
                 round = round,
                 playedAt = Instant.now(),
-                externalLink = null,
+                externalLink = "https://example.com/match/round-$round-$winnerPlayer",
                 participants = listOf(
                     MatchParticipantInput(winnerPlayer, listOf(heroId(winnerHero))),
                     MatchParticipantInput(loserPlayer, listOf(heroId(loserHero))),
