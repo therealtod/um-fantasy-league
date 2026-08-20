@@ -1,7 +1,6 @@
 package com.umfl.matchimport
 
 import org.springframework.boot.context.properties.ConfigurationProperties
-import org.springframework.stereotype.Component
 import java.time.Duration
 
 /**
@@ -17,8 +16,16 @@ import java.time.Duration
  * database it has not connected to yet.
  *
  * See the `scraper` block in `application.yml`.
+ *
+ * Registered via `@ConfigurationPropertiesScan` on the application class, not
+ * `@Component`: this is a Kotlin `data class` of `val`s with no setters, and
+ * `@Component` makes Spring bind properties the JavaBean (setter) way rather
+ * than via the constructor — which only breaks once a value is actually
+ * supplied from the environment, since the constructor's defaults satisfy
+ * everything else. `@ConfigurationPropertiesScan` gets proper constructor
+ * binding instead. See [com.umfl.ratelimit.RateLimitProperties] for the twin
+ * of this mistake.
  */
-@Component
 @ConfigurationProperties(prefix = "scraper")
 data class ScraperProperties(
     /**
