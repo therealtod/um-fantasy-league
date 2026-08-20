@@ -7,11 +7,13 @@ import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import org.springframework.dao.DuplicateKeyException
+import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.security.oauth2.jwt.JwtClaimNames
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -114,6 +116,30 @@ class SupabaseAuthenticationConverterTest {
         val result = converter.convert(jwt(authUserId, mapOf("user_name" to "Taken"))).principal as Manager
 
         assertEquals("Taken1", result.handle)
+    }
+
+    @Test
+    fun `a non-UUID sub claim is rejected as bad credentials, not a raw exception`() {
+        val token = Jwt.withTokenValue("token")
+            .header("alg", "RS256")
+            .claim(JwtClaimNames.SUB, "not-a-uuid")
+            .issuedAt(Instant.now())
+            .expiresAt(Instant.now().plusSeconds(3600))
+            .build()
+
+        assertFailsWith<BadCredentialsException> { converter.convert(token) }
+    }
+
+    @Test
+    fun `a missing sub claim is rejected as bad credentials, not a raw exception`() {
+        val token = Jwt.withTokenValue("token")
+            .header("alg", "RS256")
+            .claim("placeholder", "value")
+            .issuedAt(Instant.now())
+            .expiresAt(Instant.now().plusSeconds(3600))
+            .build()
+
+        assertFailsWith<BadCredentialsException> { converter.convert(token) }
     }
 
     @Test

@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.core.convert.converter.Converter
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.security.authentication.AbstractAuthenticationToken
+import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.security.oauth2.jwt.Jwt
 import org.springframework.stereotype.Component
 import java.util.UUID
@@ -36,7 +37,13 @@ class SupabaseAuthenticationConverter(
 ) : Converter<Jwt, AbstractAuthenticationToken> {
 
     override fun convert(jwt: Jwt): AbstractAuthenticationToken {
-        val authUserId = UUID.fromString(jwt.subject)
+        val authUserId = try {
+            UUID.fromString(jwt.subject)
+        } catch (ex: IllegalArgumentException) {
+            throw BadCredentialsException("Malformed sub claim: ${jwt.subject}")
+        } catch (ex: NullPointerException) {
+            throw BadCredentialsException("Missing sub claim")
+        }
         val manager = managerRepository.findByAuthUserId(authUserId) ?: provisionManager(jwt, authUserId)
         return ManagerAuthenticationToken(manager, jwt, ManagerAuthorities.of(manager))
     }
