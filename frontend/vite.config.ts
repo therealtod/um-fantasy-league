@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // Keeps the browser on a single origin in development.
       '/api': {
-        target: 'https://bond-partition-cross-gold.trycloudflare.com',
+        target: 'https://crest-tremendous-competitions-modify.trycloudflare.com',
         changeOrigin: true,
       },
     },
