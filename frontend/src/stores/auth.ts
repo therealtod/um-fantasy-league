@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabaseClient'
 import { isDevelopmentIdentityMode } from '@/lib/developmentIdentity'
+import { isSafeRedirectPath } from '@/lib/redirectPath'
 
 // Supabase reports a failed OAuth callback (e.g. the provider rejecting the
 // code exchange) as `error`/`error_description` query and hash params on the
@@ -50,13 +51,14 @@ export const useAuthStore = defineStore('auth', () => {
     initialized.value = true
   }
 
-  async function signInWithDiscord() {
+  async function signInWithDiscord(redirectPath?: string) {
     if (isDevelopmentIdentityMode) return
 
     error.value = null
+    const path = redirectPath && isSafeRedirectPath(redirectPath) ? redirectPath : ''
     const { error: signInError } = await supabase.auth.signInWithOAuth({
       provider: 'discord',
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: `${window.location.origin}${path}` },
     })
     if (signInError) error.value = signInError.message
   }

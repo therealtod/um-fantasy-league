@@ -61,6 +61,18 @@ describe('router auth guard', () => {
     expect(router.currentRoute.value.name).toBe('lobby')
   })
 
+  it('sends an authenticated visit to /login onward to a same-origin redirect target', async () => {
+    currentSession.value = { access_token: 'token' } as Session
+    await router.push({ path: '/login', query: { redirect: '/standings' } })
+    expect(router.currentRoute.value.name).toBe('standings')
+  })
+
+  it('falls back to /lobby when the redirect target is not a safe same-origin path', async () => {
+    currentSession.value = { access_token: 'token' } as Session
+    await router.push({ path: '/login', query: { redirect: '//evil.example.com' } })
+    expect(router.currentRoute.value.name).toBe('lobby')
+  })
+
   it('allows an unauthenticated visit to /login', async () => {
     await router.push('/login')
     expect(router.currentRoute.value.name).toBe('login')

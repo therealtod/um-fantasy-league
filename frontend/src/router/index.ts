@@ -4,6 +4,7 @@ import LoginView from '@/views/LoginView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { useManagerStore } from '@/stores/manager'
+import { isSafeRedirectPath } from '@/lib/redirectPath'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -75,6 +76,8 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.name === 'login' && authStore.isAuthenticated) {
+    const redirect = to.query.redirect
+    if (typeof redirect === 'string' && isSafeRedirectPath(redirect)) return redirect
     return { name: 'lobby' }
   }
 })

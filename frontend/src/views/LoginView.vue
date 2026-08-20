@@ -1,7 +1,14 @@
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
+const route = useRoute()
+
+function signIn() {
+  const redirect = route.query.redirect
+  void authStore.signInWithDiscord(typeof redirect === 'string' ? redirect : undefined)
+}
 </script>
 
 <template>
@@ -14,7 +21,7 @@ const authStore = useAuthStore()
         Authenticate to draft rosters and enter tournaments.
       </p>
 
-      <button type="button" class="btn-primary mt-8 w-full" @click="authStore.signInWithDiscord()">
+      <button type="button" class="btn-primary mt-8 w-full" @click="signIn">
         Sign in with Discord
       </button>
 
