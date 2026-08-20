@@ -1,0 +1,40 @@
+# Builds the backend and scraper from local source, like docker-compose.yml,
+# but runs the backend against a remote Supabase Postgres instance instead of
+# a local `db` container -- for exercising prod-profile behavior (Supabase JWT
+# auth, no db/seed demo fixtures) without going through CI/CD or touching the
+# real deployment.
+#
+# This is NOT the VPS deployment -- that's deploy/docker-compose.prod.yml,
+# which instead pulls prebuilt ghcr.io images and lives on the box permanently.
+# This file is for local testing only: docker compose -f docker-compose.prod.yml up
+#
+# Needs a .env.prod alongside this file (copy .env.prod.example and fill in
+# real Supabase credentials -- .env.prod is git-ignored, never commit it).
+services:
+  backend:
+    build: .
+    container_name: umfl-backend
+    env_file:
+      - .env.prod
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SCRAPER_BASE_URL: http://scraper:3000
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  # Same as docker-compose.yml's scraper service -- see that file's comment
+  # for why it's a separate Playwright sidecar. Independent of which Postgres
+  # the backend talks to.
+  scraper:
+    build: ./tools/tabletopleague-scraper
+    container_name: umfl-scraper
+    environment:
+      SCRAPER_HOST: 0.0.0.0
+    expose:
+      - "3000"
