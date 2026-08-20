@@ -87,6 +87,19 @@ in `afterAll` of *every* class it annotates, so from the second test class onwar
 context points at a dead port. The container is started in a static initializer and lives for the
 JVM. Don't add the annotations back.
 
+Because every test there rolls back, **no `@TransactionalEventListener(AFTER_COMMIT)` in the app
+ever fires during the test suite.** A listener whose job is to *notify* can live with that
+(`StandingsSseHub` is verified by a pure unit test instead), but one whose job is to **invalidate**
+cannot: state a test wrote inside its rolled-back transaction, and something cached, would outlive
+the rollback into the next class through the shared context. So an invalidating listener uses
+`AFTER_COMPLETION` — `MatchResultCache` is the only one, and it also pairs that with a plain
+`@EventListener` so a write is visible to its own transaction. The base class additionally clears
+that cache in a `@BeforeEach`, which is a belt-and-braces against tests that mutate match tables by
+raw SQL and so publish nothing (`SchemaAndSeedTest` inserts into `match_game` directly), not the
+mechanism itself. Relatedly, the suite must stay sequential: there is no `junit-platform.properties`
+and turning on parallel execution would let two concurrently rolled-back transactions see each
+other's uncommitted rows through that shared cache.
+
 ktlint runs off the root `.editorconfig`, on the `intellij_idea` style baseline rather than the
 stricter `ktlint_official` one: the linter is there to *preserve* the existing formatting and catch
 the mechanical slips (unused imports, import order, stray whitespace), not to reformat the codebase
@@ -181,7 +194,10 @@ DTOs), `auth`, `common`, `config` and `ratelimit`.
 `*Repository` is the Spring Data JDBC write/aggregate-loading side, a `*Query`/`*QueryRepository` is
 a hand-written `JdbcClient` read projection, and an `*AdminRepository` is a `JdbcClient` *write* for
 the composite-keyed link tables Spring Data JDBC can't map. Don't reach for a repository derived-query
-method when the screen wants a joined projection, and don't add an ORM.
+method when the screen wants a joined projection, and don't add an ORM. There is one `*Cache` —
+`MatchResultCache`, an in-memory read-through in front of `MatchResultQuery` — and it exists only
+because its key has a complete invalidation signal (see the standings section). A second one wants
+that same argument made explicitly, not a precedent.
 
 `TournamentEntry` is the manager-facing aggregate root — it owns `EntrySlot`s via `@MappedCollection`
 (list index → `entry_slot.slot_index`) and is saved as one unit. `manager` is written on
@@ -199,7 +215,12 @@ below; nothing outside that surface writes reference data or results.
   `RosterPolicy.validateLock` takes the budget from the entry, never the tournament.
 - **Nothing writes points.** Match results are written by the Admin API (see below), but every
   point total is still derived at read time in `StandingsService`; `totalCost` is derived from
-  slots. Do not materialise either.
+  slots. Do not materialise either. `MatchResultCache` is not a loophole in that: it holds the
+  fold's *input* — the assembled match list — in memory, never its output, and the asymmetry is
+  the point. Matches have exactly one writer and so a complete invalidation signal; a total would
+  depend on coefficients and costs that are retuned with a bare UPDATE and announce nothing. So
+  the rules, rosters and prices behind a board stay read live on every request, and only a
+  *match* can ever be a write behind.
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
   `scoring_coefficient`, the budget is `tournament.credit_grant` — both retuned with an UPDATE. Don't
   reintroduce a tunables block in `application.yml`. There are exactly two exceptions, and both are
@@ -208,7 +229,9 @@ below; nothing outside that surface writes reference data or results.
   operational tuning for how hard a deployed instance throttles per client IP; and `scraper.*`
   (`ScraperProperties`, see Match import below), the address of the scraper sidecar. Neither belongs
   in the database the way a scoring weight or a budget does. A third would want the same
-  justification, not a precedent.
+  justification, not a precedent — `MatchResultCache`'s sizing is Kotlin constants in a companion
+  object for exactly that reason, as is `StandingsSseHub`'s: how many match lists a JVM holds is
+  neither domain data nor deployment topology.
 - **A match names where it is recorded elsewhere, and that link is its identity.**
   `tournament_match.external_link` is `not null` with a unique index per tournament
   (`uq_tournament_match_external_link`, added by `V9__external_link_required.sql`). It is what stops
@@ -309,6 +332,38 @@ competition ranking (1, 2, 2, 4). The ticker's polling key is **`sinceMatchId`**
 visible). The event carries no board/ticker payload — the frontend already knows how to pull fresh
 data via the existing `/standings` and `/matches` endpoints, so the stream is purely a "poll now"
 signal, not a second copy of the data.
+
+That push is also what makes the read path bursty, and `MatchResultCache` (`com.umfl.match`) is the
+answer to it: one write tells up to 200 tabs per tournament to refetch, and each pulls *both* the
+board and the ticker head, so uncached that is hundreds of simultaneous runs of
+`MatchResultQuery.findByTournament`'s six unbounded queries against a ten-connection pool. The cache
+is a read-through front for that query — `StandingsService` calls `findByTournament` /
+`findByTournamentSince` on the cache, never on the query — and Caffeine's per-key atomic `get`
+collapses the burst onto one load. **It holds the fold's input only**; see the "Nothing writes
+points" invariant for why a cached `StandingsBoard` would be the thing with no complete
+invalidation signal. The ticker's page is sliced out of the same cached list rather than requeried:
+`(played_at, id)` is a total order, so reversing the ascending list *the database ordered* is
+exactly the ticker's `desc` — which is why `findByTournamentSince` survives with no production
+caller, as the SQL oracle `MatchResultCacheIntegrationTest` checks the slice against.
+
+Three details there are load-bearing and easy to undo by accident. **Invalidation listens to
+`StandingsUpdateEvent` twice**, once as a plain `@EventListener` (immediately, inside the writing
+transaction, so the writer sees its own effect) and once as `@TransactionalEventListener` — and that
+second one is **`AFTER_COMPLETION`, not `AFTER_COMMIT`**, because a rollback un-writes rows the
+cache may already have loaded inside that transaction and so invalidates just as surely as a commit.
+`StandingsSseHub` stays `AFTER_COMMIT` on the same event, since telling browsers "something changed"
+about a rolled-back write would be a lie; the asymmetry is deliberate. **`invalidate` bumps a
+per-tournament version and deliberately does not evict** — a bumped version already means no reader
+accepts the entry, and Caffeine's `invalidate` would have to take the key's lock, putting an admin's
+write behind a stranger's in-flight query. That version stamp is what closes the
+invalidate-during-load race (a reader that misses, loads across a write, and would otherwise store a
+stale list nothing ever invalidates again). And **there is no `expireAfterWrite`**: a TTL cannot add
+a guarantee the stamp does not already give, and would only turn a missing hook into an intermittent
+bug. A hero or board **rename** is the one staleness a match write cannot announce, since
+`heroName`/`mapName` are copied into an assembled `MatchResult` — `AdminHeroService.update` and
+`AdminMapService.update` publish `ReferenceDataRenamedEvent` for it, an event rather than a direct
+call so it gets the same two-phase treatment. `AdminTournamentService.delete` needs no hook: every
+standings route calls `requireTournament` and 404s first.
 
 Controllers take the caller via `@CurrentManager` (resolved by `CurrentManagerArgumentResolver`
 against the `CurrentManagerProvider` seam); a nullable parameter yields `currentOrNull()`. Errors go

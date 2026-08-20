@@ -2,7 +2,9 @@ package com.umfl.map
 
 import com.umfl.common.ConflictException
 import com.umfl.common.NotFoundException
+import com.umfl.match.ReferenceDataRenamedEvent
 import com.umfl.tournament.TournamentService
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -12,6 +14,7 @@ class AdminMapService(
     private val gameMapRepository: GameMapRepository,
     private val mapPoolAdminRepository: MapPoolAdminRepository,
     private val tournamentService: TournamentService,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
 
     @Transactional
@@ -22,6 +25,12 @@ class AdminMapService(
         return gameMapRepository.save(GameMap(name = name))
     }
 
+    /**
+     * Announces the rename for the same reason [com.umfl.hero.AdminHeroService.update]
+     * does: an assembled [com.umfl.match.MatchResult] carries each game's map
+     * name as a copy, so [com.umfl.match.MatchResultCache] has to drop what it
+     * holds.
+     */
     @Transactional
     fun update(mapId: Long, name: String): GameMap {
         val existing = requireMap(mapId)
@@ -29,7 +38,11 @@ class AdminMapService(
         if (collision != null && collision.id != mapId) {
             throw ConflictException("A map named '$name' already exists.")
         }
-        return gameMapRepository.save(existing.copy(name = name))
+        val saved = gameMapRepository.save(existing.copy(name = name))
+        if (existing.name != name) {
+            eventPublisher.publishEvent(ReferenceDataRenamedEvent("map $mapId"))
+        }
+        return saved
     }
 
     /** Adds [mapId] to [tournamentId]'s board pool. Idempotent — there is nothing to "re-price". */

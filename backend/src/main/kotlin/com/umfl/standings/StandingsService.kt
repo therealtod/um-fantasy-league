@@ -1,6 +1,6 @@
 package com.umfl.standings
 
-import com.umfl.match.MatchResultQuery
+import com.umfl.match.MatchResultCache
 import com.umfl.scoring.HeroRole
 import com.umfl.scoring.MatchMetrics
 import com.umfl.scoring.ScoringEngine
@@ -86,15 +86,22 @@ data class TickerEntry(
  * Folds recorded matches into a leaderboard.
  *
  * Points are computed here at read time and never stored. Coefficients are
- * mutable reference data, so a stored total would be a cache with nothing to
+ * mutable reference data, so a stored *total* would be a cache with nothing to
  * invalidate it; at tournament scale the fold is microseconds, and each
  * (hero, match) pair is priced exactly once regardless of how many rosters hold
  * that hero.
+ *
+ * What is cached is the fold's *input*, in [MatchResultCache] — the assembled
+ * match list, which unlike a total has exactly one writer and therefore a
+ * complete invalidation signal. The rules, rosters and hero costs read below
+ * are deliberately not cached for precisely the reason the paragraph above
+ * gives, so re-pricing a hero, retuning a coefficient or changing a roster is
+ * visible on the very next request.
  */
 @Service
 class StandingsService(
     private val standingsQuery: StandingsQuery,
-    private val matchResultQuery: MatchResultQuery,
+    private val matchResultCache: MatchResultCache,
     private val scoringRuleSetQuery: ScoringRuleSetQuery,
 ) {
 
@@ -113,11 +120,23 @@ class StandingsService(
      * no retry handling because the transaction is read-only: Postgres only
      * raises a serialization failure on a write/write conflict, which a
      * read-only transaction can never have.
+     *
+     * [MatchResultCache] narrows what that buys without making it redundant. On
+     * a miss the six assembly queries still run inside *this* transaction —
+     * the skew above, unchanged. On a hit the list was assembled inside some
+     * earlier reader's `REPEATABLE_READ` transaction and is internally coherent
+     * in exactly the same way, just against an older snapshot. The guarantee is
+     * therefore "the match list is a coherent snapshot", not "every fact on this
+     * board came from one snapshot" — the rules read and the roster read are one
+     * statement each and describe facts uncorrelated with match writes, so
+     * nothing skews against anything. The worst case is a board pricing a match
+     * list one write behind, which is the staleness the cache is for and which
+     * the SSE push already corrects.
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun board(tournamentId: Long): StandingsBoard {
         val rules = resolveRules(tournamentId)
-        val matches = matchResultQuery.findByTournament(tournamentId)
+        val matches = matchResultCache.findByTournament(tournamentId)
         val currentRound = matches.maxOfOrNull { it.round } ?: 0
 
         // Every hero the tournament touched, priced once, keyed for roster lookup.
@@ -188,7 +207,7 @@ class StandingsService(
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     fun ticker(tournamentId: Long, sinceMatchId: Long = 0, limit: Int = 25): List<TickerEntry> {
         val rules = resolveRules(tournamentId)
-        return matchResultQuery.findByTournamentSince(tournamentId, sinceMatchId, limit).map { match ->
+        return matchResultCache.findByTournamentSince(tournamentId, sinceMatchId, limit).map { match ->
             // Keyed by (game, hero), not hero alone: the same hero can appear in two
             // different games of a series with two different scores.
             val contextsByGameAndHero = match.heroContexts()

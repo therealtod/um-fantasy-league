@@ -1,6 +1,7 @@
 package com.umfl.tournament
 
 import com.umfl.common.ConflictException
+import com.umfl.match.MatchResultCache
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -9,6 +10,7 @@ import java.time.LocalDate
 class AdminTournamentService(
     private val tournamentRepository: TournamentRepository,
     private val tournamentService: TournamentService,
+    private val matchResultCache: MatchResultCache,
 ) {
 
     @Transactional
@@ -89,10 +91,16 @@ class AdminTournamentService(
      *
      * The operation is allowed for any tournament status, but requires that
      * the tournament exists.
+     *
+     * The [MatchResultCache] drop is hygiene rather than correctness: every
+     * standings route calls [TournamentService.requireTournament] first and so
+     * 404s before a cached list could be served. It just stops a deleted
+     * tournament's matches occupying the cache until something evicts them.
      */
     @Transactional
     fun delete(tournamentId: Long) {
         val existing = tournamentService.requireTournament(tournamentId)
         tournamentRepository.delete(existing)
+        matchResultCache.invalidate(tournamentId)
     }
 }

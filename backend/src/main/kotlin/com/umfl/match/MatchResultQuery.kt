@@ -13,9 +13,16 @@ import java.sql.ResultSet
  * bans, so a single join would fan out to a ragged cross product that then has
  * to be de-duplicated anyway.
  *
- * Read-only by design: the admin API (`com.umfl.match.AdminMatchService`) is
- * the sole write path, via the `TournamentMatch` aggregate — this class never
- * writes, so reads and writes cannot silently drift out of step.
+ * Read-only by design: the admin API ([AdminMatchService]) is the sole write
+ * path, via the `TournamentMatch` aggregate — this class never writes, so reads
+ * and writes cannot silently drift out of step. That single-writer property is
+ * now doubly load-bearing: it is the whole premise of [MatchResultCache]'s
+ * invalidation argument, since one writer announcing every write is what makes
+ * one event a complete signal.
+ *
+ * The public standings path reaches these six queries *through* that cache
+ * rather than directly, so [findByTournament] here is the load behind a miss,
+ * not a per-request cost.
  */
 @Repository
 class MatchResultQuery(private val jdbcClient: JdbcClient) {
@@ -112,6 +119,13 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
      * The polling key is the id, not `played_at`: parallel tables share a start
      * time, so `played_at` is not unique, while `id` is a monotonic bigserial
      * seeded in chronological order. Display order is still `played_at`.
+     *
+     * **Not dead code, despite having no production caller.** The ticker now
+     * slices its page out of the list [MatchResultCache] already holds rather
+     * than issuing this query, and `StandingsIntegrationTest` asserts the two
+     * agree. This is the oracle in that comparison — the authoritative
+     * statement, in SQL, of what that slice is supposed to mean. Deleting it
+     * would leave the Kotlin reimplementation with nothing to check it.
      */
     fun findByTournamentSince(tournamentId: Long, sinceMatchId: Long, limit: Int): List<MatchResult> =
         assemble(

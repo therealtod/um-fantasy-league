@@ -16,8 +16,15 @@ import java.time.Instant
 /**
  * The admin write path for match results. Everything downstream — standings,
  * ticker, points — is derived at read time from what this saves, so recording,
- * correcting or deleting a match here is the entire surface area; nothing
- * else needs to be recomputed or invalidated.
+ * correcting or deleting a match here is the entire surface area; no total is
+ * ever recomputed and stored.
+ *
+ * Because this is the *only* writer of `tournament_match` and its children, the
+ * [StandingsUpdateEvent] published by all three methods is a complete account of
+ * when that data changes. Two things listen to it: [com.umfl.standings.StandingsSseHub],
+ * which tells watching tabs to refetch, and [MatchResultCache], which drops the
+ * assembled match list it holds for the tournament. Keep publishing it from any
+ * method added here that writes a match.
  */
 @Service
 class AdminMatchService(

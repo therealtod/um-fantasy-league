@@ -83,6 +83,13 @@ class StandingsSseHub {
         return emitter
     }
 
+    /**
+     * `AFTER_COMMIT`, deliberately unlike [com.umfl.match.MatchResultCache]'s
+     * listener on this same event, which is `AFTER_COMPLETION`. Telling browsers
+     * "something changed" about a write that rolled back would be a lie, whereas
+     * a rollback invalidates a cache just as surely as a commit does. Don't
+     * unify the two phases.
+     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun onStandingsUpdate(event: StandingsUpdateEvent) {
         val emitters = emittersByTournament[event.tournamentId] ?: return

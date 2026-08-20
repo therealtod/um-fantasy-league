@@ -2,7 +2,9 @@ package com.umfl.hero
 
 import com.umfl.common.ConflictException
 import com.umfl.common.NotFoundException
+import com.umfl.match.ReferenceDataRenamedEvent
 import com.umfl.tournament.TournamentService
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -14,6 +16,7 @@ class AdminHeroService(
     private val heroPoolAdminRepository: HeroPoolAdminRepository,
     private val heroQueryRepository: HeroQueryRepository,
     private val tournamentService: TournamentService,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
 
     @Transactional
@@ -24,6 +27,13 @@ class AdminHeroService(
         return heroRepository.save(Hero(name = name, imageUrl = imageUrl))
     }
 
+    /**
+     * A rename is announced; an image change is not. `heroes.name` is copied
+     * into every assembled [com.umfl.match.MatchResult] that fielded, drafted or
+     * banned this hero, so a held match list still spells the old name until
+     * something says otherwise — see [com.umfl.match.MatchResultCache]. Nothing
+     * else on this row reaches a match.
+     */
     @Transactional
     fun update(heroId: Long, name: String, imageUrl: String?): Hero {
         val existing = requireHero(heroId)
@@ -31,7 +41,11 @@ class AdminHeroService(
         if (collision != null && collision.id != heroId) {
             throw ConflictException("A hero named '$name' already exists.")
         }
-        return heroRepository.save(existing.copy(name = name, imageUrl = imageUrl))
+        val saved = heroRepository.save(existing.copy(name = name, imageUrl = imageUrl))
+        if (existing.name != name) {
+            eventPublisher.publishEvent(ReferenceDataRenamedEvent("hero $heroId"))
+        }
+        return saved
     }
 
     /** Adds [heroId] to [tournamentId]'s pool at [cost], or re-prices it if already present. */
