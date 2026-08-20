@@ -65,6 +65,7 @@ object MatchMetrics {
         "LOSS" to ::loss,
         "HEALTH_REMAINING" to ::healthRemaining,
         "HEALTH_DIFFERENTIAL" to ::healthDifferential,
+        "HEALTH_DIFFERENTIAL_TWO_WAY" to ::healthDifferentialTwoWay,
         "SHUTOUT" to ::shutout,
     )
 
@@ -145,17 +146,49 @@ private fun healthRemaining(context: MetricContext): Double =
     context.participant?.healthRemaining?.toDouble() ?: 0.0
 
 /**
- * This hero's health minus the healthiest opponent's, in a game it won. Unlike
- * [win]/[loss] this is not symmetric across the two sides -- a losing hero
- * scores 0.0 here regardless of how much health it had left, since there is
- * no losing side of this metric to price.
+ * This hero's health minus the healthiest opponent's, in one game it played.
+ * Null when the hero did not play the game or had no opponent in it -- both
+ * differential metrics read as 0.0 in that case, they only differ on the
+ * losing side.
+ *
+ * Measured against the *healthiest* opponent rather than "the loser" so it
+ * generalises past two sides: every hero is priced against the best of the
+ * rest, whichever of them won.
+ */
+private fun healthGap(context: MetricContext): Double? {
+    val participant = context.participant ?: return null
+    val best = context.opponents.maxOfOrNull { it.healthRemaining } ?: return null
+    return (participant.healthRemaining - best).toDouble()
+}
+
+/**
+ * The [healthGap] of a game this hero **won**. Unlike [win]/[loss] this is not
+ * symmetric across the two sides -- a losing hero scores 0.0 here regardless of
+ * how much health it had left, since there is no losing side of this metric to
+ * price.
+ *
+ * [healthDifferentialTwoWay] is the ungated variant of exactly this. The two are
+ * a deliberate pair rather than a duplication: an admin prices one or the other
+ * (or both) by adding the matching `scoring_coefficient` row, which is why this
+ * is two registry keys instead of a flag on one.
  */
 private fun healthDifferential(context: MetricContext): Double {
     val participant = context.participant ?: return 0.0
     if (!participant.isWinner) return 0.0
-    val best = context.opponents.maxOfOrNull { it.healthRemaining } ?: return 0.0
-    return (participant.healthRemaining - best).toDouble()
+    return healthGap(context) ?: 0.0
 }
+
+/**
+ * The [healthGap] of a game this hero played, won or lost -- so the loser scores
+ * the exact negative of what the winner scored, and a heavy defeat costs a
+ * manager as much as a clean victory earns. The overkill a losing hero can
+ * finish on (health below zero, per
+ * [com.umfl.match.MatchRule.LOSER_HAS_POSITIVE_HEALTH]) widens the gap on both
+ * sides alike.
+ *
+ * The win-gated [healthDifferential] is the other half of the pair; see its doc.
+ */
+private fun healthDifferentialTwoWay(context: MetricContext): Double = healthGap(context) ?: 0.0
 
 /**
  * A clean sweep: every opponent finished on zero health. Only awarded to a hero

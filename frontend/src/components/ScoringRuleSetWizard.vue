@@ -44,6 +44,7 @@ const knownMetrics = [
   'LOSS',
   'HEALTH_REMAINING',
   'HEALTH_DIFFERENTIAL',
+  'HEALTH_DIFFERENTIAL_TWO_WAY',
   'SHUTOUT',
 ]
 

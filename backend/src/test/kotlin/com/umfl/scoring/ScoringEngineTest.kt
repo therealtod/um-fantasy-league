@@ -181,6 +181,38 @@ class ScoringEngineTest {
     }
 
     @Test
+    fun `HEALTH_DIFFERENTIAL_TWO_WAY carries a negative contribution all the way to the total`() {
+        // The same weight an admin would give the win-gated key, on the ungated one:
+        // the shut-out loser is charged exactly what the winner is paid.
+        val twoWay = rules("HEALTH_DIFFERENTIAL_TWO_WAY" to "0.5000")
+
+        assertEquals(mapOf("HEALTH_DIFFERENTIAL_TWO_WAY" to 5.5), ScoringEngine.breakdown(contextFor(7), twoWay))
+        assertEquals(5.5, ScoringEngine.score(contextFor(7), twoWay))
+
+        assertEquals(mapOf("HEALTH_DIFFERENTIAL_TWO_WAY" to -5.5), ScoringEngine.breakdown(contextFor(11), twoWay))
+        assertEquals(-5.5, ScoringEngine.score(contextFor(11), twoWay))
+
+        assertTrue(twoWay.unknownMetrics.isEmpty(), "the registry implements it, so it is a column and not a warning")
+    }
+
+    @Test
+    fun `the two differential keys are independent columns an admin can price separately`() {
+        val both = rules("HEALTH_DIFFERENTIAL" to "0.5000", "HEALTH_DIFFERENTIAL_TWO_WAY" to "0.5000")
+
+        assertEquals(listOf("HEALTH_DIFFERENTIAL", "HEALTH_DIFFERENTIAL_TWO_WAY"), both.scoredMetrics)
+        assertEquals(
+            mapOf("HEALTH_DIFFERENTIAL" to 5.5, "HEALTH_DIFFERENTIAL_TWO_WAY" to 5.5),
+            ScoringEngine.breakdown(contextFor(7), both),
+            "the winner earns both, since they measure the same gap",
+        )
+        assertEquals(
+            mapOf("HEALTH_DIFFERENTIAL_TWO_WAY" to -5.5),
+            ScoringEngine.breakdown(contextFor(11), both),
+            "only the ungated key reaches the loser",
+        )
+    }
+
+    @Test
     fun `metric keys are matched case- and whitespace-insensitively`() {
         val sloppy = rules(" win " to "10.0000", "Appearance" to "1.0000")
 
