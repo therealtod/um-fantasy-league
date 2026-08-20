@@ -597,8 +597,8 @@ into the VPS to `docker compose pull && up -d` against `deploy/docker-compose.pr
 VPS keeps a copy of at `/opt/umfl`, alongside a `.env` — modeled on `deploy/.env.example` — that is
 managed by hand on the box, never passed through CI). The `prod` profile there talks to Supabase
 Postgres, so there is no `db` service in that compose file, unlike the root `docker-compose.yml`.
-`.github/workflows/frontend-ci.yml` runs on `frontend/**` changes — `npm ci`, `npm run type-check`,
-`npm test` (vitest) — as that side's merge gate; it does not build or deploy anything. Deployment of
+`.github/workflows/frontend-ci.yml` runs on `frontend/**` changes — `npm ci`, `npm run lint`,
+`npm run type-check`, `npm test` (vitest) — as that side's merge gate; it does not build or deploy anything. Deployment of
 the frontend stays separate: Cloudflare Pages is connected directly to the GitHub repo and builds
 `frontend/` on every push and PR (its own preview-deployment mechanism, running `vue-tsc -b && vite
 build`, no tests), independent of the backend pipeline — the two sides deploy independently since

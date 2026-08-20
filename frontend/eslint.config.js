@@ -35,6 +35,9 @@ export default defineConfigWithVueTs(
       // ordering bugs (e.g. an emit wired before the state it depends on) are consistent
       // and reviewable rather than incidental.
       'vue/attributes-order': 'error',
+      // Allow a deliberately-unused parameter/variable to opt out with the conventional
+      // `_` prefix (matches this codebase's existing usage, e.g. `_e` in test callbacks).
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
 )
