@@ -141,13 +141,22 @@ const currentTournament = computed(() =>
       <table class="w-max min-w-full border-collapse">
         <thead>
           <tr class="border-b border-edge bg-surface-lowest text-left">
-            <!-- Width and offset both come from `--pinned-rank-width`; `px-3` is
-                 what keeps the rank inside it. See `.cell-pinned-rank` in main.css. -->
-            <th class="label-caps cell-pinned-rank sticky z-20 bg-surface-lowest px-3 py-3">Rnk</th>
+            <!-- Width and offset both come from `--pinned-rank-width`; the padding
+                 is what keeps a two-digit rank inside it at the phone width. See
+                 `.cell-pinned-rank` in main.css. -->
+            <th class="label-caps cell-pinned-rank sticky z-20 bg-surface-lowest px-2 py-3 md:px-3">Rnk</th>
             <th
-              class="label-caps cell-pinned-edge cell-pinned-manager sticky z-20 bg-surface-lowest px-4 py-3 whitespace-nowrap"
+              class="label-caps cell-pinned-manager sticky z-20 bg-surface-lowest px-3 py-3 whitespace-nowrap md:px-4"
             >
               Manager
+            </th>
+            <!-- The headline number, pinned beside the identity: on a phone the
+                 breakdown scrolls away underneath it, the total never does. -->
+            <th
+              class="label-caps cell-pinned-edge cell-pinned-total cell-total-emphasis sticky z-20 bg-surface-lowest px-3 py-3 text-right text-cyan whitespace-nowrap"
+              title="Total points · last round below"
+            >
+              Total
             </th>
             <th class="label-caps px-4 py-3 whitespace-nowrap">Roster</th>
             <th
@@ -158,18 +167,16 @@ const currentTournament = computed(() =>
             >
               {{ metric.label }}
             </th>
-            <th class="label-caps px-4 py-3 text-right whitespace-nowrap">Last Rd</th>
-            <th class="label-caps px-4 py-3 text-right whitespace-nowrap">Total Pts</th>
           </tr>
         </thead>
         <tbody>
           <tr v-if="standings.loading">
-            <td :colspan="5 + metrics.length" class="px-4 py-6 font-mono text-sm text-ink-dim">
+            <td :colspan="4 + metrics.length" class="px-4 py-6 font-mono text-sm text-ink-dim">
               Loading standings…
             </td>
           </tr>
           <tr v-else-if="standings.rows.length === 0">
-            <td :colspan="5 + metrics.length" class="px-4 py-6 font-mono text-sm text-ink-dim">
+            <td :colspan="4 + metrics.length" class="px-4 py-6 font-mono text-sm text-ink-dim">
               No entries in this tournament yet.
             </td>
           </tr>
@@ -180,22 +187,39 @@ const currentTournament = computed(() =>
             :class="isMe(row.managerId) ? 'row-opaque-mine' : 'row-opaque'"
           >
             <td
-              class="stat-value cell-pinned cell-pinned-rank px-3 py-3 text-sm"
+              class="stat-value cell-pinned cell-pinned-rank px-2 py-3 text-sm md:px-3"
               :class="isMe(row.managerId) ? 'text-magenta' : 'text-ink-dim'"
             >
               {{ row.rank }}
             </td>
-            <td class="cell-pinned cell-pinned-edge cell-pinned-manager px-4 py-3">
+            <td class="cell-pinned cell-pinned-manager px-3 py-3 md:px-4">
               <!-- Capped: this column is pinned, so an unusually long display
-                   name would otherwise eat the width the metrics scroll into. -->
+                   name would otherwise eat the width the metrics scroll into —
+                   and push the total's pin offset off the column boundary. -->
               <p
-                class="max-w-[9rem] truncate font-mono text-xs font-bold uppercase"
+                class="max-w-[6rem] truncate font-mono text-xs font-bold uppercase md:max-w-[9rem]"
                 :class="isMe(row.managerId) ? 'text-magenta' : 'text-ink'"
               >
                 {{ row.handle }}
               </p>
-              <p class="max-w-[9rem] truncate font-mono text-[10px] text-ink-dim">
+              <p class="max-w-[6rem] truncate font-mono text-[10px] text-ink-dim md:max-w-[9rem]">
                 {{ row.displayName }}
+              </p>
+            </td>
+            <td
+              class="cell-pinned cell-pinned-edge cell-pinned-total cell-total-emphasis px-3 py-3 text-right"
+            >
+              <p
+                class="stat-value text-base whitespace-nowrap md:text-lg"
+                :class="isMe(row.managerId) ? 'text-magenta' : 'text-ink'"
+              >
+                {{ row.totalPoints.toFixed(1) }}
+              </p>
+              <!-- The round's gain rides under the total rather than in a column
+                   of its own: the two numbers are read together, and a phone has
+                   no width to spare. -->
+              <p class="stat-value mt-1 text-[10px] whitespace-nowrap text-cyan">
+                {{ points(row.roundPoints) }} rd
               </p>
             </td>
             <td class="min-w-[12rem] px-4 py-3 font-mono text-[11px] text-ink-muted">
@@ -208,12 +232,6 @@ const currentTournament = computed(() =>
               :class="metricClass(row.breakdown[metric.metric] ?? 0, metric)"
             >
               {{ points(row.breakdown[metric.metric] ?? 0) }}
-            </td>
-            <td class="stat-value px-4 py-3 text-right text-xs whitespace-nowrap text-cyan">
-              {{ points(row.roundPoints) }}
-            </td>
-            <td class="stat-value px-4 py-3 text-right text-sm whitespace-nowrap text-ink">
-              {{ row.totalPoints.toFixed(1) }}
             </td>
           </tr>
         </tbody>

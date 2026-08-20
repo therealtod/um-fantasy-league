@@ -16,7 +16,13 @@ test.describe('responsive layout', () => {
     for (const route of ROUTES) {
       await test.step(route, async () => {
         await page.goto(`${PLAYER_A_URL}${route}`)
-        await page.waitForLoadState('networkidle')
+        await page.waitForLoadState('load')
+        // Idleness is what we want — an overflow comes from rendered data — but
+        // /standings holds an SSE connection open for live results, so the
+        // network never goes idle there and an unbounded wait times out the test
+        // before it measures anything. Give it a bounded chance, then measure
+        // either way: by the time this expires the view has long since painted.
+        await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {})
 
         const overflow = await page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,

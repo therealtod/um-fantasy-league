@@ -386,8 +386,13 @@ the closed drawer's links in the tab order. **`lg:` (1024px)** is where `RosterB
 a second `BudgetMeter` rides `sticky top-0` above the pool so the budget stays visible while picking.
 
 The standings leaderboard scrolls horizontally rather than shrinking, since its column count comes
-from the active rule set and isn't knowable in advance. Rank and Manager stay pinned while it
-scrolls, which costs a few non-obvious rules in `main.css` — they're commented where they live, next
+from the active rule set and isn't knowable in advance. Rank, Manager **and Total** stay pinned
+while it scrolls — the total is the number the page exists to report, so it sits beside the
+identity rather than past the whole breakdown, where a phone could only reach it by scrolling. The
+round's own gain rides as a sub-line under the total instead of a `Last Rd` column of its own. That
+costs a few non-obvious rules in `main.css` — each pinned column's width is the offset the next one
+pins at, so the chain derives from two shared custom properties, and a cell's content has to stay
+inside its declared width or every offset after it drifts. They're commented where they live, next
 to `.cell-pinned`.
 
 `e2e/responsive.spec.ts` guards all of this from the `mobile` Playwright project (Pixel 5): it

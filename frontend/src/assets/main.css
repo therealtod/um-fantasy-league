@@ -217,18 +217,36 @@
     z-index: 1;
     background-color: inherit;
   }
-  /* The Rank column's width *is* the offset the Manager column pins at, so both
-     derive from one value — as two hand-matched literals they drift silently and
-     the only symptom is a misaligned seam. `sticky` has no way to say "start
-     where the previous sticky column ends", hence the shared constant.
+  /* Each pinned column's width *is* the offset the next one pins at, so the whole
+     chain derives from two values — as hand-matched literals they drift silently
+     and the only symptom is a misaligned seam. `sticky` has no way to say "start
+     where the previous sticky column ends", hence the shared constants. Total is
+     the third link: it pins past rank *and* manager, so it is the one that breaks
+     first if either width stops being true.
      Caveat CSS can't remove: under `table-layout: auto` a cell's width is a
-     minimum, so rank content plus its `px-3` has to stay inside 3rem or the
-     column grows and the offset stops lining up. Fixed layout would make the
-     width authoritative but would break the metric columns, which size to
-     content because their count comes from the active rule set. */
+     minimum, so each column's content plus its padding has to stay inside the
+     declared width or the column grows and every offset after it stops lining up.
+     That is what the `max-w-*` cap on the manager cell's two lines is for. Fixed
+     layout would make the widths authoritative but would break the metric columns,
+     which size to content because their count comes from the active rule set.
+     Auto layout can also widen these columns the other way, when `min-w-full`
+     stretches a narrow table across a wide panel — harmless, since a table that
+     fits has no horizontal scroll to pin against. */
   .cell-pinned-rank,
-  .cell-pinned-manager {
-    --pinned-rank-width: 3rem;
+  .cell-pinned-manager,
+  .cell-pinned-total {
+    --pinned-rank-width: 2.5rem;
+    --pinned-manager-width: 7.5rem;
+  }
+  /* Phone first: the identity block is squeezed so the breakdown keeps a usable
+     scrolling gutter next to it. Desktop can afford the room. */
+  @media (width >= 48rem) {
+    .cell-pinned-rank,
+    .cell-pinned-manager,
+    .cell-pinned-total {
+      --pinned-rank-width: 3rem;
+      --pinned-manager-width: 11rem;
+    }
   }
   .cell-pinned-rank {
     left: 0;
@@ -236,6 +254,41 @@
   }
   .cell-pinned-manager {
     left: var(--pinned-rank-width);
+    width: var(--pinned-manager-width);
+  }
+  .cell-pinned-total {
+    left: calc(var(--pinned-rank-width) + var(--pinned-manager-width));
+  }
+  /* Fractional device-pixel rounding (a phone at a 2.75x scale, say) can leave a
+     hairline between two adjacent pinned cells, and the columns scrolling
+     underneath show through it as clipped glyphs. Each pinned cell paints its own
+     background 1px into the seam on its left. `background-color: inherit` resolves
+     on the pseudo-element too — to the row colour in the body, to the header's own
+     surface in `thead` — so the one rule serves both, and it only ever overlaps a
+     cell of the same colour. The rightmost pinned cell has nothing to its right,
+     so `.cell-pinned-edge`'s seam line stays visible. */
+  .cell-pinned-rank::before,
+  .cell-pinned-manager::before,
+  .cell-pinned-total::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -1px;
+    width: 1px;
+    background-color: inherit;
+  }
+  /* The total is the number the whole page exists to report, so its column reads
+     as its own block rather than one more cell. A flat tint painted as a
+     *background-image* — two identical gradient stops — because `.cell-pinned`
+     needs `background-color: inherit` to stay the row's opaque colour, which is
+     what hides the metric columns scrolling underneath it. An image layers over
+     that instead of replacing it, so one class serves both row colours. */
+  .cell-total-emphasis {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--color-cyan) 7%, transparent),
+      color-mix(in srgb, var(--color-cyan) 7%, transparent)
+    );
   }
   /* The seam at the pinned/scrolling boundary. An inset shadow rather than a
      border-right: under border-collapse the borders belong to the table, not
