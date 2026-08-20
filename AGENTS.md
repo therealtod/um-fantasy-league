@@ -365,9 +365,22 @@ removes one, so an incremental "since" fetch could miss either. There's still no
 timer; the server-pushed event is what triggers each `refresh()`. The stream is closed and reopened
 on tournament switch and closed on unmount.
 
+`src/domain` is this side's answer to the backend's pure `object`s: plain functions over plain data,
+no Vue import, tested as data rather than through a `mount()`. A rule that a component can state
+without a DOM belongs there. Two modules live in it.
+
 `src/domain/rosterPolicy.ts` intentionally duplicates the Kotlin budget arithmetic (`budgetStatus`)
 so the meter reacts on click. **If you change that arithmetic, change both sides** —
 `RosterPolicy.kt` and `rosterPolicy.ts` — and their tests. The server stays authoritative.
+
+`src/domain/matchForm.ts` is `MatchResultWizard.vue`'s whole domain half — the `MatchForm` model,
+the seeding (`formFromPreview`, `formFromMatch`), the payload conversion (`toPayload`), the dropdown
+option lists, the edits that cascade (`removeDraftPick`, `removeGame`, `assignBanToSide`,
+`setWinner`) and `validate`. It has no counterpart in Kotlin the way `rosterPolicy.ts` does: it is
+not a mirror of a server rule but the arithmetic that keeps this one *form* consistent with the API
+it posts to. The component imports it as `matchForm.*`, so a `matchForm.` call site marks a rule and
+anything without one is rendering. Tests split the same way — `matchForm.spec.ts` is data-in/data-out
+and owns every rule, `MatchResultWizard.spec.ts` mounts only to pin the wiring between the two.
 
 Routes: `/lobby`, `/standings` and `/login` are public; `/tournaments/:tournamentId/roster` requires
 a session plus a `beforeEnter` guard that bounces to the lobby unless the manager has an entry or
@@ -545,10 +558,13 @@ with the winner a **radio** rather than a checkbox — exactly one side wins, an
 to express — plus a client-side check so an untouched winner reads as a prompt instead of a 422.
 Pre-bans come last, in their own section, offering only heroes neither side drafted.
 
-The one real conversion is at save. The form holds the arsenal; the API wants
+All of that lives in `src/domain/matchForm.ts` (see Frontend architecture above), not in the SFC —
+the component holds the reactive `form` ref, the template and the API calls, and delegates every
+rule. The one real conversion is at save. The form holds the arsenal; the API wants
 `draftedHeroIds` *without* the banned heroes (`BANNED_HERO_DRAFTED` keeps picks and bans disjoint),
 so `toPayload` subtracts each side's bans back out and emits them as `bans` carrying their `side`.
-`formFromMatch` and `formFromPreview` do the union in the other direction — keep the three in step.
+`formFromMatch` and `formFromPreview` do the union in the other direction — keep the three in step,
+which `matchForm.spec.ts` guards by running a saved match and a preview through both.
 `removeDraftPick` cascades: dropping a hero off an arsenal also clears the games and ban rows that
 named it, since a select holding an id no longer in its option list renders blank while still
 submitting.
@@ -557,9 +573,10 @@ A ban read back with **no side** (anything recorded before `hero_ban.side` exist
 `unassignedBans` and blocks the save until the admin places it on a side. It is neither dropped nor
 guessed: the ban already scored points, so losing it would silently move the standings.
 
-Its client-side checks belong in the `validationError` computed. What is left there is what no single
-dropdown can see because it spans two: `DUPLICATE_BAN` across both sides plus the pre-bans, and a
-pre-ban naming a hero someone drafted afterwards.
+Its client-side checks belong in `matchForm.validate`, which the component wraps in a computed so a
+banner clears as the admin types rather than standing until the next save. What is left in it is what
+no single dropdown can see because it spans two: `DUPLICATE_BAN` across both sides plus the pre-bans,
+and a pre-ban naming a hero someone drafted afterwards.
 
 `MatchListAdmin` renders the games grouped under their maps, derives the games-won tally per side,
 and under each side names both its drafted-but-unfielded picks — the heroes that scored an appearance

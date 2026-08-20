@@ -3,15 +3,14 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
-import type {
-  BanType,
-  Hero,
-  MapAdminDto,
-  MatchImportPreviewDto,
-  MatchGameRequest,
-  MatchResultDto,
-  RecordMatchRequest,
-} from '@/api/types'
+import type { BanType, Hero, MapAdminDto, MatchImportPreviewDto } from '@/api/types'
+// The form model, the seeding, the payload conversion, the option lists and the
+// validation all live in the domain module, as plain functions over plain data.
+// What is left here is the reactive wrapper, the template, and the API calls —
+// so a `matchForm.` call site is the marker for "this is a rule, tested in
+// matchForm.spec.ts", and anything without one is rendering.
+import * as matchForm from '@/domain/matchForm'
+import type { MatchForm, SidedBanType } from '@/domain/matchForm'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
 interface Props {
@@ -41,9 +40,6 @@ const violations = ref<string[]>([])
 const submitAttempted = ref(false)
 const isInitialized = ref(false)
 
-/** A ban struck out of one side's draft. A `PRE_BAN` belongs to neither and lives in `preBans`. */
-type SidedBanType = Extract<BanType, 'OPPONENT_BAN' | 'SELF_BAN'>
-
 const sidedBanTypes: { value: SidedBanType; label: string }[] = [
   { value: 'OPPONENT_BAN', label: 'Opponent ban' },
   { value: 'SELF_BAN', label: 'Self ban' },
@@ -60,70 +56,7 @@ const banTypeLabels: Record<BanType, string> = {
 const mapPool = ref<MapAdminDto[]>([])
 const heroPool = ref<Hero[]>([])
 
-/**
- * One side of the series, as this form holds it.
- *
- * `draftedHeroIds` is that side's *whole* arsenal — every hero it took, whether
- * it went on to field the hero, leave it on the bench, or lose it to a ban. That
- * is deliberately a superset of what the API's own `draftedHeroIds` carries,
- * which excludes bans (`BANNED_HERO_DRAFTED` keeps picks and bans disjoint);
- * `toPayload` subtracts them back out at save time. Holding the superset here is
- * the whole point of the screen: it is the list the admin reads off the match
- * card, and it is what every hero dropdown below filters down to.
- */
-interface SideForm {
-  playerLabel: string
-  draftedHeroIds: number[]
-  /** Struck out of *this* side's draft. Every `heroId` here is also on `draftedHeroIds`. */
-  bans: { heroId: number; banType: SidedBanType }[]
-}
-
-interface MatchForm {
-  round: number
-  playedAt: string
-  externalLink: string
-  sides: SideForm[]
-  games: MatchGameRequest[]
-  /** Struck before sides were known, so on neither draft. */
-  preBans: { heroId: number }[]
-  /**
-   * Typed bans that came back with no side — every `hero_ban` row written before
-   * V7 added the column looks like this. The server tolerates them
-   * (`BAN_SIDE_INVALID` polices an impossible side, never a missing one), but
-   * this form cannot show a ban it cannot place, so it asks the admin to assign
-   * one before saving rather than silently dropping or guessing it.
-   */
-  unassignedBans: { heroId: number; banType: SidedBanType }[]
-}
-
-function blankGame(gameNumber: number): MatchGameRequest {
-  return {
-    gameNumber,
-    mapId: 0,
-    participants: [
-      { heroId: 0, healthRemaining: 0, isWinner: false },
-      { heroId: 0, healthRemaining: 0, isWinner: false },
-    ],
-  }
-}
-
-function blankSide(): SideForm {
-  return { playerLabel: '', draftedHeroIds: [], bans: [] }
-}
-
-function blankForm(): MatchForm {
-  return {
-    round: 1,
-    playedAt: new Date().toISOString(),
-    externalLink: '',
-    sides: [blankSide(), blankSide()],
-    games: [blankGame(1)],
-    preBans: [],
-    unassignedBans: [],
-  }
-}
-
-const form = ref<MatchForm>(blankForm())
+const form = ref<MatchForm>(matchForm.blankForm())
 
 const tournaments = computed(() => tournamentsStore.tournaments)
 
@@ -151,110 +84,10 @@ const playedAtLocal = computed({
   },
 })
 
-// Reset form based on mode
 function resetForm() {
-  form.value = props.prefill ? formFromPreview(props.prefill) : blankForm()
+  form.value = props.prefill ? matchForm.formFromPreview(props.prefill) : matchForm.blankForm()
 }
 
-/**
- * Seeds the form from an import preview.
- *
- * The preview splits a side's arsenal the way the *API* does — `draftedHeroIds`
- * without the banned heroes, and the bans in their own list carrying the side
- * they came out of. This form holds the two together, so the seeding here is a
- * union rather than the subtraction the old partial-draft model needed.
- *
- * `round` is never in a preview — the source site names its rounds rather than
- * numbering them — so it keeps the blank form's default for the admin to set.
- * `playedAt` falls back the same way when the source's timezone was unreadable.
- */
-function formFromPreview(preview: MatchImportPreviewDto): MatchForm {
-  const blank = blankForm()
-
-  return {
-    round: blank.round,
-    playedAt: preview.playedAt ?? blank.playedAt,
-    externalLink: preview.sourceUrl,
-    sides: [0, 1].map((side) => {
-      const participant = preview.participants[side]
-      // 0 is this form's "nothing selected" sentinel, so a ban the importer
-      // could not resolve becomes an unfilled row rather than a broken option.
-      const bans = preview.bans
-        .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === side)
-        .map((ban) => ({ heroId: ban.heroId ?? 0, banType: ban.banType as SidedBanType }))
-      return {
-        playerLabel: participant?.playerLabel ?? '',
-        draftedHeroIds: [
-          ...(participant?.draftedHeroIds ?? []),
-          ...bans.map((ban) => ban.heroId).filter((heroId) => heroId !== 0),
-        ],
-        bans,
-      }
-    }),
-    games: preview.games.map((game) => ({
-      gameNumber: game.gameNumber,
-      mapId: game.mapId ?? 0,
-      participants: [0, 1].map((side) => ({
-        heroId: game.participants[side]?.heroId ?? 0,
-        healthRemaining: game.participants[side]?.healthRemaining ?? 0,
-        isWinner: game.participants[side]?.isWinner ?? false,
-      })),
-    })),
-    preBans: preview.bans
-      .filter((ban) => ban.banType === 'PRE_BAN')
-      .map((ban) => ({ heroId: ban.heroId ?? 0 })),
-    // The importer always attributes a typed ban, since the source groups them
-    // under the side that owned the hero — so this is empty in practice and
-    // exists only so an unsided one could never vanish silently.
-    unassignedBans: preview.bans
-      .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === undefined)
-      .map((ban) => ({ heroId: ban.heroId ?? 0, banType: ban.banType as SidedBanType })),
-  }
-}
-
-/** Reads a saved match back into the form, the same union `formFromPreview` does. */
-function formFromMatch(matchData: MatchResultDto): MatchForm {
-  const sidedBans = (side: number) =>
-    matchData.bans
-      .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === side)
-      .map((ban) => ({ heroId: ban.heroId, banType: ban.banType as SidedBanType }))
-
-  return {
-    round: matchData.round,
-    playedAt: matchData.playedAt,
-    externalLink: matchData.externalLink,
-    sides: [...matchData.participants]
-      .sort((a, b) => a.side - b.side)
-      .map((participant) => {
-        const bans = sidedBans(participant.side)
-        return {
-          playerLabel: participant.playerLabel ?? '',
-          // The stored draft plus the heroes banned out of it — together, the
-          // arsenal this side actually brought.
-          draftedHeroIds: [
-            ...participant.draftedHeroes.map((hero) => hero.heroId),
-            ...bans.map((ban) => ban.heroId),
-          ],
-          bans,
-        }
-      }),
-    games: [...matchData.games]
-      .sort((a, b) => a.gameNumber - b.gameNumber)
-      .map((game) => ({
-        gameNumber: game.gameNumber,
-        mapId: game.mapId,
-        participants: [...game.participants]
-          .sort((a, b) => a.side - b.side)
-          .map((p) => ({ heroId: p.heroId, healthRemaining: p.healthRemaining, isWinner: p.isWinner })),
-      })),
-    preBans: matchData.bans.filter((ban) => ban.banType === 'PRE_BAN').map((ban) => ({ heroId: ban.heroId })),
-    unassignedBans: matchData.bans
-      .filter((ban) => ban.banType !== 'PRE_BAN' && ban.side === undefined)
-      .map((ban) => ({ heroId: ban.heroId, banType: ban.banType as SidedBanType })),
-  }
-}
-
-// Load match data for edit mode
 async function loadMatchData() {
   if (props.mode !== 'edit' || !props.tournamentId || !props.matchId) return
 
@@ -263,7 +96,7 @@ async function loadMatchData() {
   violations.value = []
 
   try {
-    form.value = formFromMatch(await api.admin.getMatch(props.tournamentId, props.matchId))
+    form.value = matchForm.formFromMatch(await api.admin.getMatch(props.tournamentId, props.matchId))
   } catch (e) {
     serverError.value = describeError(e, 'Failed to load match data')
     violations.value = violationMessages(e)
@@ -284,16 +117,12 @@ async function loadPools() {
   heroPool.value = heroes.sort(byName)
 }
 
-function addGame() {
-  form.value.games.push(blankGame(form.value.games.length + 1))
-}
+/* The plain add/remove handlers. Anything with a consequence beyond the row it
+   touches — a renumbering, a cascade, a winner moving sides — is in the domain
+   module instead. */
 
-function removeGame(index: number) {
-  form.value.games.splice(index, 1)
-  // Game numbers are always a dense 1..N sequence, so a removal renumbers the rest.
-  form.value.games.forEach((game, i) => {
-    game.gameNumber = i + 1
-  })
+function addGame() {
+  form.value.games.push(matchForm.blankGame(form.value.games.length + 1))
 }
 
 function addPreBan() {
@@ -312,223 +141,36 @@ function removeSideBan(side: number, index: number) {
   form.value.sides[side].bans.splice(index, 1)
 }
 
-/** Moves an unsided ban onto the side whose draft it came out of. */
-function assignBanToSide(index: number, side: number) {
-  const [ban] = form.value.unassignedBans.splice(index, 1)
-  form.value.sides[side].bans.push(ban)
-  if (ban.heroId !== 0 && !form.value.sides[side].draftedHeroIds.includes(ban.heroId)) {
-    form.value.sides[side].draftedHeroIds.push(ban.heroId)
-  }
-}
-
-/** The heroes a side fielded, read off the form — a side is the participant's list position. */
-function fieldedInForm(side: number): number[] {
-  return form.value.games.flatMap((game) => {
-    const participant = game.participants[side]
-    return participant && participant.heroId !== 0 ? [participant.heroId] : []
-  })
-}
-
-/** The heroes this side lost to a ban — off its arsenal, and so off every dropdown below. */
-function bannedBySide(side: number): number[] {
-  return form.value.sides[side]?.bans.map((ban) => ban.heroId) ?? []
-}
-
-const preBannedHeroIds = computed(() => form.value.preBans.map((ban) => ban.heroId))
-
-/**
- * What a side can actually field: its arsenal, less anything struck out of it.
- * This is the option list for that side's per-game hero dropdowns, and the
- * reason `PLAYED_HERO_NOT_DRAFTED` cannot fire on a submission this form built.
- */
-function fieldableHeroes(side: number): Hero[] {
-  const drafted = form.value.sides[side]?.draftedHeroIds ?? []
-  const struck = new Set([...bannedBySide(side), ...preBannedHeroIds.value])
-  return heroPool.value.filter((hero) => drafted.includes(hero.id) && !struck.has(hero.id))
-}
-
-/** A side's own ban options: its arsenal, less the heroes it has already struck on another row. */
-function bannableHeroes(side: number, currentHeroId: number): Hero[] {
-  const drafted = form.value.sides[side]?.draftedHeroIds ?? []
-  const alreadyStruck = bannedBySide(side).filter((heroId) => heroId !== currentHeroId)
-  return heroPool.value.filter((hero) => drafted.includes(hero.id) && !alreadyStruck.includes(hero.id))
-}
-
-/**
- * A pre-ban precedes the draft, so it can only name a hero neither side took.
- * Offering the drafted ones would be offering a `BANNED_HERO_DRAFTED` 422.
- */
-function preBannableHeroes(currentHeroId: number): Hero[] {
-  const drafted = new Set(form.value.sides.flatMap((side) => side.draftedHeroIds))
-  const alreadyStruck = preBannedHeroIds.value.filter((heroId) => heroId !== currentHeroId)
-  return heroPool.value.filter((hero) => !drafted.has(hero.id) && !alreadyStruck.includes(hero.id))
-}
-
-/** Heroes not yet on this side's arsenal — everything is draftable until it is drafted. */
-function draftableHeroes(side: number, currentHeroId: number): Hero[] {
-  const alreadyDrafted = (form.value.sides[side]?.draftedHeroIds ?? []).filter(
-    (heroId) => heroId !== currentHeroId,
-  )
-  return heroPool.value.filter((hero) => !alreadyDrafted.includes(hero.id))
-}
-
 function addDraftPick(side: number) {
   form.value.sides[side].draftedHeroIds.push(0)
 }
 
-/**
- * Dropping a hero off a side's arsenal drops it everywhere that arsenal fed.
- *
- * Without the cascade a game select would keep a value no longer in its own
- * option list — the browser renders that as blank while the model still holds
- * the id, so the form would look filled and submit a hero the side never
- * drafted.
- */
-function removeDraftPick(side: number, index: number) {
-  const [heroId] = form.value.sides[side].draftedHeroIds.splice(index, 1)
-  if (heroId === 0) return
+/* Template-facing adapters: the domain functions take the form and the pool,
+   which the template has no reason to repeat at every call site. */
 
-  form.value.sides[side].bans = form.value.sides[side].bans.filter((ban) => ban.heroId !== heroId)
-  form.value.games.forEach((game) => {
-    const participant = game.participants[side]
-    if (participant?.heroId === heroId) participant.heroId = 0
-  })
-}
+const removeGame = (index: number) => matchForm.removeGame(form.value, index)
+const removeDraftPick = (side: number, index: number) => matchForm.removeDraftPick(form.value, side, index)
+const assignBanToSide = (index: number, side: number) => matchForm.assignBanToSide(form.value, index, side)
+const setWinner = (gameIndex: number, participantIndex: number) =>
+  matchForm.setWinner(form.value, gameIndex, participantIndex)
 
-function heroName(heroId: number): string {
-  return heroPool.value.find((hero) => hero.id === heroId)?.name ?? `#${heroId}`
-}
-
-// Picking a side makes it the sole winner of that game and clears the other.
-// There is no way to pick *neither*, and that is deliberate: every game is
-// played to a decision, so the server rejects a game with no winner
-// (NOT_EXACTLY_ONE_WINNER). The losing side must finish with 0 or less health;
-// the winning side may have any health, including a negative value.
-function setWinner(gameIndex: number, participantIndex: number) {
-  form.value.games[gameIndex].participants.forEach((p, i) => {
-    p.isWinner = i === participantIndex
-  })
-}
+const heroName = (heroId: number) => matchForm.heroName(heroPool.value, heroId)
+const fieldableHeroes = (side: number) => matchForm.fieldableHeroes(form.value, heroPool.value, side)
+const bannableHeroes = (side: number, currentHeroId: number) =>
+  matchForm.bannableHeroes(form.value, heroPool.value, side, currentHeroId)
+const preBannableHeroes = (currentHeroId: number) =>
+  matchForm.preBannableHeroes(form.value, heroPool.value, currentHeroId)
+const draftableHeroes = (side: number, currentHeroId: number) =>
+  matchForm.draftableHeroes(form.value, heroPool.value, side, currentHeroId)
 
 /**
- * The form's shape, translated to the API's.
+ * What this form can rule out on its own, live.
  *
- * The one real conversion is the draft: this form holds a side's whole arsenal,
- * the API wants it without the banned heroes, since `BANNED_HERO_DRAFTED` keeps
- * picks and bans disjoint. Subtracting here rather than making the admin keep
- * two lists in their head is the point of the screen.
+ * A computed rather than a step inside `saveMatch` on purpose: an admin who
+ * fixes the problem in place sees the banner clear as they type, instead of a
+ * stale complaint that survives until the next save.
  */
-function toPayload(): RecordMatchRequest {
-  return {
-    round: form.value.round,
-    playedAt: form.value.playedAt,
-    externalLink: form.value.externalLink.trim(),
-    participants: form.value.sides.map((side) => ({
-      playerLabel: side.playerLabel,
-      draftedHeroIds: side.draftedHeroIds.filter(
-        (heroId) => !side.bans.some((ban) => ban.heroId === heroId),
-      ),
-    })),
-    games: form.value.games,
-    bans: [
-      ...form.value.sides.flatMap((sideForm, side) =>
-        sideForm.bans.map((ban) => ({ heroId: ban.heroId, banType: ban.banType, side })),
-      ),
-      // A pre-ban is struck before sides exist, so it carries none — the server
-      // rejects one that does (`BAN_SIDE_INVALID`).
-      ...form.value.preBans.map((ban) => ({ heroId: ban.heroId, banType: 'PRE_BAN' as const, side: null })),
-    ],
-  }
-}
-
-/**
- * Everything this form can rule out on its own, as one message or null.
- *
- * It is a computed rather than a sequence of checks inside `saveMatch` on
- * purpose: an admin who fixes the problem in place sees the banner clear as
- * they type, instead of a stale complaint that survives until the next save.
- *
- * Most of what the old partial-draft form had to police is now unrepresentable:
- * a game dropdown only offers heroes that side drafted and did not lose to a
- * ban, so `PLAYED_HERO_NOT_DRAFTED` and `BANNED_HERO_PLAYED` cannot be built
- * here at all. What remains is either a half-filled row or a conflict the
- * dropdowns cannot see, because it spans two of them.
- */
-const validationError = computed<string | null>(() => {
-  const { games, sides, preBans, unassignedBans } = form.value
-
-  // Required server-side, and the duplicate check depends on it. Caught here so
-  // an untouched box reads as a prompt rather than a 400.
-  if (form.value.externalLink.trim().length === 0) {
-    return 'This match needs an external link — it is what stops the same match being recorded twice'
-  }
-
-  if (unassignedBans.length > 0) {
-    return `Assign ${heroName(unassignedBans[0].heroId)}'s ban to the side it was struck from — this match predates per-side bans`
-  }
-
-  for (const [side, sideForm] of sides.entries()) {
-    if (sideForm.draftedHeroIds.some((heroId) => heroId === 0)) {
-      return `Every hero on side ${side + 1}'s draft needs to be chosen`
-    }
-    // DUPLICATE_PICK server-side; caught here so it reads as a prompt, not a 422.
-    const seen = new Set<number>()
-    for (const heroId of sideForm.draftedHeroIds) {
-      if (seen.has(heroId)) {
-        return `Side ${side + 1} drafted ${heroName(heroId)} twice — remove the duplicate row`
-      }
-      seen.add(heroId)
-    }
-    if (sideForm.bans.some((ban) => ban.heroId === 0)) return `Every ban on side ${side + 1} needs a hero selected`
-  }
-
-  if (preBans.some((ban) => ban.heroId === 0)) return 'Every pre-ban needs a hero selected'
-
-  // DUPLICATE_BAN server-side: `hero_ban` is keyed (match_id, hero_id), so one
-  // hero is struck at most once per series however many sides wanted it. Spans
-  // three lists, so no single dropdown can prevent it.
-  const allBans = [...sides.flatMap((side) => side.bans.map((ban) => ban.heroId)), ...preBans.map((ban) => ban.heroId)]
-  const bannedTwice = allBans.find((heroId, index) => heroId !== 0 && allBans.indexOf(heroId) !== index)
-  if (bannedTwice !== undefined) {
-    return `${heroName(bannedTwice)} is banned twice — a hero can only be struck once per series`
-  }
-
-  // BANNED_HERO_DRAFTED server-side. A side's own bans come off its draft at
-  // save time, but a pre-ban does not, so it must name a hero neither side took.
-  const drafted = new Set(sides.flatMap((side) => side.draftedHeroIds))
-  const preBannedButDrafted = preBans.find((ban) => ban.heroId !== 0 && drafted.has(ban.heroId))
-  if (preBannedButDrafted) {
-    return `${heroName(preBannedButDrafted.heroId)} is pre-banned, so neither side can have drafted it — a pre-ban precedes the draft`
-  }
-
-  if (games.length === 0) return 'At least one game is required'
-  if (games.some((g) => g.mapId === 0)) return 'Every game needs a map selected'
-  // The player name is deliberately not required: it is a free-text label, and an
-  // unattributed result is still a valid result.
-  if (games.some((g) => g.participants.some((p) => p.heroId === 0))) {
-    return 'Every game needs a hero selected for both sides'
-  }
-  // A backstop, not a prompt the admin should ever see: the dropdowns cannot
-  // offer an undrafted hero. It fires only if a hero left a draft while a game
-  // still named it and the cascade in `removeDraftPick` somehow missed it.
-  for (const [side] of sides.entries()) {
-    const fieldable = fieldableHeroes(side).map((hero) => hero.id)
-    const stray = fieldedInForm(side).find((heroId) => !fieldable.includes(heroId))
-    if (stray !== undefined) {
-      return `Side ${side + 1} fields ${heroName(stray)}, which is not on its draft — add it or pick another hero`
-    }
-  }
-  // The server rejects this too (NOT_EXACTLY_ONE_WINNER) — caught here so an
-  // untouched winner radio reads as a prompt rather than a 422.
-  if (games.some((g) => g.participants.filter((p) => p.isWinner).length !== 1)) {
-    return 'Every game needs exactly one winner — a game cannot end in a draw'
-  }
-  if (games.some((g) => g.participants.some((p) => !p.isWinner && p.healthRemaining > 0))) {
-    return 'The losing hero must have 0 or less health'
-  }
-
-  return null
-})
+const validationError = computed(() => matchForm.validate(form.value, heroPool.value))
 
 /** The server's complaint if there is one, otherwise this form's own. */
 const error = computed(() => serverError.value ?? (submitAttempted.value ? validationError.value : null))
@@ -563,9 +205,9 @@ async function saveMatch() {
 
   try {
     if (props.mode === 'create') {
-      await api.admin.recordMatch(tournamentId, toPayload())
+      await api.admin.recordMatch(tournamentId, matchForm.toPayload(form.value))
     } else if (props.mode === 'edit' && props.matchId) {
-      await api.admin.correctMatch(tournamentId, props.matchId, toPayload())
+      await api.admin.correctMatch(tournamentId, props.matchId, matchForm.toPayload(form.value))
     }
     emit('success')
   } catch (e) {
