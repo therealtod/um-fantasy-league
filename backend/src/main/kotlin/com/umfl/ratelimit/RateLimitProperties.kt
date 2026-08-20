@@ -1,7 +1,6 @@
 package com.umfl.ratelimit
 
 import org.springframework.boot.context.properties.ConfigurationProperties
-import org.springframework.stereotype.Component
 import java.time.Duration
 
 /**
@@ -9,8 +8,17 @@ import java.time.Duration
  * instance throttles, not domain data. See the `rate-limit.api` comment in
  * `application.yml` for why this doesn't count as one of the `umfl.*`
  * tunables this codebase otherwise avoids.
+ *
+ * Registered via `@ConfigurationPropertiesScan` on the application class, not
+ * `@Component`: this is a Kotlin `data class` of `val`s with no setters, and
+ * `@Component` makes Spring bind properties the JavaBean (setter) way rather
+ * than via the constructor. That only breaks once a value is actually
+ * supplied from the environment — which no deployment happens to do for this
+ * particular class, so it never surfaced here the way it did for
+ * [com.umfl.matchimport.ScraperProperties], whose `base-url` docker-compose
+ * always overrides. `@ConfigurationPropertiesScan` gets proper constructor
+ * binding instead, for both.
  */
-@Component
 @ConfigurationProperties(prefix = "rate-limit.api")
 data class RateLimitProperties(
     val capacity: Long = 300,
