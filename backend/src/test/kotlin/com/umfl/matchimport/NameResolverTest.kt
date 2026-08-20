@@ -47,6 +47,13 @@ class NameResolverTest {
         assertEquals(4L, resolver.resolve("Jekyll&Hyde"))
     }
 
+    /** The source site's short form for the hero is a curated alias, not a fuzzy match. */
+    @Test
+    fun `resolves a known source alias`() {
+        assertEquals(3L, resolver.resolve("Dr. Sattler"))
+        assertEquals(3L, resolver.resolve("  dr sattler  "))
+    }
+
     @Test
     fun `returns null for an unknown name rather than guessing`() {
         assertNull(resolver.resolve("Alicia"))

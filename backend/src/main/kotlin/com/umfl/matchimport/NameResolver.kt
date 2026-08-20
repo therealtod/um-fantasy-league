@@ -17,14 +17,25 @@ package com.umfl.matchimport
  *
  * Normalisation covers the drift actually observed between the source site and
  * `V2__reference_data.sql` — case, stray whitespace, the `.` in `Dr. Ellie
- * Sattler`, and `&` versus `and` in `Jekyll & Hyde`. It is not an alias table
+ * Sattler`, and `&` versus `and` in `Jekyll & Hyde`. It is not a fuzzy matcher
  * and should not become one; a genuinely differently-named hero is a catalogue
  * question, not a string-matching one.
+ *
+ * [ALIASES] is the one deliberate exception, and it is narrow on purpose: a
+ * curated, hand-verified list of short/alternate forms tabletopleague.com is
+ * known to use in place of a catalogue name — e.g. "Dr. Sattler" for "Dr.
+ * Ellie Sattler" — as opposed to [normalise]'s mechanical rules, which apply
+ * uniformly to every name. An entry still resolves a source name straight to
+ * a hero id, so it carries the same wrong-guess risk the class's docstring
+ * warns about; add one only once the source is confirmed to actually emit
+ * that string, never speculatively or by similarity.
  */
 class NameResolver private constructor(private val byNormalisedName: Map<String, Long>) {
 
-    fun resolve(sourceName: String?): Long? =
-        sourceName?.let { byNormalisedName[normalise(it)] }
+    fun resolve(sourceName: String?): Long? {
+        val normalised = sourceName?.let { normalise(it) } ?: return null
+        return byNormalisedName[normalised] ?: ALIASES[normalised]?.let { byNormalisedName[it] }
+    }
 
     companion object {
         /**
@@ -50,5 +61,15 @@ class NameResolver private constructor(private val byNormalisedName: Map<String,
                 .trim()
 
         private val WHITESPACE = Regex("""\s+""")
+
+        /**
+         * Normalised source alias → normalised catalogue name. See the class
+         * docstring for what belongs here. Both sides are pre-normalised so a
+         * lookup is a plain map hit rather than a second pass through
+         * [normalise].
+         */
+        private val ALIASES: Map<String, String> = mapOf(
+            normalise("Dr. Sattler") to normalise("Dr. Ellie Sattler"),
+        )
     }
 }
