@@ -6,6 +6,7 @@ import com.umfl.common.RosterRuleException
 import com.umfl.hero.HeroQueryRepository
 import com.umfl.hero.HeroView
 import com.umfl.manager.Manager
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
@@ -49,7 +50,12 @@ class TournamentService(
      *
      * The two ways this can race are guarded differently. Double registration is
      * caught by `unique (tournament_id, manager_id)` even if the read below misses
-     * a concurrent insert. Capacity has no such constraint — a count is not a
+     * a concurrent insert — the loser of that race has its `save` translated by
+     * [savingEntryConflictAsConflict] into the same "already registered" message
+     * the read-then-throw above gives the non-racing caller, rather than
+     * `GlobalExceptionHandler`'s generic catch-all 409, which names nothing.
+     * Mirrors [com.umfl.match.AdminMatchService.savingLinkConflictAsConflict].
+     * Capacity has no such constraint — a count is not a
      * row — so the last seat is protected by locking the tournament row first:
      * concurrent registrations for the same tournament serialise there, and each
      * one counts entries only after the previous has committed its own.
@@ -72,17 +78,36 @@ class TournamentService(
             throw ConflictException("${tournament.name} is full ($capacity entries).")
         }
 
-        val entry = entryRepository.save(
-            TournamentEntry(
-                tournamentId = tournamentId,
-                managerId = managerId,
-                status = EntryStatus.DRAFT,
-                creditGrant = tournament.creditGrant,
-                registeredAt = Instant.now(),
+        val entry = savingEntryConflictAsConflict(tournament) {
+            entryRepository.save(
+                TournamentEntry(
+                    tournamentId = tournamentId,
+                    managerId = managerId,
+                    status = EntryStatus.DRAFT,
+                    creditGrant = tournament.creditGrant,
+                    registeredAt = Instant.now(),
+                )
             )
-        )
+        }
         return snapshot(entry, tournament)
     }
+
+    /**
+     * The check above and the write are two statements, so a concurrent
+     * registration can slip past the check and is stopped by
+     * `unique (tournament_id, manager_id)` instead. That window is narrow but
+     * real, so the violation is translated into the same [ConflictException]
+     * the non-racing caller gets, rather than left to `GlobalExceptionHandler`'s
+     * catch-all, which renders the generic "should never fire" 409 and names
+     * nothing the manager can act on.
+     */
+    private fun <T> savingEntryConflictAsConflict(tournament: Tournament, save: () -> T): T =
+        try {
+            save()
+        } catch (e: DataIntegrityViolationException) {
+            if (e.mostSpecificCause.message?.contains(ENTRY_UNIQUE_INDEX) != true) throw e
+            throw ConflictException("Already registered for ${tournament.name}.")
+        }
 
     fun findMyEntry(tournamentId: Long, manager: Manager): RosterSnapshot? {
         val tournament = requireTournament(tournamentId)
@@ -181,5 +206,11 @@ class TournamentService(
                 entry.creditGrant,
             ),
         )
+    }
+
+    private companion object {
+        // Postgres's default name for the inline `unique (tournament_id, manager_id)`
+        // constraint on tournament_entry (see V1__core_schema.sql).
+        const val ENTRY_UNIQUE_INDEX = "tournament_entry_tournament_id_manager_id_key"
     }
 }
