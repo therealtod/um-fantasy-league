@@ -8,7 +8,6 @@ import com.umfl.match.BanType
 import com.umfl.match.MatchResultQuery
 import com.umfl.tournament.TournamentService
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 
 /**
  * Turns a Tabletop League match URL into a reviewable draft of a match result.
@@ -37,7 +36,13 @@ class MatchImportService(
     private val matchResultQuery: MatchResultQuery,
 ) {
 
-    @Transactional(readOnly = true)
+    // Deliberately not @Transactional: scrapeMatch below is an outbound HTTP call
+    // that can hold a socket open for up to ScraperProperties.timeout (90s), and a
+    // transaction would pin a Hikari connection for the same span. Ten concurrent
+    // imports — or one hung scraper plus ordinary traffic — would starve the pool
+    // for everyone else. The scrape happens first and the resolution reads after
+    // are independent lookups with no need of one snapshot, so nothing here wants
+    // a transaction at all.
     fun preview(tournamentId: Long, sourceUrl: String): MatchImportPreview {
         tournamentService.requireTournament(tournamentId)
 
