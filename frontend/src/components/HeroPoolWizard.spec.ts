@@ -5,6 +5,7 @@ import type { Hero, HeroAdminDto } from '@/api/types'
 const listHeroes = vi.fn()
 const listHeroPool = vi.fn()
 const addHeroesToPool = vi.fn()
+const setHeroCost = vi.fn()
 const removeHeroFromPool = vi.fn()
 
 vi.mock('@/api/client', () => ({
@@ -13,7 +14,7 @@ vi.mock('@/api/client', () => ({
       listHeroes: (...args: unknown[]) => listHeroes(...args),
       listHeroPool: (...args: unknown[]) => listHeroPool(...args),
       addHeroesToPool: (...args: unknown[]) => addHeroesToPool(...args),
-      setHeroCost: vi.fn(),
+      setHeroCost: (...args: unknown[]) => setHeroCost(...args),
       removeHeroFromPool: (...args: unknown[]) => removeHeroFromPool(...args),
     },
   },
@@ -29,7 +30,10 @@ const heroes: HeroAdminDto[] = [
   { id: 10, name: 'Sherlock Holmes', imageUrl: null },
   { id: 11, name: 'Dracula', imageUrl: null },
 ]
-const heroPool: Hero[] = [{ id: 10, name: 'Sherlock Holmes', imageUrl: null, cost: 500 }]
+// A factory, not a shared array: a cost edit now mutates the returned hero
+// in place (see HeroPoolWizard.vue), so a fixture reused by reference would
+// leak an edit from one test into the next.
+const makeHeroPool = (): Hero[] => [{ id: 10, name: 'Sherlock Holmes', imageUrl: null, cost: 500 }]
 
 async function mountWizardWithTournament() {
   const HeroPoolWizard = (await import('./HeroPoolWizard.vue')).default
@@ -61,7 +65,7 @@ async function stageHero(
 beforeEach(() => {
   vi.clearAllMocks()
   listHeroes.mockResolvedValue(heroes)
-  listHeroPool.mockResolvedValue(heroPool)
+  listHeroPool.mockImplementation(() => Promise.resolve(makeHeroPool()))
   removeHeroFromPool.mockResolvedValue(undefined)
 })
 
@@ -110,6 +114,46 @@ describe('HeroPoolWizard removal', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Hero pool entry not found')
+  })
+})
+
+describe('HeroPoolWizard cost edit', () => {
+  it('patches the row from the response instead of reloading the whole pool', async () => {
+    const wrapper = await mountWizardWithTournament()
+    setHeroCost.mockResolvedValue({ id: 10, name: 'Sherlock Holmes', imageUrl: null, cost: 900 })
+
+    // setValue() already dispatches both input and change.
+    await wrapper.find('#cost-10').setValue(900)
+    await flushPromises()
+
+    expect(setHeroCost).toHaveBeenCalledWith(1, 10, 900)
+    // Only the initial load — the single-field edit doesn't refetch the pool.
+    expect(listHeroPool).toHaveBeenCalledTimes(1)
+    expect((wrapper.find('#cost-10').element as HTMLInputElement).value).toBe('900')
+  })
+
+  it('reverts an invalid draft without calling the API', async () => {
+    const wrapper = await mountWizardWithTournament()
+
+    await wrapper.find('#cost-10').setValue(0)
+    await flushPromises()
+
+    expect(setHeroCost).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Cost must be a number of at least 1 credit')
+    expect((wrapper.find('#cost-10').element as HTMLInputElement).value).toBe('500')
+  })
+
+  it('reverts to the last known cost when the server rejects the edit', async () => {
+    const wrapper = await mountWizardWithTournament()
+    setHeroCost.mockRejectedValue(new Error('cost must be positive'))
+
+    await wrapper.find('#cost-10').setValue(900)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('cost must be positive')
+    expect((wrapper.find('#cost-10').element as HTMLInputElement).value).toBe('500')
+    // The rejection isn't papered over by a reload either.
+    expect(listHeroPool).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -84,6 +84,24 @@ function removePendingHero(index: number) {
   pendingHeroes.value.splice(index, 1)
 }
 
+// Draft value for each pool row's cost input, keyed by hero id and rebuilt
+// whenever the pool is (re)loaded. A rejected edit reverts through this
+// reactive draft instead of writing to the input's DOM value directly, and
+// an accepted edit is folded back in from setHeroCost's own response
+// instead of refetching the whole pool for a single-field change.
+// `<input type="number">`'s v-model casts through Vue's own number
+// coercion, so a draft is a number once parseable and stays the raw string
+// (typically `''`) while it isn't — see onCostInputChange below.
+const costDrafts = ref<Record<number, number | string>>({})
+
+watch(
+  heroPoolHeroes,
+  (pool) => {
+    costDrafts.value = Object.fromEntries(pool.map((hero) => [hero.id, hero.cost]))
+  },
+  { immediate: true },
+)
+
 async function submitBatch() {
   if (!selectedTournamentId.value || pendingHeroes.value.length === 0) return
   const tournamentId = selectedTournamentId.value
@@ -101,30 +119,33 @@ async function submitBatch() {
   cancelAddForm()
 }
 
-function onCostInputChange(hero: Hero, event: Event) {
-  const input = event.target as HTMLInputElement
-  const newCost = Number(input.value)
+async function onCostInputChange(hero: Hero) {
+  const draft = costDrafts.value[hero.id]
+  const newCost = typeof draft === 'number' ? draft : Number(draft)
 
-  if (input.value.trim() === '' || !Number.isFinite(newCost) || newCost < 1) {
+  if (draft === '' || !Number.isFinite(newCost) || newCost < 1) {
     error.value = 'Cost must be a number of at least 1 credit'
     violations.value = []
-    input.value = String(hero.cost)
+    costDrafts.value[hero.id] = hero.cost
     return
   }
 
-  updateHeroCost(hero.id, newCost)
-}
-
-async function updateHeroCost(heroId: number, newCost: number) {
   if (!selectedTournamentId.value) return
   const tournamentId = selectedTournamentId.value
 
   const result = await run(
-    () => api.admin.setHeroCost(tournamentId, heroId, newCost),
+    () => api.admin.setHeroCost(tournamentId, hero.id, newCost),
     'Failed to update hero cost',
   )
-  if (!result.ok) return
-  await reloadPool(tournamentId)
+  if (!result.ok) {
+    costDrafts.value[hero.id] = hero.cost
+    return
+  }
+  // setHeroCost's response is this one row's new state — no need to refetch
+  // the whole pool for a single-field edit. Mutated in place (not replaced)
+  // so the `hero` this closure and the next edit's revert both see it.
+  hero.cost = result.value.cost
+  costDrafts.value[hero.id] = hero.cost
 }
 </script>
 
@@ -257,11 +278,11 @@ async function updateHeroCost(heroId: number, newCost: number) {
           <label :for="`cost-${hero.id}`" class="label-caps">Cost:</label>
           <input
             :id="`cost-${hero.id}`"
-            :value="hero.cost"
+            v-model="costDrafts[hero.id]"
             type="number"
             min="1"
             class="w-24 field-input-sm"
-            @change="(e) => onCostInputChange(hero, e)"
+            @change="onCostInputChange(hero)"
           />
           <span class="font-mono text-xs text-ink-dim">CR</span>
           <button
