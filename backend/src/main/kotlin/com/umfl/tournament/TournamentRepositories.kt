@@ -11,7 +11,7 @@ interface TournamentRepository : CrudRepository<Tournament, Long> {
     fun findByName(name: String): Tournament?
 
     /**
-     * Take a row lock on the tournament and return its id.
+     * Take a row lock on the tournament and return its *current* capacity.
      *
      * `capacity` has no database constraint behind it the way double
      * registration has `unique (tournament_id, manager_id)`, so the count-then-
@@ -21,11 +21,16 @@ interface TournamentRepository : CrudRepository<Tournament, Long> {
      * queue to stand in, and costs nothing anywhere else: no other statement in
      * the app writes `tournament` on the manager path.
      *
-     * Selecting only the id keeps this a lock acquisition rather than a second
-     * load of an aggregate the caller already has.
+     * Returning capacity rather than just the id matters because the lock alone
+     * only serialises the *write*: a concurrent admin capacity change
+     * (`AdminTournamentService.update`) still commits and releases before this
+     * transaction's `FOR UPDATE` is granted, but the `Tournament` [register]
+     * already holds was read *before* that lock, so its `capacity` field is the
+     * pre-update value. Re-reading capacity here, after the lock is granted, is
+     * what makes the seat check exact instead of checking a stale snapshot.
      */
-    @Query("select id from tournament where id = :id for update")
-    fun lockById(id: Long): Long?
+    @Query("select capacity from tournament where id = :id for update")
+    fun lockCapacityById(id: Long): Int?
 }
 
 @Repository

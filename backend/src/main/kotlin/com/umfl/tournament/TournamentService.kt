@@ -66,10 +66,10 @@ class TournamentService(
             throw ConflictException("Already registered for ${tournament.name}.")
         }
 
-        tournamentRepository.lockById(tournamentId)
+        val capacity = tournamentRepository.lockCapacityById(tournamentId)
             ?: throw NotFoundException("No tournament with id $tournamentId")
-        if (entryRepository.countByTournamentId(tournamentId) >= tournament.capacity) {
-            throw ConflictException("${tournament.name} is full (${tournament.capacity} entries).")
+        if (entryRepository.countByTournamentId(tournamentId) >= capacity) {
+            throw ConflictException("${tournament.name} is full ($capacity entries).")
         }
 
         val entry = entryRepository.save(
