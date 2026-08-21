@@ -433,8 +433,8 @@ the seeding (`formFromPreview`, `formFromMatch`), the payload conversion (`toPay
 option lists, the edits that cascade (`removeDraftPick`, `removeGame`, `assignBanToSide`,
 `setWinner`) and `validate`. It has no counterpart in Kotlin the way `rosterPolicy.ts` does: it is
 not a mirror of a server rule but the arithmetic that keeps this one *form* consistent with the API
-it posts to. The component imports it as `matchForm.*`, so a `matchForm.` call site marks a rule and
-anything without one is rendering. Tests split the same way — `matchForm.spec.ts` is data-in/data-out
+it posts to. The wizard and each of its section components import it as `matchForm.*`, so a
+`matchForm.` call site marks a rule and anything without one is rendering. Tests split the same way — `matchForm.spec.ts` is data-in/data-out
 and owns every rule, `MatchResultWizard.spec.ts` mounts only to pin the wiring between the two.
 
 Routes: `/lobby`, `/standings` and `/login` are public; `/tournaments/:tournamentId/roster` requires
@@ -589,7 +589,9 @@ link onto another's conflicts.
 per-entity wizard components (`TournamentManagementWizard`, `HeroManagementWizard`,
 `MapManagementWizard`, `HeroPoolWizard`, `MapPoolWizard`, `ScoringRuleSetWizard`,
 `MatchResultWizard`, `MatchListAdmin`) that each call the corresponding `/api/admin/...` endpoints
-through the same `src/api/client.ts`. It's reachable only by managers with `isAdmin` true — see
+through the same `src/api/client.ts`. Those are the dashboard's own children; only
+`MatchResultWizard` is itself composed further, out of the four section components below. It's
+reachable only by managers with `isAdmin` true — see
 Routes above for the two layers of UI gating — with the Admin API's own `hasRole("ADMIN")` check as
 the actual security boundary.
 
@@ -615,7 +617,25 @@ Pre-bans come last, in their own section, offering only heroes neither side draf
 
 All of that lives in `src/domain/matchForm.ts` (see Frontend architecture above), not in the SFC —
 the component holds the reactive `form` ref, the template and the API calls, and delegates every
-rule. The one real conversion is at save. The form holds the arsenal; the API wants
+rule.
+
+The template itself is split one section per part of a series:
+`MatchUnassignedBanSection`, `MatchDraftSide` (one per side, so twice),
+`MatchGameRow` (one per game) and `MatchPreBanSection`. `MatchResultWizard` keeps
+what no section owns — the match's own fields, the pools it loads, `validate`, the save, and
+"+ Add Game", which is the one edit that is nobody's row. Each section takes the **whole form** as
+its `defineModel`, not its own slice, for two reasons that are worth not undoing: the option lists
+are form-wide rules (a pre-ban has to know both drafts, a side's ban rows have to know that side's
+games), so a section holding only its slice could not ask `matchForm` anything; and a `defineModel`
+is a ref rather than a prop, so a section may edit the form in place — `v-model` on a prop's member
+is what `vue/no-mutating-props` exists to stop, and threading every keystroke back up as an emit
+would buy nothing here. The rules still live in `matchForm.ts`: a section's script is its option
+lists, its plain pushes and splices, and nothing else. Tests follow the same line —
+`MatchResultWizard.spec.ts` mounts the whole tree with the sections real rather than stubbed, and
+the sections have no specs of their own, because a template over already-tested functions has
+nothing left to assert alone.
+
+The one real conversion is at save. The form holds the arsenal; the API wants
 `draftedHeroIds` *without* the banned heroes (`BANNED_HERO_DRAFTED` keeps picks and bans disjoint),
 so `toPayload` subtracts each side's bans back out and emits them as `bans` carrying their `side`.
 `formFromMatch` and `formFromPreview` do the union in the other direction — keep the three in step,

@@ -7,6 +7,13 @@
  * and are tested as data in `matchForm.spec.ts`. A new rule belongs there, not
  * in another `mount()`; only add a test here when the thing that can break is
  * the binding between the two.
+ *
+ * The wizard renders its four sections (`MatchUnassignedBanSection`,
+ * `MatchDraftSide`, `MatchGameRow`, `MatchPreBanSection`) as real children, not
+ * stubs, and that is deliberate: each section is a template over the same
+ * `matchForm` functions, so mounting the tree is what pins the model reaching
+ * them and their edits reaching the payload. There is nothing left in one to
+ * test on its own.
  */
 import { flushPromises, mount } from '@vue/test-utils'
 import type { VueWrapper } from '@vue/test-utils'

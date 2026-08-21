@@ -3,15 +3,23 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
-import type { BanType, Hero, MapAdminDto, MatchImportPreviewDto } from '@/api/types'
+import type { Hero, MapAdminDto, MatchImportPreviewDto } from '@/api/types'
 // The form model, the seeding, the payload conversion, the option lists and the
 // validation all live in the domain module, as plain functions over plain data.
-// What is left here is the reactive wrapper, the template, and the API calls —
-// so a `matchForm.` call site is the marker for "this is a rule, tested in
-// matchForm.spec.ts", and anything without one is rendering.
+// What is left here is the reactive wrapper, the API calls, and the shell the
+// section components hang off — so a `matchForm.` call site is the marker for
+// "this is a rule, tested in matchForm.spec.ts", and anything without one is
+// rendering.
 import * as matchForm from '@/domain/matchForm'
-import type { MatchForm, SidedBanType } from '@/domain/matchForm'
+import type { MatchForm } from '@/domain/matchForm'
 import ErrorBanner from '@/components/ErrorBanner.vue'
+// One section per part of a series, each taking the whole form as its model:
+// the option lists are form-wide rules (a pre-ban has to know both drafts), so
+// a section that only saw its own slice could not ask them anything.
+import MatchUnassignedBanSection from '@/components/MatchUnassignedBanSection.vue'
+import MatchDraftSide from '@/components/MatchDraftSide.vue'
+import MatchGameRow from '@/components/MatchGameRow.vue'
+import MatchPreBanSection from '@/components/MatchPreBanSection.vue'
 
 interface Props {
   tournamentId?: number
@@ -39,17 +47,6 @@ const serverError = ref<string | null>(null)
 const violations = ref<string[]>([])
 const submitAttempted = ref(false)
 const isInitialized = ref(false)
-
-const sidedBanTypes: { value: SidedBanType; label: string }[] = [
-  { value: 'OPPONENT_BAN', label: 'Opponent ban' },
-  { value: 'SELF_BAN', label: 'Self ban' },
-]
-
-const banTypeLabels: Record<BanType, string> = {
-  PRE_BAN: 'Pre-ban',
-  OPPONENT_BAN: 'Opponent ban',
-  SELF_BAN: 'Self ban',
-}
 
 // The tournament's legal boards and priced hero pool — what the match actually
 // scores against — so the admin picks from a list instead of typing a raw id.
@@ -117,51 +114,13 @@ async function loadPools() {
   heroPool.value = heroes.sort(byName)
 }
 
-/* The plain add/remove handlers. Anything with a consequence beyond the row it
-   touches — a renumbering, a cascade, a winner moving sides — is in the domain
-   module instead. */
-
+// Appending a game is the one edit left at this level, since it is the only one
+// no single section owns. Everything else — a removal that renumbers, a draft
+// pick that cascades, a winner that moves sides — belongs to the section that
+// renders it, and through it to the domain module.
 function addGame() {
   form.value.games.push(matchForm.blankGame(form.value.games.length + 1))
 }
-
-function addPreBan() {
-  form.value.preBans.push({ heroId: 0 })
-}
-
-function removePreBan(index: number) {
-  form.value.preBans.splice(index, 1)
-}
-
-function addSideBan(side: number) {
-  form.value.sides[side].bans.push({ heroId: 0, banType: 'OPPONENT_BAN' })
-}
-
-function removeSideBan(side: number, index: number) {
-  form.value.sides[side].bans.splice(index, 1)
-}
-
-function addDraftPick(side: number) {
-  form.value.sides[side].draftedHeroIds.push(0)
-}
-
-/* Template-facing adapters: the domain functions take the form and the pool,
-   which the template has no reason to repeat at every call site. */
-
-const removeGame = (index: number) => matchForm.removeGame(form.value, index)
-const removeDraftPick = (side: number, index: number) => matchForm.removeDraftPick(form.value, side, index)
-const assignBanToSide = (index: number, side: number) => matchForm.assignBanToSide(form.value, index, side)
-const setWinner = (gameIndex: number, participantIndex: number) =>
-  matchForm.setWinner(form.value, gameIndex, participantIndex)
-
-const heroName = (heroId: number) => matchForm.heroName(heroPool.value, heroId)
-const fieldableHeroes = (side: number) => matchForm.fieldableHeroes(form.value, heroPool.value, side)
-const bannableHeroes = (side: number, currentHeroId: number) =>
-  matchForm.bannableHeroes(form.value, heroPool.value, side, currentHeroId)
-const preBannableHeroes = (currentHeroId: number) =>
-  matchForm.preBannableHeroes(form.value, heroPool.value, currentHeroId)
-const draftableHeroes = (side: number, currentHeroId: number) =>
-  matchForm.draftableHeroes(form.value, heroPool.value, side, currentHeroId)
 
 /**
  * What this form can rule out on its own, live.
@@ -310,37 +269,11 @@ onMounted(async () => {
 
       <!-- Bans that predate per-side attribution. Nothing else can be filled in
            sensibly until these are placed, so they sit above the drafts. -->
-      <div
+      <MatchUnassignedBanSection
         v-if="form.unassignedBans.length"
-        class="flex flex-col gap-3 border border-magenta bg-surface-lowest p-4"
-      >
-        <h4 class="headline text-base text-magenta">Bans with no side</h4>
-        <p class="font-mono text-xs leading-relaxed text-ink-dim">
-          This match was recorded before a ban stored which draft it came out of. Place each one on
-          the side whose hero it was — the type already says who struck it.
-        </p>
-        <div
-          v-for="(ban, index) in form.unassignedBans"
-          :key="index"
-          class="flex flex-col gap-2 border border-edge bg-surface-low p-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <span class="font-mono text-sm">
-            {{ heroName(ban.heroId) }}
-            <span class="text-xs text-ink-dim">({{ banTypeLabels[ban.banType] }})</span>
-          </span>
-          <div class="flex gap-2">
-            <button
-              v-for="side in [0, 1]"
-              :key="side"
-              type="button"
-              class="btn-ghost px-4 py-2 text-xs"
-              @click="assignBanToSide(index, side)"
-            >
-              Side {{ side + 1 }}
-            </button>
-          </div>
-        </div>
-      </div>
+        v-model="form"
+        :hero-pool="heroPool"
+      />
 
       <!-- The draft comes first, and everything below it is filtered to what it
            says. A side's list is its whole arsenal: the heroes it fielded, the
@@ -352,236 +285,34 @@ onMounted(async () => {
           below only offer that side's own heroes.
         </p>
 
-        <div
-          v-for="(side, index) in form.sides"
+        <MatchDraftSide
+          v-for="(_side, index) in form.sides"
           :key="index"
-          class="flex flex-col gap-4 border border-edge bg-surface-low p-4"
-        >
-          <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div class="flex size-8 shrink-0 items-center justify-center bg-cyan font-display text-xl text-surface-lowest">
-              {{ index + 1 }}
-            </div>
-            <div class="flex flex-1 flex-col gap-2">
-              <label :for="`player-${index}`" class="label-caps">Player name (optional)</label>
-              <input
-                :id="`player-${index}`"
-                v-model="side.playerLabel"
-                type="text"
-                class="field-input-sm"
-                placeholder="Who piloted this side"
-              />
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-3 border-t border-edge pt-3">
-            <span class="label-caps">Drafted heroes</span>
-
-            <div
-              v-for="(_heroId, pickIndex) in side.draftedHeroIds"
-              :key="pickIndex"
-              class="flex flex-col gap-2 sm:flex-row sm:items-end"
-            >
-              <div class="flex flex-1 flex-col gap-2">
-                <label :for="`draft-${index}-${pickIndex}`" class="label-caps">Hero {{ pickIndex + 1 }}</label>
-                <select
-                  :id="`draft-${index}-${pickIndex}`"
-                  v-model.number="side.draftedHeroIds[pickIndex]"
-                  class="field-input-sm"
-                >
-                  <option :value="0" disabled>Select a hero…</option>
-                  <option
-                    v-for="hero in draftableHeroes(index, side.draftedHeroIds[pickIndex])"
-                    :key="hero.id"
-                    :value="hero.id"
-                  >
-                    {{ hero.name }}
-                  </option>
-                </select>
-              </div>
-              <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removeDraftPick(index, pickIndex)">
-                Remove
-              </button>
-            </div>
-
-            <button type="button" class="btn-ghost" @click="addDraftPick(index)">+ Add Drafted Hero</button>
-          </div>
-
-          <!-- This side's bans: heroes struck out of the arsenal above. They
-               score a ban instead of an appearance, which is why they belong on
-               the draft rather than beside it. -->
-          <div class="flex flex-col gap-3 border-t border-edge pt-3">
-            <span class="label-caps">Struck out of this draft (optional)</span>
-
-            <div
-              v-for="(ban, banIndex) in side.bans"
-              :key="banIndex"
-              class="flex flex-col gap-4 sm:flex-row sm:items-end"
-            >
-              <div class="grid flex-1 grid-cols-2 gap-4">
-                <div class="flex flex-col gap-2">
-                  <label :for="`ban-hero-${index}-${banIndex}`" class="label-caps">Hero</label>
-                  <select
-                    :id="`ban-hero-${index}-${banIndex}`"
-                    v-model.number="ban.heroId"
-                    class="field-input-sm"
-                  >
-                    <option :value="0" disabled>
-                      {{ side.draftedHeroIds.length ? 'Select a hero…' : `Draft heroes for side ${index + 1} first` }}
-                    </option>
-                    <option v-for="hero in bannableHeroes(index, ban.heroId)" :key="hero.id" :value="hero.id">
-                      {{ hero.name }}
-                    </option>
-                  </select>
-                </div>
-
-                <div class="flex flex-col gap-2">
-                  <label :for="`ban-type-${index}-${banIndex}`" class="label-caps">Struck by</label>
-                  <select
-                    :id="`ban-type-${index}-${banIndex}`"
-                    v-model="ban.banType"
-                    class="field-input-sm"
-                  >
-                    <option v-for="type in sidedBanTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
-                  </select>
-                </div>
-              </div>
-
-              <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removeSideBan(index, banIndex)">
-                Remove
-              </button>
-            </div>
-
-            <button type="button" class="btn-ghost" @click="addSideBan(index)">+ Add Ban</button>
-          </div>
-        </div>
+          v-model="form"
+          :hero-pool="heroPool"
+          :side="index"
+        />
       </div>
 
       <!-- Games -->
       <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
         <h4 class="headline text-base text-cyan">Games (best-of-N — at least 1 required)</h4>
 
-        <div
-          v-for="(game, gameIndex) in form.games"
+        <MatchGameRow
+          v-for="(_game, gameIndex) in form.games"
           :key="gameIndex"
-          class="flex flex-col gap-4 border border-edge bg-surface-low p-4"
-        >
-          <div class="flex items-center justify-between">
-            <h5 class="label-caps text-cyan">Game {{ game.gameNumber }}</h5>
-            <button
-              v-if="form.games.length > 1"
-              type="button"
-              class="btn-ghost px-4 py-2 text-xs"
-              @click="removeGame(gameIndex)"
-            >
-              Remove Game
-            </button>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <label :for="`game-${gameIndex}-map`" class="label-caps">Map</label>
-            <select
-              :id="`game-${gameIndex}-map`"
-              v-model.number="game.mapId"
-              class="field-input-sm"
-            >
-              <option :value="0" disabled>Select a map…</option>
-              <option v-for="map in mapPool" :key="map.id" :value="map.id">{{ map.name }}</option>
-            </select>
-          </div>
-
-          <div
-            v-for="(participant, participantIndex) in game.participants"
-            :key="participantIndex"
-            class="grid grid-cols-2 gap-4 border border-edge bg-surface-lowest p-3 sm:grid-cols-4"
-          >
-            <div class="flex flex-col gap-2">
-              <label :for="`game-${gameIndex}-hero-${participantIndex}`" class="label-caps">
-                Side {{ participantIndex + 1 }} Hero
-              </label>
-              <!-- Only what this side drafted and did not lose to a ban, which is
-                   what makes PLAYED_HERO_NOT_DRAFTED unreachable from this form. -->
-              <select
-                :id="`game-${gameIndex}-hero-${participantIndex}`"
-                v-model.number="participant.heroId"
-                class="field-input-sm"
-              >
-                <option :value="0" disabled>
-                  {{
-                    fieldableHeroes(participantIndex).length
-                      ? 'Select a hero…'
-                      : `Draft heroes for side ${participantIndex + 1} first`
-                  }}
-                </option>
-                <option v-for="hero in fieldableHeroes(participantIndex)" :key="hero.id" :value="hero.id">
-                  {{ hero.name }}
-                </option>
-              </select>
-            </div>
-
-            <div class="flex flex-col gap-2">
-              <label :for="`game-${gameIndex}-health-${participantIndex}`" class="label-caps">Health (loser: 0 or less)</label>
-              <input
-                :id="`game-${gameIndex}-health-${participantIndex}`"
-                v-model.number="participant.healthRemaining"
-                type="number"
-                class="field-input-sm"
-              />
-            </div>
-
-            <div class="flex flex-col gap-2">
-              <!-- A radio, not a checkbox: exactly one side wins each game, and
-                   there is no "neither" to express. -->
-              <label class="flex cursor-pointer items-center gap-2 pt-5 font-mono text-xs text-ink">
-                <input
-                  type="radio"
-                  :name="`game-${gameIndex}-winner`"
-                  :checked="participant.isWinner"
-                  @change="setWinner(gameIndex, participantIndex)"
-                />
-                <span>Winner</span>
-              </label>
-            </div>
-          </div>
-        </div>
+          v-model="form"
+          :hero-pool="heroPool"
+          :map-pool="mapPool"
+          :index="gameIndex"
+        />
 
         <button type="button" class="btn-ghost" @click="addGame">+ Add Game</button>
       </div>
 
       <!-- Pre-bans: struck before sides were assigned, so they belong to neither
            draft and score neither ban metric. -->
-      <div class="flex flex-col gap-4 border border-edge bg-surface-lowest p-4">
-        <h4 class="headline text-base text-cyan">Pre-bans (optional)</h4>
-        <p class="font-mono text-xs leading-relaxed text-ink-dim">
-          Heroes struck before sides were known. They belong to neither draft, so only heroes nobody
-          drafted are offered.
-        </p>
-
-        <div
-          v-for="(ban, index) in form.preBans"
-          :key="index"
-          class="flex flex-col gap-4 border border-edge bg-surface-low p-4 sm:flex-row sm:items-end"
-        >
-          <div class="flex flex-1 flex-col gap-2">
-            <label :for="`pre-ban-hero-${index}`" class="label-caps">Hero</label>
-            <select
-              :id="`pre-ban-hero-${index}`"
-              v-model.number="ban.heroId"
-              class="field-input-sm"
-            >
-              <option :value="0" disabled>Select a hero…</option>
-              <option v-for="hero in preBannableHeroes(ban.heroId)" :key="hero.id" :value="hero.id">
-                {{ hero.name }}
-              </option>
-            </select>
-          </div>
-
-          <button type="button" class="btn-ghost px-4 py-2 text-xs" @click="removePreBan(index)">
-            Remove
-          </button>
-        </div>
-
-        <button type="button" class="btn-ghost" @click="addPreBan">+ Add Pre-ban</button>
-      </div>
+      <MatchPreBanSection v-model="form" :hero-pool="heroPool" />
 
       <div class="flex justify-end gap-3 pt-2">
         <button class="btn-ghost" :disabled="loading" @click="handleCancel">Cancel</button>
