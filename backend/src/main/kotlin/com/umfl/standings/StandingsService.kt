@@ -208,9 +208,13 @@ class StandingsService(
     fun ticker(tournamentId: Long, sinceMatchId: Long = 0, limit: Int = 25): List<TickerEntry> {
         val rules = resolveRules(tournamentId)
         return matchResultCache.findByTournamentSince(tournamentId, sinceMatchId, limit).map { match ->
+            // Built once and partitioned by role, rather than re-filtered from a fresh
+            // heroContexts() call per role — same list, two views onto it.
+            val contexts = match.heroContexts()
+
             // Keyed by (game, hero), not hero alone: the same hero can appear in two
             // different games of a series with two different scores.
-            val contextsByGameAndHero = match.heroContexts()
+            val contextsByGameAndHero = contexts
                 .filter { it.role is HeroRole.Played }
                 .associateBy { context -> (context.role as HeroRole.Played).game.gameId to context.heroId }
 
@@ -224,7 +228,7 @@ class StandingsService(
                     game.participants.forEach { participant -> putIfAbsent(participant.heroId, game.gameId) }
                 }
             }
-            val draftContextsByGameAndHero = match.heroContexts()
+            val draftContextsByGameAndHero = contexts
                 .filter { it.role is HeroRole.Drafted }
                 .mapNotNull { context ->
                     firstGameIdByHero[context.heroId]?.let { gameId -> (gameId to context.heroId) to context }
