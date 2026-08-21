@@ -1,22 +1,35 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
-import { useAsyncRequest } from '@/composables/useAsyncRequest'
-import { useTournamentsStore } from '@/stores/tournaments'
+import { usePoolManagement } from '@/composables/usePoolManagement'
 import { byName } from '@/lib/sort'
 import type { Hero, HeroAdminDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 import TournamentSelect from '@/components/TournamentSelect.vue'
 
-const tournamentsStore = useTournamentsStore()
+const {
+  tournaments,
+  selectedTournamentId,
+  catalog: heroes,
+  pool: heroPoolHeroes,
+  loading,
+  error,
+  violations,
+  run,
+  reloadPool,
+  removingItem: removingHero,
+  startRemove: startRemoveHero,
+  cancelRemove: cancelRemoveHero,
+  confirmRemove: confirmRemoveHero,
+} = usePoolManagement<HeroAdminDto, Hero>({
+  entityLabel: 'Hero',
+  loadCatalog: () => api.admin.listHeroes().then((list) => list.sort(byName)),
+  loadPool: (tournamentId) => api.admin.listHeroPool(tournamentId),
+  removeFromPool: (tournamentId, heroId) => api.admin.removeHeroFromPool(tournamentId, heroId),
+})
 
-const selectedTournamentId = ref<number | null>(null)
-const heroes = ref<HeroAdminDto[]>([])
-const heroPoolHeroes = ref<Hero[]>([])
-const { loading, error, violations, run } = useAsyncRequest()
 const showAddForm = ref(false)
-const removingHero = ref<Hero | null>(null)
 
 const addForm = ref({
   heroId: null as number | null,
@@ -26,8 +39,6 @@ const addForm = ref({
 // Heroes staged for the next batch submit — built up client-side, sent in one request.
 const pendingHeroes = ref<{ heroId: number; name: string; cost: number }[]>([])
 
-const tournaments = computed(() => tournamentsStore.tournaments)
-
 // Heroes not yet in this tournament's pool and not already staged — the only ones worth adding.
 const availableHeroes = computed(() => {
   const poolIds = new Set(heroPoolHeroes.value.map((h) => h.id))
@@ -35,33 +46,12 @@ const availableHeroes = computed(() => {
   return heroes.value.filter((h) => !poolIds.has(h.id) && !pendingIds.has(h.id))
 })
 
-onMounted(() => {
-  void loadHeroes()
-})
-
-async function loadHeroes() {
-  const result = await run(() => api.admin.listHeroes(), 'Failed to load heroes')
-  if (result.ok) heroes.value = result.value.sort(byName)
-}
-
-// Watch tournament selection to load its hero pool
-watch(selectedTournamentId, async (newId) => {
-  removingHero.value = null
+// The add form and its staged batch are local to this screen — reset them on
+// a tournament switch, alongside usePoolManagement's own reset of the pool
+// and the pending removal.
+watch(selectedTournamentId, () => {
   cancelAddForm()
-  if (newId !== null) {
-    await loadHeroPool(newId)
-  } else {
-    heroPoolHeroes.value = []
-  }
 })
-
-async function loadHeroPool(tournamentId: number) {
-  const result = await run(() => api.admin.listHeroPool(tournamentId), 'Failed to load hero pool')
-  // A later switch may have already changed the selection while this was in
-  // flight — run() already drops that out-of-order response on its own.
-  if (selectedTournamentId.value !== tournamentId) return
-  if (result.ok) heroPoolHeroes.value = result.value
-}
 
 function startAddHero() {
   addForm.value = { heroId: null, cost: 1000 }
@@ -107,7 +97,7 @@ async function submitBatch() {
     'Failed to add heroes to pool',
   )
   if (!result.ok) return
-  await loadHeroPool(tournamentId)
+  await reloadPool(tournamentId)
   cancelAddForm()
 }
 
@@ -134,31 +124,7 @@ async function updateHeroCost(heroId: number, newCost: number) {
     'Failed to update hero cost',
   )
   if (!result.ok) return
-  await loadHeroPool(tournamentId)
-}
-
-function startRemoveHero(hero: Hero) {
-  error.value = null
-  violations.value = []
-  removingHero.value = hero
-}
-
-function cancelRemoveHero() {
-  removingHero.value = null
-}
-
-async function confirmRemoveHero() {
-  if (!selectedTournamentId.value || !removingHero.value) return
-  const tournamentId = selectedTournamentId.value
-  const heroId = removingHero.value.id
-
-  const result = await run(
-    () => api.admin.removeHeroFromPool(tournamentId, heroId),
-    'Failed to remove hero from pool',
-  )
-  if (!result.ok) return
-  removingHero.value = null
-  await loadHeroPool(tournamentId)
+  await reloadPool(tournamentId)
 }
 </script>
 

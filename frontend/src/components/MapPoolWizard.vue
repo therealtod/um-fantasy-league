@@ -1,59 +1,49 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { api } from '@/api/client'
-import { useAsyncRequest } from '@/composables/useAsyncRequest'
-import { useTournamentsStore } from '@/stores/tournaments'
+import { usePoolManagement } from '@/composables/usePoolManagement'
 import { byName } from '@/lib/sort'
 import type { MapAdminDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 import TournamentSelect from '@/components/TournamentSelect.vue'
 
-const tournamentsStore = useTournamentsStore()
-
-const selectedTournamentId = ref<number | null>(null)
-const maps = ref<MapAdminDto[]>([])
-const mapPool = ref<MapAdminDto[]>([])
-const { loading, error, violations, run } = useAsyncRequest()
-const removingMap = ref<MapAdminDto | null>(null)
+const {
+  tournaments,
+  selectedTournamentId,
+  catalog: maps,
+  pool: mapPool,
+  loading,
+  error,
+  violations,
+  run,
+  reloadPool,
+  removingItem: removingMap,
+  startRemove: startRemoveMap,
+  cancelRemove: cancelRemoveMap,
+  confirmRemove: confirmRemoveMap,
+} = usePoolManagement<MapAdminDto, MapAdminDto>({
+  entityLabel: 'Map',
+  loadCatalog: () => api.admin.listMaps().then((list) => list.sort(byName)),
+  loadPool: (tournamentId) => api.admin.listMapPool(tournamentId),
+  // A 409 here means the tournament already has a match recorded on this board.
+  removeFromPool: (tournamentId, mapId) => api.admin.removeMapFromPool(tournamentId, mapId),
+})
 
 // Maps staged for the next batch submit — checked here, sent in one request.
 const selectedMapIds = ref<number[]>([])
 
-const tournaments = computed(() => tournamentsStore.tournaments)
+// The staged selection is local to this screen — reset it on a tournament
+// switch, alongside usePoolManagement's own reset of the pool and the
+// pending removal.
+watch(selectedTournamentId, () => {
+  selectedMapIds.value = []
+})
 
 // Maps not yet in this tournament's pool — the only ones worth adding.
 const availableMaps = computed(() => {
   const poolIds = new Set(mapPool.value.map((m) => m.id))
   return maps.value.filter((m) => !poolIds.has(m.id))
-})
-
-onMounted(() => {
-  void loadMaps()
-})
-
-async function loadMaps() {
-  const result = await run(() => api.admin.listMaps(), 'Failed to load maps')
-  if (result.ok) maps.value = result.value.sort(byName)
-}
-
-async function loadMapPool(tournamentId: number) {
-  const result = await run(() => api.admin.listMapPool(tournamentId), 'Failed to load map pool')
-  // A later switch may have already changed the selection while this was in
-  // flight — run() already drops that out-of-order response on its own.
-  if (selectedTournamentId.value !== tournamentId) return
-  if (result.ok) mapPool.value = result.value
-}
-
-// Clear selection and reload the pool when tournament changes
-watch(selectedTournamentId, async (newId) => {
-  selectedMapIds.value = []
-  removingMap.value = null
-  if (newId !== null) {
-    await loadMapPool(newId)
-  } else {
-    mapPool.value = []
-  }
 })
 
 async function submitBatch() {
@@ -66,32 +56,7 @@ async function submitBatch() {
   )
   if (!result.ok) return
   selectedMapIds.value = []
-  await loadMapPool(tournamentId)
-}
-
-function startRemoveMap(map: MapAdminDto) {
-  error.value = null
-  violations.value = []
-  removingMap.value = map
-}
-
-function cancelRemoveMap() {
-  removingMap.value = null
-}
-
-async function confirmRemoveMap() {
-  if (!selectedTournamentId.value || !removingMap.value) return
-  const tournamentId = selectedTournamentId.value
-  const mapId = removingMap.value.id
-
-  // A 409 here means the tournament already has a match recorded on this board.
-  const result = await run(
-    () => api.admin.removeMapFromPool(tournamentId, mapId),
-    'Failed to remove map from pool',
-  )
-  if (!result.ok) return
-  removingMap.value = null
-  await loadMapPool(tournamentId)
+  await reloadPool(tournamentId)
 }
 </script>
 
