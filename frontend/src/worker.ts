@@ -1,9 +1,10 @@
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> }
-  // Backend base URL — set in wrangler.toml [vars], not hardcoded here, so a
-  // tunnel rotation (or the eventual move to a stable host) is a one-line
-  // change instead of a code edit. Keep it in step with the server.proxy
-  // target in vite.config.ts, which points dev at the same API.
+  // Backend base URL — not hardcoded here and not in wrangler.toml either,
+  // since it's currently a rotating tunnel hostname; set directly on the
+  // Worker in the Cloudflare dashboard (see wrangler.toml) so it never lands
+  // in the public repo. Keep it in step with VITE_API_PROXY_TARGET /
+  // server.proxy in vite.config.ts, which points dev at the same API.
   BACKEND_HOST: string
 }
 

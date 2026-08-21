@@ -702,7 +702,12 @@ a **Cloudflare Worker with static assets** (`frontend/wrangler.toml`), not a Pag
 and serves everything else from the `ASSETS` binding, falling back to `index.html` so Vue Router's
 history mode survives a deep link. The effect is the same same-origin proxy: the frontend's relative
 `/api/...` calls (`client.ts`, `sseClient.ts`) reach the VPS with no cross-origin request involved,
-which is why `FRONTEND_ORIGIN` stays unset in `prod`. `BACKEND_HOST` is a plain `[vars]` entry in
-`wrangler.toml` rather than a secret (it's just a base URL) — point it at the real backend hostname,
-and keep the `server.proxy` target in `frontend/vite.config.ts` in step so dev and prod hit the same
-API.
+which is why `FRONTEND_ORIGIN` stays unset in `prod`. `BACKEND_HOST` is *not* declared in
+`wrangler.toml`'s `[vars]` — while the backend only exists behind a Cloudflare quick tunnel (a
+hostname that rotates on every restart), committing it would publish that address in a public repo,
+so it's set directly on the Worker instead (Cloudflare dashboard: Workers & Pages → the Worker →
+Settings → Variables and Secrets), which Wrangler leaves untouched across deploys as long as the name
+stays undeclared in `wrangler.toml`. Point it at the real backend hostname there, and keep
+`VITE_API_PROXY_TARGET`/the `server.proxy` target in `frontend/vite.config.ts` (see Commands above)
+in step so dev and prod hit the same API. Once a stable, non-tunnel backend host exists, it stops
+being sensitive and `BACKEND_HOST` can move back into `[vars]` as a plain, committed entry.

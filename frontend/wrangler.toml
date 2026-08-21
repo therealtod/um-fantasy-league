@@ -6,9 +6,13 @@ compatibility_date = "2026-08-03"
 directory = "./dist"
 binding = "ASSETS"
 
-# Not a secret — this is just the backend's base URL, so a plain [vars] entry
-# (checked into git, one place to update) beats `wrangler secret put`. Swap
-# this for the real backend host once one exists at a stable, non-tunnel
-# hostname (see BACKEND_HOST in AGENTS.md's CI/CD section).
-[vars]
-BACKEND_HOST = "https://crest-tremendous-competitions-modify.trycloudflare.com"
+# BACKEND_HOST (the backend's base URL — see env.BACKEND_HOST in
+# src/worker.ts) is deliberately NOT declared here. It's currently a
+# Cloudflare quick-tunnel hostname that rotates on every restart, and a
+# [vars] entry here would put that tunnel's address in a public repo.
+# It's set directly on the Worker instead (dashboard: Workers & Pages ->
+# um-fantasy-league -> Settings -> Variables and Secrets), which Wrangler
+# leaves alone across deploys as long as it stays undeclared here. Swap it
+# for a real, stable backend host the same way, once one exists (see
+# BACKEND_HOST in AGENTS.md's CI/CD section) — a stable host is no longer
+# a secret and could move back into [vars] at that point.
