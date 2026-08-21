@@ -6,6 +6,7 @@ vi.mock('@/api/client', () => ({
   api: { standings: vi.fn(), matches: vi.fn() },
   ApiError: class extends Error {},
   describeError: (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback),
+  violationMessages: () => [],
 }))
 
 vi.mock('@/api/sseClient', () => ({

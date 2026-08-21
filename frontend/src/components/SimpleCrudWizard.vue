@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="TItem extends { id: number }, TForm extends { name: string }">
 import { shallowRef, ref, onMounted } from 'vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
-import { describeError, violationMessages } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 
 const props = defineProps<{
   entityLabel: string
@@ -14,9 +14,7 @@ const props = defineProps<{
 }>()
 
 const items = shallowRef<TItem[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
+const { loading, error, violations, run } = useAsyncRequest()
 const showForm = ref(false)
 const editingItem = ref<TItem | null>(null)
 
@@ -27,17 +25,8 @@ onMounted(() => {
 })
 
 async function loadItems() {
-  loading.value = true
-  error.value = null
-  violations.value = []
-  try {
-    items.value = await props.load()
-  } catch (e) {
-    error.value = describeError(e, `Failed to load ${props.entityLabel.toLowerCase()}s`)
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(() => props.load(), `Failed to load ${props.entityLabel.toLowerCase()}s`)
+  if (result.ok) items.value = result.value
 }
 
 function startCreate() {
@@ -66,25 +55,17 @@ async function save() {
     return
   }
 
-  loading.value = true
-  error.value = null
-  violations.value = []
+  const editing = editingItem.value
+  const fallback = `Failed to save ${props.entityLabel.toLowerCase()}`
+  const result = editing
+    ? await run(() => props.update(editing.id, form.value), fallback)
+    : await run(() => props.create(form.value), fallback)
 
-  try {
-    if (editingItem.value) {
-      const updated = await props.update(editingItem.value.id, form.value)
-      items.value = items.value.map((i) => (i.id === updated.id ? updated : i))
-    } else {
-      const created = await props.create(form.value)
-      items.value = [...items.value, created]
-    }
-    cancelForm()
-  } catch (e) {
-    error.value = describeError(e, `Failed to save ${props.entityLabel.toLowerCase()}`)
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  if (!result.ok) return
+  items.value = editing
+    ? items.value.map((i) => (i.id === result.value.id ? result.value : i))
+    : [...items.value, result.value]
+  cancelForm()
 }
 </script>
 

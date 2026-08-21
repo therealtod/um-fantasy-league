@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { api, describeError, violationMessages } from '@/api/client'
+import { api } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { ScoringCoefficientRequest, ScoringRuleSetDto } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
@@ -10,9 +11,7 @@ const tournamentsStore = useTournamentsStore()
 
 const selectedTournamentId = ref<number | null>(null)
 const ruleSets = ref<ScoringRuleSetDto[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
+const { loading, error, violations, run } = useAsyncRequest()
 const showForm = ref(false)
 const editingRuleSet = ref<ScoringRuleSetDto | null>(null)
 
@@ -80,21 +79,14 @@ async function loadRuleSets() {
     return
   }
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-  try {
-    const loaded = await api.admin.listScoringRuleSets(tournamentId)
-    // A later switch may have already changed the selection while this was in flight — drop it.
-    if (selectedTournamentId.value !== tournamentId) return
-    ruleSets.value = loaded
-  } catch (e) {
-    if (selectedTournamentId.value !== tournamentId) return
-    error.value = describeError(e, 'Failed to load scoring rule sets')
-    violations.value = violationMessages(e)
-  } finally {
-    if (selectedTournamentId.value === tournamentId) loading.value = false
-  }
+  const result = await run(
+    () => api.admin.listScoringRuleSets(tournamentId),
+    'Failed to load scoring rule sets',
+  )
+  // A later switch may have already changed the selection while this was in
+  // flight — run() already drops that out-of-order response on its own.
+  if (selectedTournamentId.value !== tournamentId) return
+  if (result.ok) ruleSets.value = result.value
 }
 
 function startCreate() {
@@ -183,56 +175,52 @@ async function saveRuleSet() {
     return
   }
 
-  loading.value = true
-  error.value = null
-  violations.value = []
   savedWarnings.value = null
+  const tournamentId = selectedTournamentId.value
+  const editing = editingRuleSet.value
+  const fallback = 'Failed to save scoring rule set'
+  const result = editing
+    ? await run(
+        () =>
+          api.admin.updateScoringRuleSet(tournamentId, editing.id, {
+            name: form.value.name,
+            coefficients: form.value.coefficients,
+          }),
+        fallback,
+      )
+    : await run(
+        () =>
+          api.admin.createScoringRuleSet(tournamentId, {
+            name: form.value.name,
+            coefficients: form.value.coefficients,
+            activate: form.value.activate,
+          }),
+        fallback,
+      )
 
-  try {
-    const editing = editingRuleSet.value
-    const saved = editing
-      ? await api.admin.updateScoringRuleSet(selectedTournamentId.value, editing.id, {
-          name: form.value.name,
-          coefficients: form.value.coefficients,
-        })
-      : await api.admin.createScoringRuleSet(selectedTournamentId.value, {
-          name: form.value.name,
-          coefficients: form.value.coefficients,
-          activate: form.value.activate,
-        })
-
-    savedWarnings.value = { name: saved.name, metrics: saved.warnings ?? [] }
-    cancelForm()
-    // Activating deactivates a sibling, so the whole list is stale after a create+activate.
-    if (saved.isActive) {
-      await loadRuleSets()
-    } else {
-      mergeRuleSet(saved)
-    }
-  } catch (e) {
-    error.value = describeError(e, 'Failed to save scoring rule set')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
+  if (!result.ok) return
+  const saved = result.value
+  savedWarnings.value = { name: saved.name, metrics: saved.warnings ?? [] }
+  cancelForm()
+  // Activating deactivates a sibling, so the whole list is stale after a create+activate.
+  if (saved.isActive) {
+    await loadRuleSets()
+  } else {
+    mergeRuleSet(saved)
   }
 }
 
 async function activateRuleSet(ruleSet: ScoringRuleSetDto) {
   if (!selectedTournamentId.value) return
+  const tournamentId = selectedTournamentId.value
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-  try {
-    await api.admin.activateScoringRuleSet(selectedTournamentId.value, ruleSet.id)
-    // Reload rather than patch: the previously active sibling was deactivated too.
-    await loadRuleSets()
-  } catch (e) {
-    error.value = describeError(e, 'Failed to activate scoring rule set')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () => api.admin.activateScoringRuleSet(tournamentId, ruleSet.id),
+    'Failed to activate scoring rule set',
+  )
+  if (!result.ok) return
+  // Reload rather than patch: the previously active sibling was deactivated too.
+  await loadRuleSets()
 }
 </script>
 

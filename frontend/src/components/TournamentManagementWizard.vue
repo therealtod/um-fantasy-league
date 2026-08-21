@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { api, describeError, violationMessages } from '@/api/client'
+import { api } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type {
   Tournament,
@@ -13,9 +14,7 @@ import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 
 const tournamentsStore = useTournamentsStore()
 
-const loading = ref(false)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
+const { loading, error, violations, run } = useAsyncRequest()
 const showForm = ref(false)
 const editingTournament = ref<Tournament | null>(null)
 const deletingTournament = ref<Tournament | null>(null)
@@ -85,21 +84,15 @@ function cancelDelete() {
 
 async function confirmDelete() {
   if (!deletingTournament.value) return
+  const tournamentId = deletingTournament.value.id
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-
-  try {
-    await api.admin.deleteTournament(deletingTournament.value.id)
-    await tournamentsStore.load() // Refresh the list
-    cancelDelete()
-  } catch (e) {
-    error.value = describeError(e, 'Failed to delete tournament')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () => api.admin.deleteTournament(tournamentId),
+    'Failed to delete tournament',
+  )
+  if (!result.ok) return
+  await tournamentsStore.load() // Refresh the list
+  cancelDelete()
 }
 
 async function saveTournament() {
@@ -114,24 +107,14 @@ async function saveTournament() {
     return
   }
 
-  loading.value = true
-  error.value = null
-  violations.value = []
+  const editing = editingTournament.value
+  const result = editing
+    ? await run(() => api.admin.updateTournament(editing.id, form.value), 'Failed to save tournament')
+    : await run(() => api.admin.createTournament(form.value), 'Failed to save tournament')
 
-  try {
-    if (editingTournament.value) {
-      await api.admin.updateTournament(editingTournament.value.id, form.value)
-    } else {
-      await api.admin.createTournament(form.value)
-    }
-    await tournamentsStore.load() // Refresh the list
-    cancelForm()
-  } catch (e) {
-    error.value = describeError(e, 'Failed to save tournament')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  if (!result.ok) return
+  await tournamentsStore.load() // Refresh the list
+  cancelForm()
 }
 </script>
 

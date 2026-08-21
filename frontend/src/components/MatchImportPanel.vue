@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import type { MatchImportPreviewDto, UnresolvedName } from '@/api/types'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
@@ -28,10 +29,11 @@ const emit = defineEmits<{
 
 const sourceUrl = ref('')
 const preview = ref<MatchImportPreviewDto | null>(null)
-const loading = ref(false)
+// Adding a board to the pool has its own busy flag (addingMapId) rather than
+// sharing loading — it shares this instance's error/violations, since only
+// one operation runs at a time, but must not disable the Import button.
+const { loading, error, violations, run } = useAsyncRequest()
 const addingMapId = ref<number | null>(null)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
 
 const canImport = computed(() => sourceUrl.value.trim().length > 0 && !loading.value)
 const isResolved = computed(() => preview.value !== null && preview.value.unresolved.length === 0)
@@ -52,19 +54,13 @@ const addableMaps = computed<UnresolvedName[]>(() =>
 
 async function runImport() {
   if (!canImport.value) return
-  loading.value = true
-  error.value = null
-  violations.value = []
   preview.value = null
 
-  try {
-    preview.value = await api.admin.importMatch(props.tournamentId, sourceUrl.value.trim())
-  } catch (e) {
-    error.value = describeError(e, 'Failed to import that match')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () => api.admin.importMatch(props.tournamentId, sourceUrl.value.trim()),
+    'Failed to import that match',
+  )
+  if (result.ok) preview.value = result.value
 }
 
 /**

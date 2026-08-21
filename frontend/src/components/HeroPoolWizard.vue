@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { api, describeError, violationMessages } from '@/api/client'
+import { api } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type { Hero, HeroAdminDto } from '@/api/types'
@@ -13,9 +14,7 @@ const tournamentsStore = useTournamentsStore()
 const selectedTournamentId = ref<number | null>(null)
 const heroes = ref<HeroAdminDto[]>([])
 const heroPoolHeroes = ref<Hero[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
+const { loading, error, violations, run } = useAsyncRequest()
 const showAddForm = ref(false)
 const removingHero = ref<Hero | null>(null)
 
@@ -41,12 +40,8 @@ onMounted(() => {
 })
 
 async function loadHeroes() {
-  try {
-    heroes.value = (await api.admin.listHeroes()).sort(byName)
-  } catch (e) {
-    error.value = describeError(e, 'Failed to load heroes')
-    violations.value = violationMessages(e)
-  }
+  const result = await run(() => api.admin.listHeroes(), 'Failed to load heroes')
+  if (result.ok) heroes.value = result.value.sort(byName)
 }
 
 // Watch tournament selection to load its hero pool
@@ -61,21 +56,11 @@ watch(selectedTournamentId, async (newId) => {
 })
 
 async function loadHeroPool(tournamentId: number) {
-  loading.value = true
-  error.value = null
-  violations.value = []
-  try {
-    const pool = await api.admin.listHeroPool(tournamentId)
-    // A later switch may have already changed the selection while this was in flight — drop it.
-    if (selectedTournamentId.value !== tournamentId) return
-    heroPoolHeroes.value = pool
-  } catch (e) {
-    if (selectedTournamentId.value !== tournamentId) return
-    error.value = describeError(e, 'Failed to load hero pool')
-    violations.value = violationMessages(e)
-  } finally {
-    if (selectedTournamentId.value === tournamentId) loading.value = false
-  }
+  const result = await run(() => api.admin.listHeroPool(tournamentId), 'Failed to load hero pool')
+  // A later switch may have already changed the selection while this was in
+  // flight — run() already drops that out-of-order response on its own.
+  if (selectedTournamentId.value !== tournamentId) return
+  if (result.ok) heroPoolHeroes.value = result.value
 }
 
 function startAddHero() {
@@ -111,24 +96,19 @@ function removePendingHero(index: number) {
 
 async function submitBatch() {
   if (!selectedTournamentId.value || pendingHeroes.value.length === 0) return
+  const tournamentId = selectedTournamentId.value
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-
-  try {
-    await api.admin.addHeroesToPool(
-      selectedTournamentId.value,
-      pendingHeroes.value.map((p) => ({ heroId: p.heroId, cost: p.cost })),
-    )
-    await loadHeroPool(selectedTournamentId.value)
-    cancelAddForm()
-  } catch (e) {
-    error.value = describeError(e, 'Failed to add heroes to pool')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () =>
+      api.admin.addHeroesToPool(
+        tournamentId,
+        pendingHeroes.value.map((p) => ({ heroId: p.heroId, cost: p.cost })),
+      ),
+    'Failed to add heroes to pool',
+  )
+  if (!result.ok) return
+  await loadHeroPool(tournamentId)
+  cancelAddForm()
 }
 
 function onCostInputChange(hero: Hero, event: Event) {
@@ -147,20 +127,14 @@ function onCostInputChange(hero: Hero, event: Event) {
 
 async function updateHeroCost(heroId: number, newCost: number) {
   if (!selectedTournamentId.value) return
+  const tournamentId = selectedTournamentId.value
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-
-  try {
-    await api.admin.setHeroCost(selectedTournamentId.value, heroId, newCost)
-    await loadHeroPool(selectedTournamentId.value)
-  } catch (e) {
-    error.value = describeError(e, 'Failed to update hero cost')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () => api.admin.setHeroCost(tournamentId, heroId, newCost),
+    'Failed to update hero cost',
+  )
+  if (!result.ok) return
+  await loadHeroPool(tournamentId)
 }
 
 function startRemoveHero(hero: Hero) {
@@ -175,21 +149,16 @@ function cancelRemoveHero() {
 
 async function confirmRemoveHero() {
   if (!selectedTournamentId.value || !removingHero.value) return
+  const tournamentId = selectedTournamentId.value
+  const heroId = removingHero.value.id
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-
-  try {
-    await api.admin.removeHeroFromPool(selectedTournamentId.value, removingHero.value.id)
-    removingHero.value = null
-    await loadHeroPool(selectedTournamentId.value)
-  } catch (e) {
-    error.value = describeError(e, 'Failed to remove hero from pool')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () => api.admin.removeHeroFromPool(tournamentId, heroId),
+    'Failed to remove hero from pool',
+  )
+  if (!result.ok) return
+  removingHero.value = null
+  await loadHeroPool(tournamentId)
 }
 </script>
 

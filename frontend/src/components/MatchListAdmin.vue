@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import type { BanType, MatchResultDto } from '@/api/types'
 import { api, describeError, violationMessages } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import DestructiveConfirmPanel from '@/components/DestructiveConfirmPanel.vue'
 
@@ -18,9 +19,10 @@ const emit = defineEmits<{
 }>()
 
 const matches = ref<MatchResultDto[]>([])
-const isLoading = ref(false)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
+// Delete has its own busy flag (isDeleting) rather than sharing loading — it
+// shares this instance's error/violations, since only one operation runs at
+// a time, but must not flip the table into its full "Loading matches..." state.
+const { loading: isLoading, error, violations, run } = useAsyncRequest()
 const selectedRound = ref<number | null>(null)
 const deletingMatch = ref<MatchResultDto | null>(null)
 const isDeleting = ref(false)
@@ -46,21 +48,11 @@ const filteredMatches = computed(() => {
 
 async function loadMatches() {
   const tournamentId = props.tournamentId
-  isLoading.value = true
-  error.value = null
-  violations.value = []
-  try {
-    const loaded = await api.admin.listMatches(tournamentId)
-    // A later switch may have already changed the selection while this was in flight — drop it.
-    if (props.tournamentId !== tournamentId) return
-    matches.value = loaded
-  } catch (err) {
-    if (props.tournamentId !== tournamentId) return
-    error.value = describeError(err, 'Failed to load matches')
-    violations.value = violationMessages(err)
-  } finally {
-    if (props.tournamentId === tournamentId) isLoading.value = false
-  }
+  const result = await run(() => api.admin.listMatches(tournamentId), 'Failed to load matches')
+  // A later switch may have already changed the selection while this was in
+  // flight — run() already drops that out-of-order response on its own.
+  if (props.tournamentId !== tournamentId) return
+  if (result.ok) matches.value = result.value
 }
 
 function formatDateTime(isoString: string): string {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { api, describeError, violationMessages } from '@/api/client'
+import { api } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type { MapAdminDto } from '@/api/types'
@@ -13,9 +14,7 @@ const tournamentsStore = useTournamentsStore()
 const selectedTournamentId = ref<number | null>(null)
 const maps = ref<MapAdminDto[]>([])
 const mapPool = ref<MapAdminDto[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
-const violations = ref<string[]>([])
+const { loading, error, violations, run } = useAsyncRequest()
 const removingMap = ref<MapAdminDto | null>(null)
 
 // Maps staged for the next batch submit — checked here, sent in one request.
@@ -34,25 +33,16 @@ onMounted(() => {
 })
 
 async function loadMaps() {
-  try {
-    maps.value = (await api.admin.listMaps()).sort(byName)
-  } catch (e) {
-    error.value = describeError(e, 'Failed to load maps')
-    violations.value = violationMessages(e)
-  }
+  const result = await run(() => api.admin.listMaps(), 'Failed to load maps')
+  if (result.ok) maps.value = result.value.sort(byName)
 }
 
 async function loadMapPool(tournamentId: number) {
-  try {
-    const pool = await api.admin.listMapPool(tournamentId)
-    // A later switch may have already changed the selection while this was in flight — drop it.
-    if (selectedTournamentId.value !== tournamentId) return
-    mapPool.value = pool
-  } catch (e) {
-    if (selectedTournamentId.value !== tournamentId) return
-    error.value = describeError(e, 'Failed to load map pool')
-    violations.value = violationMessages(e)
-  }
+  const result = await run(() => api.admin.listMapPool(tournamentId), 'Failed to load map pool')
+  // A later switch may have already changed the selection while this was in
+  // flight — run() already drops that out-of-order response on its own.
+  if (selectedTournamentId.value !== tournamentId) return
+  if (result.ok) mapPool.value = result.value
 }
 
 // Clear selection and reload the pool when tournament changes
@@ -68,21 +58,15 @@ watch(selectedTournamentId, async (newId) => {
 
 async function submitBatch() {
   if (!selectedTournamentId.value || selectedMapIds.value.length === 0) return
+  const tournamentId = selectedTournamentId.value
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-
-  try {
-    await api.admin.addMapsToPool(selectedTournamentId.value, selectedMapIds.value)
-    selectedMapIds.value = []
-    await loadMapPool(selectedTournamentId.value)
-  } catch (e) {
-    error.value = describeError(e, 'Failed to add maps to pool')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(
+    () => api.admin.addMapsToPool(tournamentId, selectedMapIds.value),
+    'Failed to add maps to pool',
+  )
+  if (!result.ok) return
+  selectedMapIds.value = []
+  await loadMapPool(tournamentId)
 }
 
 function startRemoveMap(map: MapAdminDto) {
@@ -97,22 +81,17 @@ function cancelRemoveMap() {
 
 async function confirmRemoveMap() {
   if (!selectedTournamentId.value || !removingMap.value) return
+  const tournamentId = selectedTournamentId.value
+  const mapId = removingMap.value.id
 
-  loading.value = true
-  error.value = null
-  violations.value = []
-
-  try {
-    await api.admin.removeMapFromPool(selectedTournamentId.value, removingMap.value.id)
-    removingMap.value = null
-    await loadMapPool(selectedTournamentId.value)
-  } catch (e) {
-    // A 409 here means the tournament already has a match recorded on this board.
-    error.value = describeError(e, 'Failed to remove map from pool')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  // A 409 here means the tournament already has a match recorded on this board.
+  const result = await run(
+    () => api.admin.removeMapFromPool(tournamentId, mapId),
+    'Failed to remove map from pool',
+  )
+  if (!result.ok) return
+  removingMap.value = null
+  await loadMapPool(tournamentId)
 }
 </script>
 

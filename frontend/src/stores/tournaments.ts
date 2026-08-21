@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, ApiError, describeError } from '@/api/client'
+import { api, ApiError } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import type { Tournament } from '@/api/types'
 
 export const useTournamentsStore = defineStore('tournaments', () => {
   const tournaments = ref<Tournament[]>([])
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const { loading, error, run } = useAsyncRequest()
   const registering = ref<number | null>(null)
 
   // `myEntryStatus` is *absent*, not null, when the manager has no entry: the
@@ -26,17 +26,13 @@ export const useTournamentsStore = defineStore('tournaments', () => {
   const live = computed(() => tournaments.value.filter((t) => t.status === 'LIVE'))
 
   async function load() {
-    loading.value = true
-    error.value = null
-    try {
-      tournaments.value = await api.tournaments()
-    } catch (e) {
-      error.value = describeError(e, 'Could not load tournaments')
-    } finally {
-      loading.value = false
-    }
+    const result = await run(() => api.tournaments(), 'Could not load tournaments')
+    if (result.ok) tournaments.value = result.value
   }
 
+  // register() has its own busy indicator (registering, keyed by which
+  // tournament) rather than sharing loading — routing it through run() would
+  // flip the whole list's loading flag for what is a per-row action.
   async function register(tournamentId: number) {
     registering.value = tournamentId
     error.value = null

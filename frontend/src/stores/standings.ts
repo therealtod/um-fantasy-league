@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api } from '@/api/client'
 import { openStandingsStream } from '@/api/sseClient'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import type { StandingsBoard, TickerEntry } from '@/api/types'
 
 const MAX_TICKER_ENTRIES = 40
@@ -10,8 +11,7 @@ export const useStandingsStore = defineStore('standings', () => {
   const tournamentId = ref<number | null>(null)
   const board = ref<StandingsBoard | null>(null)
   const ticker = ref<TickerEntry[]>([])
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const { loading, error, run } = useAsyncRequest()
 
   /** Closes the current tournament's `/standings/stream` SSE connection, if any. */
   let closeStream: (() => void) | null = null
@@ -26,29 +26,22 @@ export const useStandingsStore = defineStore('standings', () => {
     tournamentId.value = id
     board.value = null
     ticker.value = []
-    loading.value = true
-    error.value = null
-    try {
-      const [standings, matches] = await Promise.all([
-        api.standings(id),
-        api.matches(id, 0, MAX_TICKER_ENTRIES),
-      ])
-      // A second load() for a different tournament may have started and even
-      // finished while this one was still in flight — an out-of-order
-      // response here must not clobber the newer selection's board.
-      if (tournamentId.value !== id) return
+
+    const result = await run(
+      () => Promise.all([api.standings(id), api.matches(id, 0, MAX_TICKER_ENTRIES)]),
+      'Could not load standings',
+    )
+    // A second load() for a different tournament may have started and even
+    // finished while this one was still in flight — run() already drops that
+    // out-of-order response on its own, but the stream must still only open
+    // for the selection that is still current once this settles.
+    if (tournamentId.value !== id) return
+    if (result.ok) {
+      const [standings, matches] = result.value
       board.value = standings
       ticker.value = matches
-    } catch (e) {
-      if (tournamentId.value !== id) return
-      error.value = describeError(e, 'Could not load standings')
-    } finally {
-      if (tournamentId.value === id) loading.value = false
     }
-
-    if (tournamentId.value === id) {
-      closeStream = openStandingsStream(id, () => void refresh())
-    }
+    closeStream = openStandingsStream(id, () => void refresh())
   }
 
   /** Closes the live standings stream, if one is open. Call on unmount. */

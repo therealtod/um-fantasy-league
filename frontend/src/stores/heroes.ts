@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api, describeError } from '@/api/client'
+import { api } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import type { Hero, HeroSort } from '@/api/types'
 
 /**
@@ -10,16 +11,10 @@ import type { Hero, HeroSort } from '@/api/types'
 export const useHeroesStore = defineStore('heroes', () => {
   const heroes = ref<Hero[]>([])
   const tournamentId = ref<number | null>(null)
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+  const { loading, error, run } = useAsyncRequest()
 
   const sort = ref<HeroSort>('COST')
   const search = ref('')
-
-  // Bumped on every load() so an out-of-order response — a search request
-  // that started earlier but resolves later than a newer one — can be told
-  // apart from the latest and dropped instead of clobbering it.
-  let requestId = 0
 
   async function load(id: number | null = tournamentId.value) {
     if (id === null) {
@@ -28,22 +23,14 @@ export const useHeroesStore = defineStore('heroes', () => {
       return
     }
     tournamentId.value = id
-    const thisRequest = ++requestId
-    loading.value = true
-    error.value = null
-    try {
-      const result = await api.heroes(id, {
-        sort: sort.value,
-        search: search.value || undefined,
-      })
-      if (thisRequest !== requestId) return
-      heroes.value = result
-    } catch (e) {
-      if (thisRequest !== requestId) return
-      error.value = describeError(e, 'Could not load heroes')
-    } finally {
-      if (thisRequest === requestId) loading.value = false
-    }
+    // run() drops an out-of-order response on its own — a search request
+    // that started earlier but resolves later than a newer one is dropped
+    // instead of clobbering it.
+    const result = await run(
+      () => api.heroes(id, { sort: sort.value, search: search.value || undefined }),
+      'Could not load heroes',
+    )
+    if (result.ok) heroes.value = result.value
   }
 
   /** Point the pool at a different tournament, reloading only when it moves. */

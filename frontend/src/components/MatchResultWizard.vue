@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { api, describeError, violationMessages } from '@/api/client'
+import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
 import type { Hero, MapAdminDto, MatchImportPreviewDto } from '@/api/types'
@@ -40,11 +41,9 @@ const emit = defineEmits<{
 
 const tournamentsStore = useTournamentsStore()
 
-const loading = ref(false)
 // What the *server* (or a failed load) said, as opposed to what this form can
 // work out for itself — see `validationError`.
-const serverError = ref<string | null>(null)
-const violations = ref<string[]>([])
+const { loading, error: serverError, violations, run } = useAsyncRequest()
 const submitAttempted = ref(false)
 const isInitialized = ref(false)
 
@@ -87,19 +86,11 @@ function resetForm() {
 
 async function loadMatchData() {
   if (props.mode !== 'edit' || !props.tournamentId || !props.matchId) return
+  const tournamentId = props.tournamentId
+  const matchId = props.matchId
 
-  loading.value = true
-  serverError.value = null
-  violations.value = []
-
-  try {
-    form.value = matchForm.formFromMatch(await api.admin.getMatch(props.tournamentId, props.matchId))
-  } catch (e) {
-    serverError.value = describeError(e, 'Failed to load match data')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  const result = await run(() => api.admin.getMatch(tournamentId, matchId), 'Failed to load match data')
+  if (result.ok) form.value = matchForm.formFromMatch(result.value)
 }
 
 async function loadPools() {
@@ -160,28 +151,25 @@ async function saveMatch() {
   }
   if (validationError.value) return
 
-  loading.value = true
-
-  try {
+  const result = await run(async () => {
     if (props.mode === 'create') {
       await api.admin.recordMatch(tournamentId, matchForm.toPayload(form.value))
     } else if (props.mode === 'edit' && props.matchId) {
       await api.admin.correctMatch(tournamentId, props.matchId, matchForm.toPayload(form.value))
     }
-    emit('success')
-  } catch (e) {
-    serverError.value = describeError(e, 'Failed to save match')
-    violations.value = violationMessages(e)
-  } finally {
-    loading.value = false
-  }
+  }, 'Failed to save match')
+
+  if (result.ok) emit('success')
 }
 
 function handleCancel() {
   emit('cancel')
 }
 
-// Initialize based on mode
+// Initialize based on mode. Manual rather than run(), since loadMatchData()
+// already wraps its own call in run() on this same instance — nesting a
+// second run() around it here would fight over one token/loading pair for
+// no benefit; this just shares the same error/violations/loading refs.
 onMounted(async () => {
   loading.value = true
   try {
