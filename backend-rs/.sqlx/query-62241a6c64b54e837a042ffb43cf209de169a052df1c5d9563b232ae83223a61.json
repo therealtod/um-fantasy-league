@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into scoring_coefficient (rule_set_id, metric, coefficient, sort_order)\n         select $1, m, w, s\n         from unnest($2::text[], $3::numeric[], $4::integer[]) as t(m, w, s)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray",
+        "NumericArray",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62241a6c64b54e837a042ffb43cf209de169a052df1c5d9563b232ae83223a61"
+}

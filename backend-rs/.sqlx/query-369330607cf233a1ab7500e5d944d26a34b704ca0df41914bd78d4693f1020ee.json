@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select rs.id as rule_set_id, rs.name, c.metric as \"metric?\", c.coefficient as \"coefficient?\"\n           from scoring_rule_set rs\n           left join scoring_coefficient c on c.rule_set_id = rs.id\n           where rs.tournament_id = $1\n             and rs.is_active\n           order by c.sort_order, c.metric",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rule_set_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "scoring_rule_set",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "scoring_rule_set",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "metric?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "metric"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "coefficient?",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "coefficient"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "369330607cf233a1ab7500e5d944d26a34b704ca0df41914bd78d4693f1020ee"
+}

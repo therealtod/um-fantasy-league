@@ -18,6 +18,7 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::manager::routes())
         .merge(crate::hero::routes())
         .merge(crate::tournament::routes())
+        .merge(crate::scoring::routes())
     // Feature routes are merged here, one line each:
     //   .merge(crate::standings::routes())
     //   ...

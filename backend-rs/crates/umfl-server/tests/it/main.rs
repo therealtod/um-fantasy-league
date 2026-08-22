@@ -15,5 +15,6 @@ mod harness;
 mod actuator;
 mod roster_flow;
 mod schema_and_seed;
+mod scoring_admin;
 mod security;
 mod tournament_api;

@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select rule_set_id, id, metric, coefficient, sort_order\n         from scoring_coefficient where rule_set_id = any($1) order by sort_order, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rule_set_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "rule_set_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "metric",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "metric"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "coefficient",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "coefficient"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "sort_order",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficient",
+            "name": "sort_order"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d4c86d1b2b2c19b1388f6e07f4a73117463c7502389124f392cea57d22f2c2fb"
+}

@@ -13,6 +13,7 @@ pub mod hero;
 pub mod http;
 pub mod manager;
 pub mod ratelimit;
+pub mod scoring;
 pub mod state;
 pub mod tournament;
 

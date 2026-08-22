@@ -2,6 +2,7 @@
 //! documents for the framework's own rejections, and the `instance` field the
 //! servlet layer filled in on its way out.
 
+pub mod big_decimal;
 pub mod extract;
 pub mod problem;
 

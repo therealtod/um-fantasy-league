@@ -37,7 +37,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 # `preserve_order` makes serde_json::Map an IndexMap. Without it every
 # nested object is alphabetised, which silently reorders `violations` and
 # `fields` away from the LinkedHashMap order Jackson emitted.
-serde_json = { version = "1.0.151", features = ["preserve_order"] }
+#
+# `raw_value` is what lets `http::big_decimal` put a `numeric(10,4)` on the
+# wire as a JSON *number* with its trailing zeros intact -- see that module for
+# why neither `rust_decimal`'s own serde nor an `f64` hop can do it.
+serde_json = { version = "1.0.151", features = ["preserve_order", "raw_value"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "chrono", "rust_decimal", "uuid", "macros", "migrate"] }
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }

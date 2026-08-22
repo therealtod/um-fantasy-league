@@ -105,28 +105,27 @@ Landed, with tests:
 
 | Area | Modules | Routes |
 |---|---|---|
-| Plumbing | `config`, `state`, `error`, `http/{problem,extract}`, `ratelimit`, `auth/{authenticate,authorize,dev,supabase}` | — |
+| Plumbing | `config`, `state`, `error`, `http/{problem,extract,big_decimal}`, `ratelimit`, `auth/{authenticate,authorize,dev,supabase}` | — |
 | Actuator | `api/actuator` | `GET /actuator/{health,info}` |
 | Manager | `manager/{query,writer}` | `GET /api/me` |
 | Hero pool | `hero/query` | `GET /api/tournaments/{id}/heroes` |
 | Tournaments & rosters | `tournament/{query,writer,service}` | `GET /api/tournaments`, `GET /api/tournaments/{id}`, `POST …/entries`, `GET …/entries/me`, `PUT …/entries/me/slots`, `POST …/entries/me/lock` |
+| Scoring rule sets | `scoring/{query,writer,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/scoring-rule-sets`, `PUT …/{ruleSetId}`, `POST …/{ruleSetId}/activate` |
 
 Still to port, in dependency order — each is a Kotlin package under
 `backend/src/main/kotlin/com/umfl/` and is its own oracle:
 
-1. **`scoring`** — `AdminScoringService`, the rule-set query/writer, `/api/admin/**` rule sets and
-   coefficients. Its pure half (`scoring_engine`, `match_metrics`, `scoring_rule_set_policy`) is
-   already in `umfl-domain`.
-2. **`map`** — `AdminMapService`, `MapPoolAdminRepository`, the board pool. Note the deferred
+1. **`map`** — `AdminMapService`, `MapPoolAdminRepository`, the board pool. Note the deferred
    composite FK and the `set constraints … immediate` re-check described in AGENTS.md.
-3. **`match`** — `MatchResultQuery`, `TournamentMatchRepository`, `AdminMatchService`,
+2. **`match`** — `MatchResultQuery`, `TournamentMatchRepository`, `AdminMatchService`,
    `MatchResultCache`, `ReferenceDataRenamedEvent`. The biggest one; `match_policy` and
    `match_result` are already pure.
-4. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
+3. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
    and the SSE route. **Does not port the fold**; it calls `umfl_domain::standings::{board,ticker}`
-   (§3a).
-5. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
-6. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
+   (§3a). Its rule-set input is `scoring::query::active_rules`, which is already landed and has no
+   other caller yet.
+4. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
+5. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
    `AdminTournamentService`. They write the tables the read side above already reads.
 
 Two ported Kotlin tests have a piece deliberately deferred and want finishing when their dependency
@@ -134,7 +133,7 @@ lands: `roster_flow.rs`'s UMFL-06 case drops the Kotlin's cross-check against
 `StandingsQuery.rosters`, and this document's own headline assertion — the hand-derived leaderboard
 in §13 — has nowhere to live until `standings` exists.
 
-## 4. Serialization — five rules, all of them wire contract
+## 4. Serialization — six rules, all of them wire contract
 
 **4.1. Every `Option` field on a response type carries `skip_serializing_if = "Option::is_none"`.**
 
@@ -171,6 +170,22 @@ keys, but matching costs nothing and makes a hand-diff readable.
 
 **4.5. Enums serialize as their Kotlin constant name.** `#[serde(rename_all = "SCREAMING_SNAKE_CASE")]`
 where the Rust spelling differs. `BanType::SelfBan` must render `"SELF_BAN"`.
+
+**4.6. A `numeric` column goes through `crate::http::big_decimal`.** `rust_decimal`'s own serde
+emits a JSON *string*; `types.ts` declares `coefficient: number`. Going via `f64` fixes the type and
+breaks the scale — `numeric(10,4)` prints `0.7500` and `BigDecimal.toString()` keeps every digit,
+where an `f64` hop prints `0.75`. The helper is a `RawValue` round trip in both directions, so the
+scale the client *sent* also survives: `AdminScoringService.create` echoes the aggregate it saved
+rather than a re-read row, so a posted `12.0` comes back `12.0`.
+
+```rust
+#[serde(with = "crate::http::big_decimal")]
+pub coefficient: Decimal,
+
+// A request field whose `@NotNull` is enforced by `garde` rather than the type:
+#[serde(default, with = "crate::http::big_decimal::option")]
+pub coefficient: Option<Decimal>,
+```
 
 ## 5. Errors
 

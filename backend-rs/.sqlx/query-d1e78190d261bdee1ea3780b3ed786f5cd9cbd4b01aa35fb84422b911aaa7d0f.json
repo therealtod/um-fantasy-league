@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select is_active from scoring_rule_set where tournament_id = $1 and name = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "scoring_rule_set",
+            "name": "is_active"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d1e78190d261bdee1ea3780b3ed786f5cd9cbd4b01aa35fb84422b911aaa7d0f"
+}

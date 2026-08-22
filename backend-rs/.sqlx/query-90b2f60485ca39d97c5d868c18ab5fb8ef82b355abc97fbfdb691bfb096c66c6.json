@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scoring_rule_set\n            set tournament_id = $2, name = $3, is_active = $4\n          where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "90b2f60485ca39d97c5d868c18ab5fb8ef82b355abc97fbfdb691bfb096c66c6"
+}
