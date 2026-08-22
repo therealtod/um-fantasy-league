@@ -111,27 +111,32 @@ Landed, with tests:
 | Hero pool | `hero/query` | `GET /api/tournaments/{id}/heroes` |
 | Tournaments & rosters | `tournament/{query,writer,service}` | `GET /api/tournaments`, `GET /api/tournaments/{id}`, `POST …/entries`, `GET …/entries/me`, `PUT …/entries/me/slots`, `POST …/entries/me/lock` |
 | Scoring rule sets | `scoring/{query,writer,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/scoring-rule-sets`, `PUT …/{ruleSetId}`, `POST …/{ruleSetId}/activate` |
+| Board pool | `map/{query,writer,pool_admin,admin_service}` | `GET`/`POST /api/admin/maps`, `PUT /api/admin/maps/{id}`, `GET`/`POST /api/admin/tournaments/{id}/maps`, `PUT`/`DELETE …/maps/{mapId}` |
 
 Still to port, in dependency order — each is a Kotlin package under
 `backend/src/main/kotlin/com/umfl/` and is its own oracle:
 
-1. **`map`** — `AdminMapService`, `MapPoolAdminRepository`, the board pool. Note the deferred
-   composite FK and the `set constraints … immediate` re-check described in AGENTS.md.
-2. **`match`** — `MatchResultQuery`, `TournamentMatchRepository`, `AdminMatchService`,
+1. **`match`** — `MatchResultQuery`, `TournamentMatchRepository`, `AdminMatchService`,
    `MatchResultCache`, `ReferenceDataRenamedEvent`. The biggest one; `match_policy` and
    `match_result` are already pure.
-3. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
+2. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
    and the SSE route. **Does not port the fold**; it calls `umfl_domain::standings::{board,ticker}`
    (§3a). Its rule-set input is `scoring::query::active_rules`, which is already landed and has no
    other caller yet.
-4. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
-5. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
+3. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
+4. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
    `AdminTournamentService`. They write the tables the read side above already reads.
 
-Two ported Kotlin tests have a piece deliberately deferred and want finishing when their dependency
-lands: `roster_flow.rs`'s UMFL-06 case drops the Kotlin's cross-check against
-`StandingsQuery.rosters`, and this document's own headline assertion — the hand-derived leaderboard
-in §13 — has nowhere to live until `standings` exists.
+Three things are deliberately deferred and want finishing when their dependency lands:
+`roster_flow.rs`'s UMFL-06 case drops the Kotlin's cross-check against `StandingsQuery.rosters`;
+this document's own headline assertion — the hand-derived leaderboard in §13 — has nowhere to live
+until `standings` exists; and **`map::admin_service::update` does not yet announce a rename**. The
+Kotlin publishes `ReferenceDataRenamedEvent` there (and in `AdminHeroService.update`) because an
+assembled `MatchResult` carries `mapName`/`heroName` as copies, so `MatchResultCache` has to drop
+what it holds. Nothing is stale while nothing is cached, so the port leaves the exact
+`existing.name != name` test in place with a `tracing::debug!` on it; the `match` owner hangs the
+two-phase invalidation off that test — once inside the transaction, once after it ends, committed
+*or* rolled back — in both services.
 
 ## 4. Serialization — six rules, all of them wire contract
 

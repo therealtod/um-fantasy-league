@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tournament_map (tournament_id, map_id)\n         select $1, m from unnest($2::bigint[]) as t(m)\n         on conflict do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76c8388e6672b07a7049d99023cbe5c3d78bd0109982ac7e6dda134a99e811ba"
+}

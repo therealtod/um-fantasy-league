@@ -13,6 +13,7 @@
 mod harness;
 
 mod actuator;
+mod map_admin;
 mod roster_flow;
 mod schema_and_seed;
 mod scoring_admin;

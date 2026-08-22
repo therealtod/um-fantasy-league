@@ -12,6 +12,7 @@ pub mod error;
 pub mod hero;
 pub mod http;
 pub mod manager;
+pub mod map;
 pub mod ratelimit;
 pub mod scoring;
 pub mod state;

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select gm.id, gm.name\n         from tournament_map tm\n         join game_map gm on gm.id = tm.map_id\n         where tm.tournament_id = $1\n         order by gm.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "game_map",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "game_map",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "66ffe6473cf1d679e7573d8fa4d978f198522ed8245a44078931df359ec8c7b6"
+}
