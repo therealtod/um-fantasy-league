@@ -1,0 +1,16 @@
+# `sort_unstable_*` is banned repo-wide.
+#
+# The standings ranking is standard competition ranking (1, 2, 2, 4) and the
+# ticker sorts each game's participants winner-first -- both rely on everything
+# they did *not* compare keeping the order the database returned it in. An
+# unstable sort would break that intermittently, on some inputs, on some
+# platform versions: the worst possible failure mode for a contract this is
+# checked against by an exact-equality leaderboard assertion.
+#
+# Use `sort_by` / `sort_by_key`. If a genuinely order-irrelevant hot path ever
+# wants the unstable form, allow it at the call site with a comment saying why.
+disallowed-methods = [
+    { path = "slice::sort_unstable", reason = "use sort() -- recorded order is contract, see clippy.toml" },
+    { path = "slice::sort_unstable_by", reason = "use sort_by() -- recorded order is contract, see clippy.toml" },
+    { path = "slice::sort_unstable_by_key", reason = "use sort_by_key() -- recorded order is contract, see clippy.toml" },
+]

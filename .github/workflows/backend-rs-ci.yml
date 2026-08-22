@@ -1,0 +1,69 @@
+# The Rust backend's merge gate.
+#
+# Runs alongside `backend-ci.yml` rather than replacing it: while the port is
+# in progress the Kotlin backend is the behavioural oracle, so its own gate has
+# to stay green. T14 (cutover) deletes `backend-ci.yml` and this file loses the
+# `-rs` suffix.
+name: backend-rs-ci
+
+on:
+  pull_request:
+    paths:
+      - "backend-rs/**"
+      - "db/**"
+      - ".github/workflows/backend-rs-ci.yml"
+  push:
+    branches-ignore:
+      - master
+    paths:
+      - "backend-rs/**"
+      - "db/**"
+      - ".github/workflows/backend-rs-ci.yml"
+
+defaults:
+  run:
+    working-directory: backend-rs
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Every step compiles against the committed query metadata, never a live
+      # database -- the same way the release build does.
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      # `backend-rs/rust-toolchain.toml` pins the version; this action reads it.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend-rs
+
+      # Replaces `:backend:ktlintCheck`.
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      # `clippy.toml` bans `sort_unstable_*` here: recorded order is contract.
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The new failure mode this build has and the Gradle one did not: editing
+      # a query and forgetting to re-run `cargo sqlx prepare` still compiles
+      # locally (a live DATABASE_URL is there) and breaks the image build.
+      - name: Check the offline query metadata is current
+        run: |
+          if [ -d .sqlx ]; then
+            cargo install sqlx-cli --locked --no-default-features --features postgres,rustls
+            cargo sqlx prepare --workspace --check -- --all-targets
+          else
+            echo "No .sqlx/ yet -- no compile-time-checked queries in the tree."
+          fi
+
+      # Integration tests need a Docker daemon, which GitHub-hosted runners
+      # have preinstalled -- the same arrangement as the Kotlin gate.
+      - name: Test
+        run: cargo test --workspace

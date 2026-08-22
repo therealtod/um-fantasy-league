@@ -7,7 +7,20 @@ spring:
     password: ${DB_PASSWORD:umfl}
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # `db/` lives at the **repository root**, not on the classpath: the Rust
+    # port in `backend-rs/` migrates the same directory, so the SQL is shared
+    # rather than copied into one build's resources. Flyway therefore reads it
+    # off the filesystem, and a `filesystem:` location is relative to the
+    # working directory -- which Gradle sets to `backend/` for both
+    # `:backend:test` and `:backend:bootRun`, hence the `../` default.
+    #
+    # `DB_MIGRATIONS_DIR` is the escape hatch for every other launcher, where
+    # that relative guess is wrong: a bare `java -jar` from the repository root
+    # (`DB_MIGRATIONS_DIR=db`), or the container image, which has to COPY `db`
+    # in and point at it absolutely. It is the same category as `DB_URL` -- a
+    # path this process cannot read out of a database it hasn't reached yet --
+    # and not one of the `umfl.*` domain tunables disclaimed below.
+    locations: filesystem:${DB_MIGRATIONS_DIR:../db}/migration
   jackson:
     default-property-inclusion: non_null
   lifecycle:

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tournament_entry\n              set tournament_id = $2, manager_id = $3, status = $4,\n                  credit_grant = $5, registered_at = $6, locked_at = $7\n            where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "214ae043e82c1105c328e2417b74e04b791c06bb1f26fb0e825fa70b8122c301"
+}

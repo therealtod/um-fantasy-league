@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select hero_id from entry_slot where entry_id = $1 order by slot_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hero_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "entry_slot",
+            "name": "hero_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7671c2cd88160901c811faed40349ea4ded99cc2181b16520b2b5d28a8ef931f"
+}

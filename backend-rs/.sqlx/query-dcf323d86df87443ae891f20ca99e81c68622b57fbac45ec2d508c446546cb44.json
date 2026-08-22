@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, name, format, status, start_date, end_date,\n                  capacity, roster_size, credit_grant\n           from tournament where id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "format",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "format"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "start_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "start_date"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "end_date",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "end_date"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "capacity",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "capacity"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "roster_size",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "roster_size"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "credit_grant",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament",
+            "name": "credit_grant"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dcf323d86df87443ae891f20ca99e81c68622b57fbac45ec2d508c446546cb44"
+}

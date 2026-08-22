@@ -1,0 +1,28 @@
+[package]
+name = "umfl-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# INVARIANT: this crate is pure. No sqlx, no axum, no reqwest, no tokio.
+# AGENTS.md: "Domain rules live in pure objects with no Spring or persistence
+# dependency ... New rules belong there." Keeping the manifest free of I/O
+# crates turns that convention into a build error.
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock", "std"] }
+# The IANA zone table, for `scraped_timestamps`. Pure data and a lookup -- the
+# source site renders its timestamps in a named zone ("22:00 CEST") and there is
+# no offset on the wire to use instead. Not an I/O dependency; see the invariant
+# above.
+chrono-tz = { version = "0.10.4", default-features = false, features = ["std"] }
+indexmap = { version = "2.14.0", features = ["serde"] }
+rust_decimal = "1.42.1"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.20"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = { version = "1.0.151", features = ["preserve_order"] }

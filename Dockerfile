@@ -18,7 +18,16 @@ WORKDIR /app
 
 RUN addgroup -S umfl && adduser -S umfl -G umfl
 COPY --from=build /workspace/backend/build/libs/*.jar app.jar
-RUN chown umfl:umfl app.jar
+
+# The Flyway migrations used to ride inside the jar as a classpath resource.
+# They now live at the repo root so they survive `backend/` being deleted at the
+# end of the Rust port, which means this image has to carry them as ordinary
+# files and tell Flyway where they went -- `application.yml`'s default of
+# `../db` is relative to Gradle's working directory, not to /app.
+COPY db /app/db
+ENV DB_MIGRATIONS_DIR=/app/db
+
+RUN chown -R umfl:umfl app.jar /app/db
 USER umfl
 
 EXPOSE 8080

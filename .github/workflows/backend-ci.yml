@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "db/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle/**"
@@ -14,6 +15,7 @@ on:
       - master
     paths:
       - "backend/**"
+      - "db/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle/**"

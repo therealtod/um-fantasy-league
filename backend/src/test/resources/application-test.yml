@@ -5,7 +5,7 @@ spring:
     # tournaments, managers, recorded matches) -- see V3__demo_fixtures.sql.
     # Heroes and boards are not in there: they are reference data and come from
     # `db/migration/V2__reference_data.sql`, in every profile.
-    locations: classpath:db/migration,classpath:db/seed
+    locations: filesystem:${DB_MIGRATIONS_DIR:../db}/migration,filesystem:${DB_MIGRATIONS_DIR:../db}/seed
 
 logging:
   level:

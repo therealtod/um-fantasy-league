@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select h.id, h.name, h.image_url, th.cost\n           from tournament_hero th\n           join heroes h on h.id = th.hero_id\n           where th.tournament_id = $1 and h.id = any($2)\n           order by h.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "image_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "image_url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "cost",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament_hero",
+            "name": "cost"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "bb7ff3b8eed7eccf2d88c07ded85f676a7ecbbab8ce35942b7d62cde06da9c30"
+}

@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, tournament_id, manager_id, status, credit_grant, registered_at, locked_at\n           from tournament_entry where tournament_id = $1 and manager_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tournament_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "tournament_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "manager_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "credit_grant",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "credit_grant"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "registered_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "registered_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "locked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tournament_entry",
+            "name": "locked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "53fa70a01e22438015dd219478ec918dcc01d4945ca098fa660367e9e7b6e94b"
+}

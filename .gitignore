@@ -9,6 +9,9 @@ build/
 *.iml
 .vscode/
 
+# Rust
+backend-rs/target/
+
 # Node
 node_modules/
 dist/

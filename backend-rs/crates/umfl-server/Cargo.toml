@@ -1,0 +1,68 @@
+[package]
+name = "umfl-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "umfl-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8.9"
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock", "std"] }
+dashmap = "6.2.1"
+figment = { version = "0.10.19", features = ["env"] }
+futures = "0.3.34"
+garde = { version = "0.23.0", features = ["derive"] }
+indexmap = { version = "2.14.0", features = ["serde"] }
+ipnet = "2.12.1"
+jsonwebtoken = "11.0.0"
+moka = { version = "0.12.16", features = ["future"] }
+percent-encoding = "2.3.2"
+rust_decimal = "1.42.1"
+# The JWKS fetch, and (T12) the scraper sidecar. `AGENTS.md` says the
+# application makes "exactly one outbound HTTP call", counting only the
+# scraper; prod in fact makes a second, because `NimbusJwtDecoder
+# .withJwkSetUri` fetches and refreshes Supabase's signing keys. Both are
+# GET-a-little-JSON, so one small client covers them.
+#
+# `default-features = false` keeps `native-tls` and OpenSSL out: sqlx is
+# already on `tls-rustls-ring`, and two TLS stacks in one image is a second
+# CVE surface for nothing.
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1.0.229", features = ["derive"] }
+# `preserve_order` makes serde_json::Map an IndexMap. Without it every
+# nested object is alphabetised, which silently reorders `violations` and
+# `fields` away from the LinkedHashMap order Jackson emitted.
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres", "chrono", "rust_decimal", "uuid", "macros", "migrate"] }
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tower = "0.5.3"
+tower-http = { version = "0.7.0", features = ["cors", "trace", "catch-panic"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+umfl-domain = { path = "../umfl-domain" }
+uuid = { version = "1.24.1", features = ["v4", "serde"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# `ServiceExt::oneshot` drives the real router in-process -- no network, and no
+# `axum-test` dependency to lag axum 0.8.
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1.4"
+testcontainers-modules = { version = "0.15.0", features = ["postgres"] }
+
+# Every integration test in one binary. Cargo gives each `tests/*.rs` its own
+# process, and this harness starts a PostgreSQL container per process -- so a
+# second top-level test file would mean a second container, a second migrated
+# template and a second copy of the startup cost. `tests/it/main.rs` declares
+# the suite as `mod`s instead.
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

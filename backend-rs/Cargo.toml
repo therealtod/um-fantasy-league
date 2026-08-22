@@ -1,0 +1,21 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.lints.clippy]
+# The ticker's winner-first sort and the standings ranking both rely on the
+# rest of the sequence keeping its recorded order. An unstable sort would be a
+# silent, intermittent contract break -- see AGENTS.md on StandingsService.
+#
+# There is no clippy lint that forbids `sort_unstable_*`; the similarly named
+# `stable_sort_primitive` points the other way and *suggests* the unstable
+# form, so it is off here. The prohibition lives in `clippy.toml`'s
+# `disallowed-methods` instead, which `disallowed_methods` below enforces.
+stable_sort_primitive = "allow"
+disallowed_methods = "deny"
