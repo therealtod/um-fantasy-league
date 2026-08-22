@@ -45,20 +45,24 @@ pub async fn create(state: &AppState, name: &str) -> ApiResult<GameMap> {
 
 /// Renames a board.
 ///
-/// # The rename announcement is deferred
+/// # The rename announcement
 ///
-/// The Kotlin publishes `ReferenceDataRenamedEvent` here, because an assembled
-/// `MatchResult` carries each game's `mapName` as a *copy* and
-/// `MatchResultCache` therefore has to drop what it holds -- a rename is the
-/// one staleness no match write announces.
+/// A rename is the one staleness a *match* write cannot announce: an assembled
+/// `MatchResult` carries each game's `mapName` as a **copy**, joined in when the
+/// match was read, so every cached list still spells the old name.
+/// [`crate::r#match::MatchResultCache::invalidate_all`] drops them all.
 ///
-/// There is no cache on this side yet: `match` is the next package on
-/// PORTING.md §3b's list and owns both `MatchResultCache` and the invalidation
-/// pair. Nothing is stale in the meantime, since nothing is cached. **Whoever
-/// lands `match` hangs the invalidation off the `existing.name != name` test
-/// below**, along with the identical one in `AdminHeroService.update`, and does
-/// it as the two-phase pair the event bought: once inside the transaction, and
-/// once after it ends -- committed *or* rolled back.
+/// The Kotlin publishes `ReferenceDataRenamedEvent` for this, an event rather
+/// than a direct call so the rename gets the same two-phase treatment a match
+/// write gets. There is no event bus here, so both phases are explicit: once
+/// inside the transaction, so a reader on this connection is not served the old
+/// name back, and once after the transaction ends -- committed *or* rolled
+/// back, since a rollback un-writes rows the cache may already hold.
+///
+/// It is gated on the name actually **changing**: `image_url` and
+/// `tournament_hero.cost` never reach an assembled match, so nothing else
+/// edited through this API can stale a cached copy. `AdminHeroService.update`
+/// carries the identical pair and is still to port (PORTING.md §3b).
 pub async fn update(state: &AppState, map_id: i64, name: &str) -> ApiResult<GameMap> {
     let mut tx = state.pool.begin().await?;
     let existing = require_map(&mut tx, map_id).await?;
@@ -68,13 +72,21 @@ pub async fn update(state: &AppState, map_id: i64, name: &str) -> ApiResult<Game
     }
     writer::update(&mut *tx, map_id, name).await?;
 
-    // The exact condition the announcement is gated on: `image_url` and
-    // `tournament_hero.cost` never reach an assembled match, so a rename is
-    // the only edit here that can leave a cached copy spelling the old name.
-    if existing.name != name {
-        tracing::debug!(map_id, from = existing.name, to = name, "Board renamed");
+    let renamed = existing.name != name;
+    if renamed {
+        tracing::debug!(
+            map_id,
+            from = existing.name,
+            to = name,
+            "Invalidating every cached match list: a board was renamed."
+        );
+        state.match_cache.invalidate_all();
     }
-    tx.commit().await?;
+    let outcome = tx.commit().await;
+    if renamed {
+        state.match_cache.invalidate_all();
+    }
+    outcome?;
 
     Ok(GameMap {
         id: Some(map_id),

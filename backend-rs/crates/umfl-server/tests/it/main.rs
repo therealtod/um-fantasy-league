@@ -14,6 +14,8 @@ mod harness;
 
 mod actuator;
 mod map_admin;
+mod match_admin;
+mod match_cache;
 mod roster_flow;
 mod schema_and_seed;
 mod scoring_admin;

@@ -13,6 +13,7 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::auth::supabase::JwksCache;
 use crate::config::Config;
+use crate::r#match::MatchResultCache;
 use crate::ratelimit::RateLimiter;
 
 #[derive(Clone)]
@@ -25,6 +26,10 @@ pub struct AppState {
     /// Supabase's signing keys, fetched lazily and only in `prod`. Empty and
     /// untouched in every other profile, whose credential is a header.
     pub jwks: JwksCache,
+    /// The assembled match list per tournament, held between writes. Shared
+    /// for the same reason `rate_limiter` is: a per-request cache would have
+    /// no memory to cache with.
+    pub match_cache: MatchResultCache,
 }
 
 impl AppState {
@@ -39,11 +44,13 @@ impl AppState {
             .await?;
         let rate_limiter = RateLimiter::new(&config.rate_limit);
         let jwks = JwksCache::new(config.supabase_jwks_uri.clone());
+        let match_cache = MatchResultCache::new();
         Ok(Self {
             pool,
             config: Arc::new(config),
             rate_limiter,
             jwks,
+            match_cache,
         })
     }
 }

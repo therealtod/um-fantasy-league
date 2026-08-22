@@ -112,31 +112,38 @@ Landed, with tests:
 | Tournaments & rosters | `tournament/{query,writer,service}` | `GET /api/tournaments`, `GET /api/tournaments/{id}`, `POST …/entries`, `GET …/entries/me`, `PUT …/entries/me/slots`, `POST …/entries/me/lock` |
 | Scoring rule sets | `scoring/{query,writer,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/scoring-rule-sets`, `PUT …/{ruleSetId}`, `POST …/{ruleSetId}/activate` |
 | Board pool | `map/{query,writer,pool_admin,admin_service}` | `GET`/`POST /api/admin/maps`, `PUT /api/admin/maps/{id}`, `GET`/`POST /api/admin/tournaments/{id}/maps`, `PUT`/`DELETE …/maps/{mapId}` |
+| Match results | `match/{query,writer,cache,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/matches`, `GET`/`PUT`/`DELETE …/matches/{matchId}` |
 
 Still to port, in dependency order — each is a Kotlin package under
 `backend/src/main/kotlin/com/umfl/` and is its own oracle:
 
-1. **`match`** — `MatchResultQuery`, `TournamentMatchRepository`, `AdminMatchService`,
-   `MatchResultCache`, `ReferenceDataRenamedEvent`. The biggest one; `match_policy` and
-   `match_result` are already pure.
-2. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
+1. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
    and the SSE route. **Does not port the fold**; it calls `umfl_domain::standings::{board,ticker}`
    (§3a). Its rule-set input is `scoring::query::active_rules`, which is already landed and has no
    other caller yet.
-3. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
-4. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
+2. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
+3. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
    `AdminTournamentService`. They write the tables the read side above already reads.
 
-Three things are deliberately deferred and want finishing when their dependency lands:
-`roster_flow.rs`'s UMFL-06 case drops the Kotlin's cross-check against `StandingsQuery.rosters`;
-this document's own headline assertion — the hand-derived leaderboard in §13 — has nowhere to live
-until `standings` exists; and **`map::admin_service::update` does not yet announce a rename**. The
-Kotlin publishes `ReferenceDataRenamedEvent` there (and in `AdminHeroService.update`) because an
-assembled `MatchResult` carries `mapName`/`heroName` as copies, so `MatchResultCache` has to drop
-what it holds. Nothing is stale while nothing is cached, so the port leaves the exact
-`existing.name != name` test in place with a `tracing::debug!` on it; the `match` owner hangs the
-two-phase invalidation off that test — once inside the transaction, once after it ends, committed
-*or* rolled back — in both services.
+### Two notes for whoever picks up the next one
+
+**The `StandingsUpdateEvent` pair has no event bus.** `match/admin_service.rs` reproduces both of
+its Kotlin listeners as explicit calls at each of `record`/`correct`/`delete`: `announce` before the
+commit (inside the writing transaction) and `announce_completed` after it, committed *or* rolled
+back. **`standings`'s SSE hub notification is the third call, and goes after the `outcome?`** at
+each of those three sites — commit-only, because telling browsers "something changed" about a write
+that rolled back would be a lie. The two `announce*` helpers are one line each precisely so that
+third line has an obvious home.
+
+**`AdminHeroService.update` still owes a rename announcement.** `map::admin_service::update` now
+makes the two-phase `match_cache.invalidate_all()` call its `ReferenceDataRenamedEvent` bought,
+gated on the name actually changing; the hero half lands with the admin `hero` package.
+`match_cache.rs`'s `a_hero_rename_needs_the_global_invalidation_to_be_seen` is the test that turns
+into its end-to-end case.
+
+Two ported Kotlin tests still have a piece deferred: `roster_flow.rs`'s UMFL-06 case drops the
+Kotlin's cross-check against `StandingsQuery.rosters`, and this document's own headline assertion —
+the hand-derived leaderboard in §13 — has nowhere to live until `standings` exists.
 
 ## 4. Serialization — six rules, all of them wire contract
 

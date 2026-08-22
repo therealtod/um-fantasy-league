@@ -13,6 +13,7 @@ pub mod hero;
 pub mod http;
 pub mod manager;
 pub mod map;
+pub mod r#match;
 pub mod ratelimit;
 pub mod scoring;
 pub mod state;
@@ -132,6 +133,7 @@ mod tests {
             config: Arc::new(config),
             rate_limiter,
             jwks,
+            match_cache: crate::r#match::MatchResultCache::new(),
         })
     }
 
