@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select tm.map_id from tournament_map tm where tm.tournament_id = $1 limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "map_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_map",
+            "name": "map_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c632d82b25b13df9ef457ca33a5effae79ba96861aedaadb2368796936ccf88e"
+}

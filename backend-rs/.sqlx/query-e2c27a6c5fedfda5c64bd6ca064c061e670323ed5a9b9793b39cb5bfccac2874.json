@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select m.id, m.tournament_id, m.round, m.played_at, m.external_link\n         from tournament_match m\n         where m.tournament_id = $1\n           and ($2::int is null or m.round = $2::int)\n         order by m.played_at, m.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_match",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "tournament_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_match",
+            "name": "tournament_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament_match",
+            "name": "round"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "played_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tournament_match",
+            "name": "played_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "external_link",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tournament_match",
+            "name": "external_link"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e2c27a6c5fedfda5c64bd6ca064c061e670323ed5a9b9793b39cb5bfccac2874"
+}

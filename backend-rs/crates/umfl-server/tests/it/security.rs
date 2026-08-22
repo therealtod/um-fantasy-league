@@ -35,18 +35,24 @@ async fn get(app: &TestApp, uri: &str, manager: Option<&str>) -> TestResponse {
     send(app, "GET", uri, manager).await
 }
 
+/// [`send`] without collecting the body -- see `TestApp::oneshot_status`.
+async fn status_of(app: &TestApp, method: &str, uri: &str, manager: Option<&str>) -> StatusCode {
+    app.oneshot_status(request_for(method, uri, manager)).await
+}
+
 async fn send(app: &TestApp, method: &str, uri: &str, manager: Option<&str>) -> TestResponse {
+    app.oneshot(request_for(method, uri, manager)).await
+}
+
+fn request_for(method: &str, uri: &str, manager: Option<&str>) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(uri);
     if let Some(id) = manager {
         builder = builder.header(MANAGER_ID, id);
     }
-    app.oneshot(
-        builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{}"))
-            .expect("well-formed request"),
-    )
-    .await
+    builder
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from("{}"))
+        .expect("well-formed request")
 }
 
 /// Viewing a tournament needs no account; only entering one does.
@@ -63,9 +69,11 @@ async fn the_public_reads_need_no_credential() {
         "/actuator/health",
         "/actuator/info",
     ] {
-        let response = get(&app, uri, None).await;
-        assert_ne!(response.status, StatusCode::UNAUTHORIZED, "GET {uri}");
-        assert_ne!(response.status, StatusCode::FORBIDDEN, "GET {uri}");
+        // The status only, and never the body: one of these is the SSE stream,
+        // whose body has no last byte to collect.
+        let status = status_of(&app, "GET", uri, None).await;
+        assert_ne!(status, StatusCode::UNAUTHORIZED, "GET {uri}");
+        assert_ne!(status, StatusCode::FORBIDDEN, "GET {uri}");
     }
 }
 

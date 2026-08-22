@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select hb.match_id, hb.hero_id, h.name as hero_name, hb.ban_type, hb.side\n         from hero_ban hb\n         join heroes h on h.id = hb.hero_id\n         where hb.match_id = any($1)\n         order by hb.match_id, h.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "match_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "hero_ban",
+            "name": "match_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hero_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "hero_ban",
+            "name": "hero_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "hero_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "ban_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "hero_ban",
+            "name": "ban_type"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "side",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "hero_ban",
+            "name": "side"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a6b757f9f8a3a8d5e492a4ca8525cfc0d2f4392985ed9e6eb77cea2621496c5e"
+}

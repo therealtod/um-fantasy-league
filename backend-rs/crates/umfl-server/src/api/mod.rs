@@ -21,7 +21,9 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::scoring::routes())
         .merge(crate::map::routes())
         .merge(crate::r#match::routes())
+        .merge(crate::standings::routes())
+        .merge(crate::matchimport::routes())
     // Feature routes are merged here, one line each:
-    //   .merge(crate::standings::routes())
+    //   .merge(crate::hero::admin_routes())
     //   ...
 }

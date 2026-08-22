@@ -14,7 +14,9 @@ use sqlx::postgres::PgPoolOptions;
 use crate::auth::supabase::JwksCache;
 use crate::config::Config;
 use crate::r#match::MatchResultCache;
+use crate::matchimport::{HttpScraperClient, ScraperClient};
 use crate::ratelimit::RateLimiter;
+use crate::standings::StandingsSseHub;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -30,6 +32,14 @@ pub struct AppState {
     /// for the same reason `rate_limiter` is: a per-request cache would have
     /// no memory to cache with.
     pub match_cache: MatchResultCache,
+    /// The open standings streams, keyed by tournament. Shared for the same
+    /// reason `match_cache` is: a per-request hub would have nobody to notify.
+    pub standings_hub: StandingsSseHub,
+    /// The scraper sidecar, behind this crate's **one** trait (PORTING.md §3).
+    /// It is a trait object rather than a concrete client because the Kotlin
+    /// had a genuine test seam here: `MatchImportServiceTest` substitutes a
+    /// stub rather than standing up Playwright.
+    pub scraper: Arc<dyn ScraperClient>,
 }
 
 impl AppState {
@@ -45,12 +55,17 @@ impl AppState {
         let rate_limiter = RateLimiter::new(&config.rate_limit);
         let jwks = JwksCache::new(config.supabase_jwks_uri.clone());
         let match_cache = MatchResultCache::new();
+        let standings_hub = StandingsSseHub::new();
+        let scraper: Arc<dyn ScraperClient> =
+            Arc::new(HttpScraperClient::new(config.scraper_base_url.clone()));
         Ok(Self {
             pool,
             config: Arc::new(config),
             rate_limiter,
             jwks,
             match_cache,
+            standings_hub,
+            scraper,
         })
     }
 }

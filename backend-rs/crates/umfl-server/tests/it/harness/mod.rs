@@ -170,6 +170,28 @@ impl TestApp {
     /// Postgres implements `TEMPLATE` as a file copy of an already-migrated
     /// database, so this costs a fraction of re-running the migrations.
     pub async fn spawn() -> Self {
+        Self::spawn_with(|_| {}).await
+    }
+
+    /// A fresh app whose `AppState` is adjusted before the router is built.
+    ///
+    /// The one thing worth swapping is `scraper`, this crate's only trait and
+    /// the seam `MatchImportServiceTest` used a `@MockitoBean` for -- the
+    /// alternative is standing Playwright up inside the test suite. The hook is
+    /// deliberately "mutate the state" rather than a scraper-shaped parameter,
+    /// so the next seam (if one is ever justified) needs no second constructor.
+    pub async fn spawn_with(adjust: impl FnOnce(&mut AppState)) -> Self {
+        let (mut state, db_name) = Self::connect_state().await;
+        adjust(&mut state);
+        let router = umfl_server::build_router(state.clone());
+        Self {
+            state,
+            db_name,
+            router,
+        }
+    }
+
+    async fn connect_state() -> (AppState, String) {
         let template = template();
         static NEXT: AtomicU32 = AtomicU32::new(1);
         let db_name = format!("umfl_test_{}", NEXT.fetch_add(1, Ordering::Relaxed));
@@ -202,12 +224,7 @@ impl TestApp {
         let state = AppState::connect(config)
             .await
             .unwrap_or_else(|e| panic!("connect to {db_name}: {e}"));
-        let router = umfl_server::build_router(state.clone());
-        Self {
-            state,
-            db_name,
-            router,
-        }
+        (state, db_name)
     }
 
     pub fn pool(&self) -> &PgPool {
@@ -241,6 +258,23 @@ impl TestApp {
             content_type,
             body,
         }
+    }
+
+    /// The status of a response whose body is deliberately **not** collected.
+    ///
+    /// `GET /api/tournaments/{id}/standings/stream` is an SSE endpoint: its
+    /// body ends only when the client disconnects or the hour-long cap
+    /// elapses, so [`Self::oneshot`], which collects to the last byte, hangs on
+    /// it forever. A test that only asserts on the status must not ask for the
+    /// body. Dropping the response here drops the stream, which is what a
+    /// disconnecting browser does and what releases the hub's subscription.
+    pub async fn oneshot_status(&self, request: Request<Body>) -> StatusCode {
+        self.router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("the router is infallible")
+            .status()
     }
 
     pub async fn get(&self, uri: &str) -> TestResponse {

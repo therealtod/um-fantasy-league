@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into match_hero_pick (match_id, side, hero_id)\n         select $1, s, h from unnest($2::integer[], $3::bigint[]) as t(s, h)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4Array",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e25e0963857a3b2e720b2830e0173a772cb3c434d60aa90b39829cdceaae5ec"
+}

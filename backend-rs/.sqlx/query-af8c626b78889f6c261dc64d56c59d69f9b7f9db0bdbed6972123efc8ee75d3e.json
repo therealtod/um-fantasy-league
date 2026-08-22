@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update heroes set name = 'Renamed Hero' where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "af8c626b78889f6c261dc64d56c59d69f9b7f9db0bdbed6972123efc8ee75d3e"
+}

@@ -14,8 +14,10 @@ pub mod http;
 pub mod manager;
 pub mod map;
 pub mod r#match;
+pub mod matchimport;
 pub mod ratelimit;
 pub mod scoring;
+pub mod standings;
 pub mod state;
 pub mod tournament;
 
@@ -134,6 +136,10 @@ mod tests {
             rate_limiter,
             jwks,
             match_cache: crate::r#match::MatchResultCache::new(),
+            standings_hub: crate::standings::StandingsSseHub::new(),
+            scraper: Arc::new(crate::matchimport::HttpScraperClient::new(
+                "http://localhost:3000".to_owned(),
+            )),
         })
     }
 
@@ -200,10 +206,14 @@ mod tests {
     #[tokio::test]
     async fn every_problem_body_names_the_request_path() {
         // A publicly readable path, so the rule table lets it through to the
-        // router -- where nothing is mounted yet, making this the 404 fallback
-        // and therefore a *handler*-level document, which does carry `instance`.
-        let (_, _, body) = get("/api/tournaments/1/standings").await;
-        assert_eq!(body["instance"], "/api/tournaments/1/standings");
+        // router -- where `AppPath<i64>` rejects the id before the handler runs,
+        // making this a *handler*-level document, which does carry `instance`.
+        // (It used to be `/api/tournaments/1/standings` and the 404 fallback,
+        // until `standings` was ported and that path became a real route
+        // wanting a database.)
+        let (status, _, body) = get("/api/tournaments/abc").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["instance"], "/api/tournaments/abc");
     }
 
     /// The 405 the base class used to produce. Before `GlobalExceptionHandler`

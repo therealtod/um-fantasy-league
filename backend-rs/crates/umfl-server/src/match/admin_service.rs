@@ -11,7 +11,8 @@
 //! Because this is the *only* writer of `tournament_match` and its children,
 //! the announcement all three write methods make is a complete account of when
 //! that data changes. In Kotlin that announcement is a `StandingsUpdateEvent`
-//! with two listeners; here it is [`announce`] and [`announce_completed`], and
+//! with two listeners; here it is [`announce`], [`announce_completed`] and
+//! [`announce_committed`], and
 //! the phases are the same. **Keep announcing from any method added here that
 //! writes a match.**
 
@@ -96,6 +97,7 @@ pub async fn record(
     let outcome = tx.commit().await;
     announce_completed(state, tournament_id);
     outcome?;
+    announce_committed(state, tournament_id);
     Ok(saved)
 }
 
@@ -140,6 +142,7 @@ pub async fn correct(
     let outcome = tx.commit().await;
     announce_completed(state, tournament_id);
     outcome?;
+    announce_committed(state, tournament_id);
     Ok(saved)
 }
 
@@ -152,6 +155,7 @@ pub async fn delete(state: &AppState, tournament_id: i64, match_id: i64) -> ApiR
     let outcome = tx.commit().await;
     announce_completed(state, tournament_id);
     outcome?;
+    announce_committed(state, tournament_id);
     Ok(())
 }
 
@@ -170,11 +174,22 @@ fn announce(state: &AppState, tournament_id: i64) {
 /// The second half: fires once the transaction has **ended**, committed or
 /// rolled back. See [`super::cache`] for why neither half is sufficient alone,
 /// and why this one is completion rather than commit.
-///
-/// When `standings` lands, its hub's commit-only notification goes *after* the
-/// `outcome?` at each call site, not in here.
 fn announce_completed(state: &AppState, tournament_id: i64) {
     state.match_cache.invalidate(tournament_id);
+}
+
+/// The standings push, and the reason it is a *third* call rather than a line
+/// inside [`announce_completed`]: it is **commit-only**.
+///
+/// Kotlin gets the distinction from two listeners on one `StandingsUpdateEvent`
+/// -- `MatchResultCache`'s is `AFTER_COMPLETION`, `StandingsSseHub`'s is
+/// `AFTER_COMMIT`. Telling browsers "something changed" about a write that
+/// rolled back would be a lie, whereas a rollback un-writes rows the cache may
+/// already hold and so invalidates just as surely as a commit does. Hence the
+/// position: after the `outcome?`, which is the only place a rolled-back write
+/// has already returned.
+fn announce_committed(state: &AppState, tournament_id: i64) {
+    state.standings_hub.notify(tournament_id);
 }
 
 /// The source link is what stops the same match being imported twice, so a link

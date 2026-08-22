@@ -113,49 +113,44 @@ Landed, with tests:
 | Scoring rule sets | `scoring/{query,writer,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/scoring-rule-sets`, `PUT …/{ruleSetId}`, `POST …/{ruleSetId}/activate` |
 | Board pool | `map/{query,writer,pool_admin,admin_service}` | `GET`/`POST /api/admin/maps`, `PUT /api/admin/maps/{id}`, `GET`/`POST /api/admin/tournaments/{id}/maps`, `PUT`/`DELETE …/maps/{mapId}` |
 | Match results | `match/{query,writer,cache,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/matches`, `GET`/`PUT`/`DELETE …/matches/{matchId}` |
+| Standings | `standings/{query,service,sse}` | `GET /api/tournaments/{id}/standings`, `GET …/matches`, `GET …/standings/stream` |
+| Match import | `matchimport/{query,scraper,service}` | `POST /api/admin/tournaments/{id}/matches/import` |
 
 Still to port, in dependency order — each is a Kotlin package under
 `backend/src/main/kotlin/com/umfl/` and is its own oracle:
 
-1. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
-   and the three public routes on `api/StandingsController.kt`: `GET /api/tournaments/{id}/standings`,
-   `GET …/matches` (the ticker; `sinceMatchId` defaults to 0, `limit` to 25 clamped to 1..200) and
-   `GET …/standings/stream`. All three are already `permitAll` in `auth::authorize`'s table, and all
-   three open with `requireTournament`. **Nothing of this exists yet** — no `standings` module, no
-   `AppState` field.
+1. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
+   `AdminTournamentService`. They write the tables the read side above already reads. This is the
+   last one: with it, `api/mod.rs` merges every route the Kotlin serves.
 
-   **It does not port the fold.** `umfl_domain::standings::{board, ticker}` are complete and take
-   `(&[MatchResult], &ScoringRules, &[EntryRoster])`; what is left is reading those three inputs and
-   handing them over. Two of the three are already landed and currently have no caller:
-   `scoring::query::active_rules` and `r#match::cache::MatchResultCache::{find_by_tournament,
-   find_by_tournament_since}`. The third, `StandingsQuery.rosters`, is the only new SQL — one
-   statement, and its **left join** onto `entry_slot` is load-bearing (an entry with no picks is
-   still an entry and still belongs on the board; `th.cost` is 0 when a rostered hero has left the
-   pool, which is reported rather than crashed on).
-
-   `set transaction isolation level repeatable read read only` must be the **first statement after
-   `BEGIN`** (§7). The Kotlin's own KDoc on `StandingsService.board` explains what it buys and what
-   `MatchResultCache` narrows it to — port that reasoning across, it is not obvious from the code.
-
-   `StandingsSseHub` is the one place `AGENTS.md`'s "no background workers" has an exception: a
-   keep-alive every 20s. The caps (`MAX_SUBSCRIBERS_PER_TOURNAMENT` 200, `MAX_TOTAL_SUBSCRIBERS`
-   500, a one-hour emitter timeout, 4 dispatch threads) are Kotlin constants and stay constants
-   here, per the `umfl.*` invariant. Over capacity is `DomainError::service_unavailable`, message
-   *"The standings stream is at capacity; please retry in a moment."* Its listener is
-   **`AFTER_COMMIT`**, deliberately unlike the cache's — see the note below.
-2. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
-3. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
-   `AdminTournamentService`. They write the tables the read side above already reads.
+   `AdminHeroService.update` also owes the rename announcement described below.
 
 ### Two notes for whoever picks up the next one
 
-**The `StandingsUpdateEvent` pair has no event bus.** `match/admin_service.rs` reproduces both of
-its Kotlin listeners as explicit calls at each of `record`/`correct`/`delete`: `announce` before the
-commit (inside the writing transaction) and `announce_completed` after it, committed *or* rolled
-back. **`standings`'s SSE hub notification is the third call, and goes after the `outcome?`** at
+**The `StandingsUpdateEvent` pair has no event bus, and is now a trio.** `match/admin_service.rs`
+reproduces both of its Kotlin listeners as explicit calls at each of `record`/`correct`/`delete`:
+`announce` before the commit (inside the writing transaction) and `announce_completed` after it,
+committed *or* rolled back. **`announce_committed` is the third, and sits after the `outcome?`** at
 each of those three sites — commit-only, because telling browsers "something changed" about a write
-that rolled back would be a lie. The two `announce*` helpers are one line each precisely so that
-third line has an obvious home.
+that rolled back would be a lie. All three are one line each; if a fourth write method is ever added
+it needs all three, in that order.
+
+**The SSE hub kept the Kotlin's caps and lost its two thread pools.** `MAX_SUBSCRIBERS_PER_TOURNAMENT`
+200, `MAX_TOTAL_SUBSCRIBERS` 500, the 20s keep-alive and the one-hour cap are all constants in
+`standings/sse.rs`, per the `umfl.*` invariant. The four dispatch threads and the keep-alive
+scheduler have no counterpart: axum attaches the heartbeat to each response stream, and a slow
+client backs up in its own task and its own `broadcast` receiver rather than behind a shared pool —
+which is what those threads were buying. A subscription is released by `Drop` on the response body,
+covering in one path all four sites Kotlin's `releaseEmitter` had to make idempotent. `subscribe`
+returns an already-rendered `Response` because `keep_alive` wraps the stream in a type axum does not
+export.
+
+**The scraper is the crate's one trait, and the harness swaps it by mutating `AppState`.**
+`TestApp::spawn_with(|state| …)` is the Rust answer to `@MockitoBean`, and `tests/it/match_import.rs`'s
+`StubScraper` is the only implementor besides `HttpScraperClient`. The hook is state-shaped rather
+than scraper-shaped on purpose: a second seam (if one is ever justified) needs no second constructor.
+`ScraperProperties`' timeouts and allowed hosts became constants in `matchimport/scraper.rs` -- only
+`scraper.base-url` was ever bound to an environment variable, and `Config` already carried it.
 
 **`AdminHeroService.update` still owes a rename announcement.** `map::admin_service::update` now
 makes the two-phase `match_cache.invalidate_all()` call its `ReferenceDataRenamedEvent` bought,
@@ -163,9 +158,25 @@ gated on the name actually changing; the hero half lands with the admin `hero` p
 `match_cache.rs`'s `a_hero_rename_needs_the_global_invalidation_to_be_seen` is the test that turns
 into its end-to-end case.
 
-Two ported Kotlin tests still have a piece deferred: `roster_flow.rs`'s UMFL-06 case drops the
-Kotlin's cross-check against `StandingsQuery.rosters`, and this document's own headline assertion —
-the hand-derived leaderboard in §13 — has nowhere to live until `standings` exists.
+**A streaming route has no last byte, and the harness collects to one.** `TestApp::oneshot` drains the
+body, so it hangs forever on `GET …/standings/stream`; `TestApp::oneshot_status` exists for the tests
+that only assert a status, and `security.rs` uses it. A test that wants the *events* takes the
+`Response` from the hub directly and reads `into_data_stream()` under a `tokio::time::timeout` --
+see `standings.rs`'s `a_committed_match_write_pushes_an_update_to_an_open_stream`.
+
+§13's headline assertion now lives in `tests/it/standings.rs`, asserted off the HTTP response rather
+than off the service. One deferred piece is left: `roster_flow.rs`'s UMFL-06 case still drops the
+Kotlin's cross-check against `StandingsQuery.rosters`, which `standings::query::rosters` can now
+satisfy.
+
+**One known gap, raised rather than smuggled in (PORTING.md §1).** `match/cache.rs`'s loader runs its
+six assembly queries on a pooled connection in autocommit, so on a *miss* the assembled list is not
+itself a single snapshot — the Kotlin's loader runs inside `StandingsService`'s REPEATABLE READ
+transaction and is. The standings service cannot pass its transaction in: `get_or_load` takes a
+`Fn() -> Fut` shared by every waiter, which is exactly what collapses the burst. Closing it means
+`load` opening its own `repeatable read read only` transaction — a two-line change to another
+feature's file, and a change rather than a port, so it is filed here instead of being made in the
+standings commit.
 
 ## 4. Serialization — six rules, all of them wire contract
 
