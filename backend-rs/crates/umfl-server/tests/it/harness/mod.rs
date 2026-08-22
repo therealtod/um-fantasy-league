@@ -31,8 +31,10 @@
 pub mod migrate;
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{SyncSender, sync_channel};
+use std::sync::{Mutex as StdMutex, OnceLock};
+use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -43,8 +45,23 @@ use sqlx::{AssertSqlSafe, Connection, Executor, PgConnection, PgPool};
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::ImageExt;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use tower::ServiceExt;
+
+// `atexit(3)` declared by hand rather than pulling in the `libc` crate for one
+// FFI call -- see `reap_container_at_exit` for why this is the one hook that
+// still fires.
+unsafe extern "C" {
+    fn atexit(cb: extern "C" fn()) -> std::os::raw::c_int;
+}
+
+/// The container thread's shutdown request, sent from `reap_container_at_exit`.
+///
+/// The `SyncSender<()>` riding along is the reply address: the thread drops
+/// the container -- which is what actually stops/removes it -- and then acks
+/// on it, so the `atexit` hook can wait for the removal to really finish
+/// (bounded; see below) instead of racing the process's own exit.
+static SHUTDOWN: OnceLock<StdMutex<Option<oneshot::Sender<SyncSender<()>>>>> = OnceLock::new();
 
 use umfl_server::config::Config;
 use umfl_server::manager::Manager;
@@ -72,13 +89,30 @@ struct Template {
 /// the load-bearing part: `#[tokio::test]` builds and *drops* a runtime per
 /// test, so a `ContainerAsync` initialised on the first test's runtime would
 /// lose the background tasks its Docker client depends on the moment that test
-/// finished. Parking the owning thread forever ties the container's life to the
-/// process instead, which is exactly what the Kotlin harness achieves by
-/// starting its container in a static initialiser.
+/// finished. Tying the container's life to the process instead is what the
+/// Kotlin harness achieves by starting its container in a static initialiser
+/// -- but the JVM runs shutdown hooks on exit and a bare `cargo test` binary
+/// does not, so getting there needs one more piece here: see
+/// `reap_container_at_exit`.
+///
+/// The thread parks on `shutdown_rx` rather than `std::future::pending`.
+/// Parking on `pending` would mean the container is never dropped at all --
+/// not "dropped too late", *never*: it sits inside a `static`, and Rust does
+/// not run destructors on statics, or on other threads' locals, when a
+/// process exits, `cargo test`'s harness included. So nothing short of an
+/// explicit signal into this thread, acted on while its runtime is still
+/// alive, ever gets `ContainerAsync::drop` to run -- and testcontainers-rs
+/// has no Ryuk-style reaper (unlike the Java/Kotlin client) to fall back on
+/// if it doesn't.
 fn template() -> &'static Template {
     static TEMPLATE: OnceLock<Template> = OnceLock::new();
     TEMPLATE.get_or_init(|| {
         let (ready, wait) = std::sync::mpsc::channel();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<SyncSender<()>>();
+        SHUTDOWN
+            .set(StdMutex::new(Some(shutdown_tx)))
+            .unwrap_or_else(|_| panic!("template() only runs its OnceLock::get_or_init once"));
+
         std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -98,15 +132,63 @@ fn template() -> &'static Template {
                 let base_url = format!("postgres://postgres:postgres@{host}:{port}/");
                 migrate_template(&base_url).await;
                 ready.send(base_url).expect("hand the base URL back");
-                // Hold the container and its runtime for the rest of the run.
-                std::future::pending::<()>().await
+
+                // Hold the container for the rest of the run, then -- once
+                // `reap_container_at_exit` asks -- drop it right here, still
+                // inside this thread's own runtime. `ContainerAsync::drop`
+                // needs `tokio::runtime::Handle::current()` to actually talk
+                // to Docker (`testcontainers::core::async_drop`), and this is
+                // the only place in the process guaranteed to still have one
+                // by the time the request arrives.
+                if let Ok(ack) = shutdown_rx.await {
+                    drop(container);
+                    let _ = ack.send(());
+                }
             })
         });
+
+        // The one hook that still runs on the way out: `cargo test`'s own
+        // harness ends the process via `std::process::exit`, which -- like
+        // any path through libc's `exit(3)` -- skips every Rust destructor
+        // on every thread, but still invokes callbacks registered with
+        // `atexit(3)`. Registered once, since `template()`'s `OnceLock` only
+        // reaches this line once.
+        unsafe {
+            atexit(reap_container_at_exit);
+        }
+
         let base_url = wait
             .recv()
             .expect("container setup panicked -- see the panic above this one");
         Template { base_url }
     })
+}
+
+/// Asks the container thread to drop the container, and waits (briefly) for
+/// it to confirm.
+///
+/// Runs from `atexit(3)` -- see `template()` -- on whatever thread the
+/// process happens to be exiting from, with no Tokio runtime of its own, so
+/// it can only signal and wait, never run the async removal itself. The wait
+/// is bounded: if Docker is wedged and the container thread never acks,
+/// this gives up rather than hanging the test binary's shutdown -- the same
+/// leak as before this fix, in a case that was never the common one.
+extern "C" fn reap_container_at_exit() {
+    let Some(cell) = SHUTDOWN.get() else {
+        return;
+    };
+    let Some(shutdown) = cell
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+    else {
+        return;
+    };
+    let (ack_tx, ack_rx) = sync_channel(0);
+    if shutdown.send(ack_tx).is_err() {
+        return;
+    }
+    let _ = ack_rx.recv_timeout(Duration::from_secs(10));
 }
 
 /// Migrates `umfl_template` once: schema, reference data **and** seed.
