@@ -118,9 +118,31 @@ Still to port, in dependency order — each is a Kotlin package under
 `backend/src/main/kotlin/com/umfl/` and is its own oracle:
 
 1. **`standings`** — `StandingsQuery`, the REPEATABLE READ read-only snapshot, `StandingsSseHub`
-   and the SSE route. **Does not port the fold**; it calls `umfl_domain::standings::{board,ticker}`
-   (§3a). Its rule-set input is `scoring::query::active_rules`, which is already landed and has no
-   other caller yet.
+   and the three public routes on `api/StandingsController.kt`: `GET /api/tournaments/{id}/standings`,
+   `GET …/matches` (the ticker; `sinceMatchId` defaults to 0, `limit` to 25 clamped to 1..200) and
+   `GET …/standings/stream`. All three are already `permitAll` in `auth::authorize`'s table, and all
+   three open with `requireTournament`. **Nothing of this exists yet** — no `standings` module, no
+   `AppState` field.
+
+   **It does not port the fold.** `umfl_domain::standings::{board, ticker}` are complete and take
+   `(&[MatchResult], &ScoringRules, &[EntryRoster])`; what is left is reading those three inputs and
+   handing them over. Two of the three are already landed and currently have no caller:
+   `scoring::query::active_rules` and `r#match::cache::MatchResultCache::{find_by_tournament,
+   find_by_tournament_since}`. The third, `StandingsQuery.rosters`, is the only new SQL — one
+   statement, and its **left join** onto `entry_slot` is load-bearing (an entry with no picks is
+   still an entry and still belongs on the board; `th.cost` is 0 when a rostered hero has left the
+   pool, which is reported rather than crashed on).
+
+   `set transaction isolation level repeatable read read only` must be the **first statement after
+   `BEGIN`** (§7). The Kotlin's own KDoc on `StandingsService.board` explains what it buys and what
+   `MatchResultCache` narrows it to — port that reasoning across, it is not obvious from the code.
+
+   `StandingsSseHub` is the one place `AGENTS.md`'s "no background workers" has an exception: a
+   keep-alive every 20s. The caps (`MAX_SUBSCRIBERS_PER_TOURNAMENT` 200, `MAX_TOTAL_SUBSCRIBERS`
+   500, a one-hour emitter timeout, 4 dispatch threads) are Kotlin constants and stay constants
+   here, per the `umfl.*` invariant. Over capacity is `DomainError::service_unavailable`, message
+   *"The standings stream is at capacity; please retry in a moment."* Its listener is
+   **`AFTER_COMMIT`**, deliberately unlike the cache's — see the note below.
 2. **`matchimport`** — the `ScraperClient` trait, `MatchImportService`, the preview DTOs, the 503.
 3. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
    `AdminTournamentService`. They write the tables the read side above already reads.
