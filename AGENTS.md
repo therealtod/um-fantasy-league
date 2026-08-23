@@ -706,8 +706,11 @@ which is why `FRONTEND_ORIGIN` stays unset in `prod`. `BACKEND_HOST` is *not* de
 `wrangler.toml`'s `[vars]` — while the backend only exists behind a Cloudflare quick tunnel (a
 hostname that rotates on every restart), committing it would publish that address in a public repo,
 so it's set directly on the Worker instead (Cloudflare dashboard: Workers & Pages → the Worker →
-Settings → Variables and Secrets), which Wrangler leaves untouched across deploys as long as the name
-stays undeclared in `wrangler.toml`. Point it at the real backend hostname there, and keep
+Settings → Variables and Secrets). `wrangler.toml` sets `keep_vars = true` for exactly this reason:
+without it, `wrangler deploy` treats `[vars]` as the complete set of plain-text variables and wipes
+anything dashboard-only — including `BACKEND_HOST` — on the very next deploy, which on this repo means
+the next push to `master` (Cloudflare's Git-connected build runs `wrangler deploy`). Point it at the
+real backend hostname there, and keep
 `VITE_API_PROXY_TARGET`/the `server.proxy` target in `frontend/vite.config.ts` (see Commands above)
 in step so dev and prod hit the same API. Once a stable, non-tunnel backend host exists, it stops
 being sensitive and `BACKEND_HOST` can move back into `[vars]` as a plain, committed entry.

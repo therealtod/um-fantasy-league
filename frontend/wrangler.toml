@@ -2,6 +2,13 @@ name = "um-fantasy-league"
 main = "src/worker.ts"
 compatibility_date = "2026-08-03"
 
+# `wrangler deploy` treats [vars] below as the *complete* set of plain-text
+# variables and wipes anything set only in the dashboard on every deploy --
+# including the Git-connected build that runs on every push to master --
+# unless this is on. Without it, BACKEND_HOST (see below) silently
+# disappears the moment CI redeploys the Worker.
+keep_vars = true
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
@@ -11,8 +18,9 @@ binding = "ASSETS"
 # Cloudflare quick-tunnel hostname that rotates on every restart, and a
 # [vars] entry here would put that tunnel's address in a public repo.
 # It's set directly on the Worker instead (dashboard: Workers & Pages ->
-# um-fantasy-league -> Settings -> Variables and Secrets), which Wrangler
-# leaves alone across deploys as long as it stays undeclared here. Swap it
-# for a real, stable backend host the same way, once one exists (see
-# BACKEND_HOST in AGENTS.md's CI/CD section) — a stable host is no longer
-# a secret and could move back into [vars] at that point.
+# um-fantasy-league -> Settings -> Variables and Secrets). `keep_vars = true`
+# above is what makes that survive a deploy; without it Wrangler resets vars
+# to this file's [vars] (empty) on every push. Swap it for a real, stable
+# backend host the same way, once one exists (see BACKEND_HOST in AGENTS.md's
+# CI/CD section) — a stable host is no longer a secret and could move back
+# into [vars] at that point.
