@@ -84,7 +84,13 @@ async function getBrowser() {
     // rather than handing back a dead handle for every later request.
     browserPromise = null;
   }
-  browserPromise = chromium.launch({ headless: true });
+  // --disable-dev-shm-usage: Docker's default /dev/shm is 64MB, too small for
+  // Chromium's renderer/compositor shared-memory buffers on a memory-tight
+  // host. Starved rather than OOM-killed, the renderer just stalls forever
+  // instead of crashing -- browser.isConnected() above stays true, so
+  // without this flag a stall never triggers the respawn path and every
+  // scrape hangs until the caller's own timeout.
+  browserPromise = chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
   return browserPromise;
 }
 

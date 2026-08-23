@@ -61,7 +61,10 @@ export function matchIdFromUrl(url) {
 }
 
 export async function launchBrowser({ headful = false } = {}) {
-  const browser = await chromium.launch({ headless: !headful });
+  // --disable-dev-shm-usage: see the matching comment in server.mjs's
+  // getBrowser() -- Docker's default 64MB /dev/shm starves Chromium's
+  // renderer on a memory-tight host, and it stalls rather than crashing.
+  const browser = await chromium.launch({ headless: !headful, args: ["--disable-dev-shm-usage"] });
   const page = await browser.newPage();
   return { browser, page };
 }
