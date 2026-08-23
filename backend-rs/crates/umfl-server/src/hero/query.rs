@@ -153,6 +153,84 @@ pub async fn find_roster_heroes(
     .await
 }
 
+// ---------------------------------------------------------------------------
+// The catalogue -- oracle: `hero/HeroRepository.kt` (Spring Data JDBC's
+// `CrudRepository` derived queries), used by the admin half.
+// ---------------------------------------------------------------------------
+
+/// `findAll()`, ordered by id for the same reason `map::query::find_all` is:
+/// Spring Data JDBC's own order is merely insertion order until the first
+/// `UPDATE`, and this makes that the guarantee rather than the observation.
+pub async fn find_all(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<super::Hero>> {
+    let rows = sqlx::query!("select id, name, image_url from heroes order by id")
+        .fetch_all(db)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| super::Hero {
+            id: Some(r.id),
+            name: r.name,
+            image_url: r.image_url,
+        })
+        .collect())
+}
+
+/// `findByName` -- `heroes.name` is `unique`, so this is at most one row.
+pub async fn find_by_name(
+    db: impl PgExecutor<'_>,
+    name: &str,
+) -> sqlx::Result<Option<super::Hero>> {
+    let row = sqlx::query!(
+        "select id, name, image_url from heroes where name = $1",
+        name
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(|r| super::Hero {
+        id: Some(r.id),
+        name: r.name,
+        image_url: r.image_url,
+    }))
+}
+
+/// `findById`.
+pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option<super::Hero>> {
+    let row = sqlx::query!("select id, name, image_url from heroes where id = $1", id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.map(|r| super::Hero {
+        id: Some(r.id),
+        name: r.name,
+        image_url: r.image_url,
+    }))
+}
+
+/// `findAllById` -- the batch add's existence check, and how it names the ids
+/// that do not exist. Catalogue-wide, unlike [`find_by_ids`] above: a hero's
+/// *identity* is not tournament-scoped, only its price is.
+pub async fn find_all_by_id(
+    db: impl PgExecutor<'_>,
+    ids: &[i64],
+) -> sqlx::Result<Vec<super::Hero>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query!(
+        "select id, name, image_url from heroes where id = any($1) order by id",
+        ids
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| super::Hero {
+            id: Some(r.id),
+            name: r.name,
+            image_url: r.image_url,
+        })
+        .collect())
+}
+
 /// Escapes ILIKE metacharacters so a search for `_` or `%` matches those
 /// characters literally.
 fn escape_like(raw: &str) -> String {

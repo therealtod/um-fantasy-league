@@ -13,6 +13,7 @@
 mod harness;
 
 mod actuator;
+mod hero_admin;
 mod map_admin;
 mod match_admin;
 mod match_cache;
@@ -22,4 +23,5 @@ mod schema_and_seed;
 mod scoring_admin;
 mod security;
 mod standings;
+mod tournament_admin;
 mod tournament_api;

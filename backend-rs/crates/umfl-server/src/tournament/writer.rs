@@ -18,10 +18,82 @@
 //! than one statement and all of them belong to somebody's transaction.
 //! See PORTING.md §7.
 
-use sqlx::PgConnection;
-use umfl_domain::tournament::TournamentEntry;
+use sqlx::{PgConnection, PgExecutor};
+use umfl_domain::tournament::{Tournament, TournamentEntry};
 
-use super::query::entry_status_to_db;
+use super::query::{entry_status_to_db, format_to_db, status_to_db};
+
+// ---------------------------------------------------------------------------
+// The tournament root itself -- oracle: `TournamentRepository.save`
+// (Spring Data JDBC's `CrudRepository`), which inserts when the `@Id` is
+// null and updates when it is not. Unlike the entry above, `tournament` owns
+// no `@MappedCollection` child, so there is no delete-and-reinsert cascade
+// here -- see `map::writer` and `hero::writer` for the same shape on a
+// childless root.
+// ---------------------------------------------------------------------------
+
+/// Inserts a tournament, returning the generated id.
+pub async fn insert_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"insert into tournament
+               (name, format, status, start_date, end_date, capacity, roster_size, credit_grant)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)
+           returning id"#,
+        t.name,
+        format_to_db(t.format),
+        status_to_db(t.status),
+        t.start_date,
+        t.end_date,
+        t.capacity,
+        t.roster_size,
+        t.credit_grant
+    )
+    .fetch_one(db)
+    .await
+}
+
+/// Full replace, including `status` -- there is no status-transition state
+/// machine: an admin is trusted to move a tournament through its lifecycle
+/// sensibly.
+///
+/// # Panics
+///
+/// On a tournament with no id. Unreachable -- every caller loaded it from
+/// [`super::query::find_by_id`] -- and it is the `requireNotNull` the Kotlin
+/// service makes at the same point.
+pub async fn update_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx::Result<()> {
+    let id = t.id.expect("a loaded tournament has an id");
+    sqlx::query!(
+        r#"update tournament
+              set name = $2, format = $3, status = $4, start_date = $5,
+                  end_date = $6, capacity = $7, roster_size = $8, credit_grant = $9
+            where id = $1"#,
+        id,
+        t.name,
+        format_to_db(t.format),
+        status_to_db(t.status),
+        t.start_date,
+        t.end_date,
+        t.capacity,
+        t.roster_size,
+        t.credit_grant
+    )
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Deletes a tournament. Every foreign key onto `tournament` is `on delete
+/// cascade` (see `V1__core_schema.sql`), so this alone removes its hero
+/// pool, board pool, entries (and their slots), scoring rule sets (and
+/// their coefficients), and matches (and their participants, games and
+/// bans) -- see `AdminTournamentService.delete`'s doc for the itemised list.
+pub async fn delete_tournament(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<()> {
+    sqlx::query!("delete from tournament where id = $1", id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
 
 /// Inserts a new entry and its slots, returning the generated id.
 ///

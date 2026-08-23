@@ -7,6 +7,7 @@
 //! The DTOs live here rather than in a shared `Dtos.kt` (PORTING.md §3); the
 //! JSON shape is unchanged, and `frontend/src/api/types.ts` is the contract.
 
+pub mod admin_service;
 pub mod query;
 pub mod service;
 pub mod writer;
@@ -27,6 +28,7 @@ use crate::hero::HeroDto;
 use crate::http::extract::{AppPath, AppQuery, ValidJson};
 use crate::state::AppState;
 
+use admin_service::TournamentFields;
 use service::RosterSnapshot;
 
 /// Dates serialise as plain `YYYY-MM-DD`: a tournament is announced as a day or
@@ -173,6 +175,90 @@ fn hero_ids_rule(value: &Option<Vec<i64>>, _: &()) -> garde::Result {
     }
 }
 
+/// `@NotBlank(message = "name is required")` / `@NotNull(message = "... is
+/// required")`. Oracle: `AdminDtos.kt`'s `CreateTournamentRequest`.
+///
+/// `capacity` / `roster_size` / `credit_grant` carry only `@Positive` in the
+/// Kotlin, no `@NotNull` -- an omitted value there passes Bean Validation
+/// (`@Positive` ignores a null) and then 500s on the controller's
+/// `requireNotNull`. This is PORTING.md deviation (a): **fixed**, and the
+/// message for the newly-added not-null half is Hibernate's own default for
+/// a bare `@NotNull` with no custom message, `"must not be null"`, since no
+/// annotation with a custom message ever existed for that case -- unlike
+/// `gameNumber` below, which has a real `@NotNull(message = "gameNumber is
+/// required")` in the Kotlin and keeps that string.
+#[derive(Debug, Deserialize, garde::Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTournamentRequest {
+    #[garde(custom(required_text("name is required")))]
+    pub name: Option<String>,
+    #[garde(custom(required("format is required")))]
+    pub format: Option<TournamentFormat>,
+    #[garde(custom(required("status is required")))]
+    pub status: Option<TournamentStatus>,
+    #[garde(custom(required("startDate is required")))]
+    pub start_date: Option<NaiveDate>,
+    #[serde(default)]
+    #[garde(skip)]
+    pub end_date: Option<NaiveDate>,
+    #[garde(custom(required_positive("must not be null", "capacity must be positive")))]
+    pub capacity: Option<i32>,
+    #[garde(custom(required_positive("must not be null", "rosterSize must be positive")))]
+    pub roster_size: Option<i32>,
+    #[garde(custom(required_positive("must not be null", "creditGrant must be positive")))]
+    pub credit_grant: Option<i32>,
+}
+
+/// Full replace — every field is resubmitted, including `status`.
+pub type UpdateTournamentRequest = CreateTournamentRequest;
+
+/// `@NotNull`.
+fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Result {
+    move |value, _| match value {
+        Some(_) => Ok(()),
+        None => Err(garde::Error::new(message)),
+    }
+}
+
+/// `@NotBlank`: fails on absent *and* on whitespace-only.
+fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
+    move |value, _| match value {
+        Some(text) if !text.trim().is_empty() => Ok(()),
+        _ => Err(garde::Error::new(message)),
+    }
+}
+
+/// `@NotNull` and `@Positive` on one field. `@Positive` ignores a null, so
+/// exactly one of the two can fail.
+fn required_positive(
+    absent: &'static str,
+    non_positive: &'static str,
+) -> impl Fn(&Option<i32>, &()) -> garde::Result {
+    move |value, _| match value {
+        None => Err(garde::Error::new(absent)),
+        Some(n) if *n <= 0 => Err(garde::Error::new(non_positive)),
+        Some(_) => Ok(()),
+    }
+}
+
+impl CreateTournamentRequest {
+    /// The service's inputs, once validation has run -- which is why every
+    /// `expect` here is unreachable for the same reason the Kotlin
+    /// controller's `requireNotNull`s are.
+    fn to_fields(&self) -> TournamentFields<'_> {
+        TournamentFields {
+            name: self.name.as_deref().expect("validated as present"),
+            format: self.format.expect("validated as present"),
+            status: self.status.expect("validated as present"),
+            start_date: self.start_date.expect("validated as present"),
+            end_date: self.end_date,
+            capacity: self.capacity.expect("validated as present"),
+            roster_size: self.roster_size.expect("validated as present"),
+            credit_grant: self.credit_grant.expect("validated as present"),
+        }
+    }
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/tournaments", get(list))
@@ -181,6 +267,11 @@ pub fn routes() -> Router<AppState> {
         .route("/api/tournaments/{id}/entries/me", get(my_entry))
         .route("/api/tournaments/{id}/entries/me/slots", put(set_slots))
         .route("/api/tournaments/{id}/entries/me/lock", post(lock))
+        .route("/api/admin/tournaments", post(admin_create))
+        .route(
+            "/api/admin/tournaments/{id}",
+            put(admin_update).delete(admin_delete),
+        )
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -278,4 +369,42 @@ async fn lock(
 ) -> ApiResult<Json<RosterDto>> {
     let snapshot = service::lock_roster(&state, id, &manager).await?;
     Ok(Json(RosterDto::from(snapshot)))
+}
+
+// `hasRole('ADMIN')` is enforced by `auth::authorize` for every `/api/admin/**`
+// path -- the `@PreAuthorize` on the controller and the URL matcher in one
+// place. Each handler still takes the `CurrentManager` its Kotlin
+// counterpart declares, so the identity a route needs stays visible at the
+// route. Oracle: `api/AdminTournamentController.kt`.
+
+async fn admin_create(
+    State(state): State<AppState>,
+    CurrentManager(_admin): CurrentManager,
+    ValidJson(request): ValidJson<CreateTournamentRequest>,
+) -> ApiResult<impl IntoResponse> {
+    let tournament = admin_service::create(&state, request.to_fields()).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(TournamentDto::from(tournament, 0, None)),
+    ))
+}
+
+async fn admin_update(
+    State(state): State<AppState>,
+    CurrentManager(_admin): CurrentManager,
+    AppPath(id): AppPath<i64>,
+    ValidJson(request): ValidJson<UpdateTournamentRequest>,
+) -> ApiResult<Json<TournamentDto>> {
+    let tournament = admin_service::update(&state, id, request.to_fields()).await?;
+    let enrolled = service::enrolment_count(&state.pool, id).await?;
+    Ok(Json(TournamentDto::from(tournament, enrolled, None)))
+}
+
+async fn admin_delete(
+    State(state): State<AppState>,
+    CurrentManager(_admin): CurrentManager,
+    AppPath(id): AppPath<i64>,
+) -> ApiResult<StatusCode> {
+    admin_service::delete(&state, id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

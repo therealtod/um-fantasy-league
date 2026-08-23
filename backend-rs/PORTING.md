@@ -108,22 +108,31 @@ Landed, with tests:
 | Plumbing | `config`, `state`, `error`, `http/{problem,extract,big_decimal}`, `ratelimit`, `auth/{authenticate,authorize,dev,supabase}` | — |
 | Actuator | `api/actuator` | `GET /actuator/{health,info}` |
 | Manager | `manager/{query,writer}` | `GET /api/me` |
-| Hero pool | `hero/query` | `GET /api/tournaments/{id}/heroes` |
-| Tournaments & rosters | `tournament/{query,writer,service}` | `GET /api/tournaments`, `GET /api/tournaments/{id}`, `POST …/entries`, `GET …/entries/me`, `PUT …/entries/me/slots`, `POST …/entries/me/lock` |
+| Hero catalogue & pool | `hero/{query,writer,pool_admin,admin_service}` | `GET /api/tournaments/{id}/heroes`, `GET`/`POST /api/admin/heroes`, `PUT /api/admin/heroes/{id}`, `GET`/`POST /api/admin/tournaments/{id}/heroes`, `PUT`/`DELETE …/heroes/{heroId}` |
+| Tournaments & rosters | `tournament/{query,writer,service,admin_service}` | `GET /api/tournaments`, `GET /api/tournaments/{id}`, `POST …/entries`, `GET …/entries/me`, `PUT …/entries/me/slots`, `POST …/entries/me/lock`, `POST /api/admin/tournaments`, `PUT`/`DELETE /api/admin/tournaments/{id}` |
 | Scoring rule sets | `scoring/{query,writer,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/scoring-rule-sets`, `PUT …/{ruleSetId}`, `POST …/{ruleSetId}/activate` |
 | Board pool | `map/{query,writer,pool_admin,admin_service}` | `GET`/`POST /api/admin/maps`, `PUT /api/admin/maps/{id}`, `GET`/`POST /api/admin/tournaments/{id}/maps`, `PUT`/`DELETE …/maps/{mapId}` |
 | Match results | `match/{query,writer,cache,admin_service}` | `GET`/`POST /api/admin/tournaments/{id}/matches`, `GET`/`PUT`/`DELETE …/matches/{matchId}` |
 | Standings | `standings/{query,service,sse}` | `GET /api/tournaments/{id}/standings`, `GET …/matches`, `GET …/standings/stream` |
 | Match import | `matchimport/{query,scraper,service}` | `POST /api/admin/tournaments/{id}/matches/import` |
 
-Still to port, in dependency order — each is a Kotlin package under
-`backend/src/main/kotlin/com/umfl/` and is its own oracle:
+**Nothing is left to port.** The admin halves of `hero` and `tournament` — `AdminHeroService`,
+`HeroPoolAdminRepository`, `AdminTournamentService` — were the last entry on this board; `api/mod.rs`
+now merges every route the Kotlin serves, transitively through `hero::routes()` and
+`tournament::routes()` (each feature's admin endpoints are merged inside its own `routes()`, per §10 —
+`api/mod.rs` itself never grew a new line for them). `AdminHeroService.update`'s rename announcement
+is landed too — see the (now resolved) note below for the reasoning.
 
-1. **admin halves of `hero` and `tournament`** — `AdminHeroService`, `HeroPoolAdminRepository`,
-   `AdminTournamentService`. They write the tables the read side above already reads. This is the
-   last one: with it, `api/mod.rs` merges every route the Kotlin serves.
-
-   `AdminHeroService.update` also owes the rename announcement described below.
+One thing surfaced while porting the hero pool's `SetHeroCostRequest`/`HeroPoolEntryRequest.cost` and
+is worth recording for the next person who meets the same shape: like `capacity`/`rosterSize`/
+`creditGrant`, Kotlin's `cost` carries only `@Positive`, no `@NotNull`, so an absent `cost` there is
+a live 500 today. Deviation (a) covers only those three tournament fields by name, but it is really a
+statement about the *shape* — a field with `@Positive` and no `@NotNull` is always a bug, not a
+tournament-specific one — so `cost` was fixed the identical way rather than faithfully reproducing a
+fourth instance of the same defect: a 400 `validation-failed` naming the field, with Hibernate's own
+un-customised `@NotNull` message (`"must not be null"`) for the half of the check that was never
+actually annotated. If a fifth field with this exact shape turns up outside this crate's remaining
+scope, this paragraph is the precedent, not deviation (a)'s original three names.
 
 ### Two notes for whoever picks up the next one
 
@@ -152,11 +161,12 @@ than scraper-shaped on purpose: a second seam (if one is ever justified) needs n
 `ScraperProperties`' timeouts and allowed hosts became constants in `matchimport/scraper.rs` -- only
 `scraper.base-url` was ever bound to an environment variable, and `Config` already carried it.
 
-**`AdminHeroService.update` still owes a rename announcement.** `map::admin_service::update` now
-makes the two-phase `match_cache.invalidate_all()` call its `ReferenceDataRenamedEvent` bought,
-gated on the name actually changing; the hero half lands with the admin `hero` package.
-`match_cache.rs`'s `a_hero_rename_needs_the_global_invalidation_to_be_seen` is the test that turns
-into its end-to-end case.
+**`AdminHeroService.update`'s rename announcement is landed.** `map::admin_service::update` made the
+two-phase `match_cache.invalidate_all()` call its `ReferenceDataRenamedEvent` bought, gated on the
+name actually changing; `hero::admin_service::update` carries the identical pair, so a hero rename
+invalidates the cache the same way a board rename already did.
+`match_cache.rs`'s `a_hero_rename_needs_the_global_invalidation_to_be_seen` is the end-to-end case
+that exercises it.
 
 **A streaming route has no last byte, and the harness collects to one.** `TestApp::oneshot` drains the
 body, so it hangs forever on `GET …/standings/stream`; `TestApp::oneshot_status` exists for the tests

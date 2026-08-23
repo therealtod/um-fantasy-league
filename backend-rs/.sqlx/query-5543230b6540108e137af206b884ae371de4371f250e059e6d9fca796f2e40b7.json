@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select cost from tournament_hero where tournament_id = $1 and hero_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cost",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament_hero",
+            "name": "cost"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5543230b6540108e137af206b884ae371de4371f250e059e6d9fca796f2e40b7"
+}

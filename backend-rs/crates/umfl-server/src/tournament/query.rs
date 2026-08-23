@@ -100,6 +100,33 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
     }))
 }
 
+/// `findByName` -- `tournament.name` is `unique`, so this is at most one row.
+/// The admin create/update collision check's oracle.
+pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<Option<Tournament>> {
+    let Some(r) = sqlx::query!(
+        r#"select id, name, format, status, start_date, end_date,
+                  capacity, roster_size, credit_grant
+           from tournament where name = $1"#,
+        name
+    )
+    .fetch_optional(db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(Tournament {
+        id: Some(r.id),
+        name: r.name,
+        format: format_from_db(&r.format)?,
+        status: status_from_db(&r.status)?,
+        start_date: r.start_date,
+        end_date: r.end_date,
+        capacity: r.capacity,
+        roster_size: r.roster_size,
+        credit_grant: r.credit_grant,
+    }))
+}
+
 /// Take a row lock on the tournament and return its **current** capacity.
 ///
 /// `capacity` has no database constraint behind it the way double registration
@@ -248,6 +275,23 @@ pub async fn status_for(
 // values, so an unknown one means the schema moved underneath the code. That is
 // a decode failure rather than a panic: `From<sqlx::Error>` renders it as the
 // 500 a Kotlin `valueOf` would also have produced, and says which column.
+
+/// The Kotlin constant name, which is what the column stores. The admin
+/// writer's counterpart to [`format_from_db`].
+pub(crate) fn format_to_db(format: TournamentFormat) -> &'static str {
+    match format {
+        TournamentFormat::Banquest => "BANQUEST",
+        TournamentFormat::Arsenal => "ARSENAL",
+    }
+}
+
+/// The admin writer's counterpart to [`status_from_db`]. `TournamentStatus`
+/// already carries `as_str` for the same purpose, since its rendering is
+/// user-visible wire text (`TOURNAMENT_CLOSED`'s message); this is just that
+/// method under the name its sibling encoders here use.
+pub(crate) fn status_to_db(status: TournamentStatus) -> &'static str {
+    status.as_str()
+}
 
 fn format_from_db(raw: &str) -> sqlx::Result<TournamentFormat> {
     match raw {
