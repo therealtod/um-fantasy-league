@@ -32,7 +32,7 @@ jobs:
       # database -- the same way the release build does.
       SQLX_OFFLINE: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # `backend-rs/rust-toolchain.toml` pins the version; this action reads it.
       - uses: dtolnay/rust-toolchain@stable
