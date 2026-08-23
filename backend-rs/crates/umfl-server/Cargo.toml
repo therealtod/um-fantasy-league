@@ -19,7 +19,16 @@ futures = "0.3.34"
 garde = { version = "0.23.0", features = ["derive"] }
 indexmap = { version = "2.14.0", features = ["serde"] }
 ipnet = "2.12.1"
-jsonwebtoken = "11.0.0"
+# 11.x decoupled the crypto backend the way `rustls` does: neither of
+# `rust_crypto`/`aws_lc_rs` is a default feature, so leaving this bare builds a
+# process that panics on the first `decode()` with "Could not automatically
+# determine the process-level CryptoProvider" -- there's no backend to run the
+# Supabase token's ES256 signature check with. `aws_lc_rs` is the one the
+# Dockerfile's "Debian rather than Alpine" comment already anticipated: on the
+# glibc target that image builds for, `aws-lc-sys` links prebuilt object code
+# and needs nothing beyond the `cc`/`perl` already on the image, where musl has
+# no such prebuilt and would need a real build toolchain for no benefit.
+jsonwebtoken = { version = "11.0.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 moka = { version = "0.12.16", features = ["future"] }
 percent-encoding = "2.3.2"
 rust_decimal = "1.42.1"
