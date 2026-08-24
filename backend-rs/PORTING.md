@@ -188,6 +188,16 @@ transaction and is. The standings service cannot pass its transaction in: `get_o
 feature's file, and a change rather than a port, so it is filed here instead of being made in the
 standings commit.
 
+**Still open, and now unblocked.** A review found that the gap above sat on top of a worse one:
+`board`/`ticker` opened the snapshot transaction and *then* called the cache, so a miss asked the
+pool for a second connection while holding the first. At `max_connections(10)` ten concurrent
+standings requests over a miss held every connection and each waited for an eleventh — a
+self-deadlock, under precisely the SSE burst the cache exists to absorb, resolving only when sqlx's
+acquire timeout fired. The cache read is now hoisted **above** `snapshot(state)` in both, and
+`tests/it/standings.rs` pins it with a one-connection pool. Read that fix before closing the gap
+above: giving `load` its own transaction while the call was still nested would have made the
+deadlock strictly worse, so the hoist is its prerequisite, not an alternative to it.
+
 ## 4. Serialization — six rules, all of them wire contract
 
 **4.1. Every `Option` field on a response type carries `skip_serializing_if = "Option::is_none"`.**
@@ -402,8 +412,14 @@ than deviating — recorded here because both look like deviations if you meet t
 
 ## 13. Testing
 
-**Layer 1 — pure domain.** No Docker, no database. Port the Kotlin test classes near 1:1, with
-`rstest` for the parameterised tables. This is the merge gate and where nearly all the value is.
+**Layer 1 — pure domain.** No Docker, no database. Port the Kotlin test classes near 1:1, driving
+the parameterised tables with a plain `for` over an array of cases. This is the merge gate and where
+nearly all the value is.
+
+This paragraph used to prescribe `rstest`. It was never added to any manifest and the suite grew to
+181 domain tests without it, because a `for` over a `[(input, expected); N]` array reads the same,
+keeps the fixture tables tabular the way `.editorconfig` already bends for, and needs no dependency.
+Do not add one now on the strength of a sentence that described an intention rather than the code.
 
 **Layer 2 — integration, template database per test.** Note this is *not* the Kotlin harness.
 `PostgresIntegrationTest` rolls back a transaction per test, which works only because Spring's
@@ -423,7 +439,11 @@ Three consequences, all good, and worth knowing because they delete caveats you 
   disappears.
 - The `invalidateAll()` belt-and-braces `@BeforeEach` is unnecessary.
 - **The suite can run in parallel.** The shared-cache hazard that forced the Kotlin suite sequential
-  is gone. Mark the `SELECT … FOR UPDATE` tests `#[serial]`.
+  is gone, and the suite has run parallel from the start: every test owns a database cloned from the
+  template, so there is nothing to contend over. No test has needed serialising — `serial_test` is
+  deliberately *not* a dependency. The one `SELECT … FOR UPDATE` path
+  (`tournament/query.rs`'s capacity check) is per-database and so already isolated. If a future test
+  genuinely needs the whole binary to itself, add the crate then and say in the test why.
 
 Put **every** integration test in one binary (`tests/it/main.rs` with `mod` declarations). Each
 `tests/*.rs` is otherwise its own binary with its own container.

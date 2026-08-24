@@ -165,13 +165,26 @@ mod tests {
 
     #[test]
     fn a_null_detail_is_absent_rather_than_null() {
-        let s = serde_json::to_string(&ProblemDetail::new(
+        let document: serde_json::Value = serde_json::to_value(ProblemDetail::new(
             StatusCode::FORBIDDEN,
             "Forbidden",
             None,
             "forbidden",
         ))
         .unwrap();
-        assert!(!s.contains("null"), "{s}");
+
+        // Asserted against the parsed document rather than the rendered string.
+        // A `!contains("null")` reads the same and is not the same: it fires on
+        // any *string value* carrying those four letters -- a `detail` sentence
+        // mentioning a null, a slug like `null-hero` -- and it cannot tell an
+        // absent key from one present and null, which is the whole distinction
+        // under test. `lib.rs` walks a whole response tree this way; this
+        // document is flat, so the two assertions below say all of it.
+        let object = document.as_object().expect("a problem detail is an object");
+        assert!(!object.contains_key("detail"), "{document}");
+        assert!(
+            object.values().all(|v| !v.is_null()),
+            "a `non_null` document rendered a JSON null: {document}"
+        );
     }
 }
