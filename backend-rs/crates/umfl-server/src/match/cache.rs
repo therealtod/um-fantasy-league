@@ -312,9 +312,27 @@ pub fn slice_since(matches: &[MatchResult], since_match_id: i64, limit: usize) -
         .collect()
 }
 
+/// The six assembly queries, under **one** snapshot.
+///
+/// They used to run on a pooled connection in autocommit, so each took its own
+/// READ COMMITTED snapshot and a write committing between two of them could
+/// tear the assembled list -- a header whose games query then returned nothing,
+/// for instance. The Kotlin never had that gap: its loader ran inside
+/// `StandingsService`'s own REPEATABLE READ transaction. This is the port
+/// closing it, filed in PORTING.md §3b rather than smuggled into the standings
+/// commit because it is a change and not a port (PORTING.md §1).
+///
+/// Opening a transaction here is only safe because the caller no longer holds
+/// one. `standings::service` reads this cache **before** it opens its own
+/// snapshot precisely so that a miss is not asking the pool for a second
+/// connection while sitting on the first; do that and ten concurrent requests
+/// deadlock a ten-connection pool. The ordering there and the transaction here
+/// are one design, so read that module's `# Why REPEATABLE READ` note before
+/// changing either.
 async fn load(pool: &PgPool, tournament_id: i64) -> sqlx::Result<Vec<MatchResult>> {
-    let mut conn = pool.acquire().await?;
-    let matches = super::query::find_by_tournament(&mut conn, tournament_id, None).await?;
+    let mut tx = crate::state::read_snapshot(pool).await?;
+    let matches = super::query::find_by_tournament(&mut tx, tournament_id, None).await?;
+    tx.commit().await?;
     tracing::debug!(
         tournament_id,
         count = matches.len(),

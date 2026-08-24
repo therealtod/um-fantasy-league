@@ -13,6 +13,7 @@ use umfl_domain::DomainError;
 use umfl_domain::tournament::EntryStatus;
 use umfl_server::error::ApiError;
 use umfl_server::hero::{HeroFilter, HeroSort, query as hero_query};
+use umfl_server::standings::query as standings_query;
 use umfl_server::tournament::{query, service};
 
 use crate::harness::TestApp;
@@ -362,9 +363,15 @@ async fn re_pricing_a_hero_re_prices_an_unlocked_roster() {
 /// silently dropped -- which is why `find_roster_heroes` exists alongside
 /// `find_by_ids`.
 ///
-/// The Kotlin closes with a cross-check against `StandingsQuery.rosters`: that
-/// both reads report the same roster length and spend. That half waits for the
-/// standings feature; the invariant this test owns is asserted in full here.
+/// The Kotlin closes with a cross-check against `StandingsQuery.rosters`, and
+/// so does this: both reads must report the same roster length and the same
+/// spend. That half is not decoration. The two paths reach cost by genuinely
+/// different SQL -- the roster read joins `tournament_hero` through
+/// `find_roster_heroes`, while `standings::query::rosters` **left** joins it and
+/// leans on `unwrap_or(0)` for the missing row -- so a hero pulled from the pool
+/// is the one input that can make them disagree, and a leaderboard that prices a
+/// locked roster differently from the Roster Builder is exactly the silent
+/// wrongness this suite exists to catch.
 #[tokio::test]
 async fn a_hero_pulled_from_the_pool_after_locking_is_kept_at_cost_zero() {
     let app = TestApp::spawn().await;
@@ -406,6 +413,27 @@ async fn a_hero_pulled_from_the_pool_after_locking_is_kept_at_cost_zero() {
         [4_100, 3_200, 0]
     );
     assert_eq!(reloaded.budget.spent, 7_300);
+
+    // The cross-check. `spent()` is derived from the slots on this side too,
+    // so agreement here means the two queries agree about the *pulled* hero
+    // costing 0 rather than vanishing -- a dropped slot would read as a
+    // shorter roster and a smaller spend, and would quietly move the board.
+    let board_rosters = standings_query::rosters(app.pool(), winter).await.unwrap();
+    let mine = board_rosters
+        .iter()
+        .find(|r| r.manager_id == manager.id)
+        .expect("the locked entry is on the board");
+    assert_eq!(
+        mine.heroes.len(),
+        reloaded.heroes.len(),
+        "the leaderboard read dropped a slot the roster read kept"
+    );
+    assert_eq!(
+        mine.heroes.iter().map(|h| h.cost).collect::<Vec<_>>(),
+        [4_100, 3_200, 0],
+        "the pulled hero is priced at 0 on the board, not omitted"
+    );
+    assert_eq!(mine.spent(), reloaded.budget.spent);
 }
 
 #[tokio::test]

@@ -386,3 +386,66 @@ fn to_request(recorded: &Value) -> Value {
         })).collect::<Vec<_>>(),
     })
 }
+
+/// The snapshot the cache loader and the standings service both open really is
+/// REPEATABLE READ and really is read-only.
+///
+/// This is the one assertion that cannot be made by inspection, because getting
+/// it wrong is not an error. `set transaction isolation level` is accepted only
+/// before a transaction's first query; issued later it is silently ignored and
+/// the transaction stays at READ COMMITTED (PORTING.md §7). Every statement
+/// still succeeds and every row still looks plausible -- they just come from
+/// several different snapshots -- so a regression here surfaces as a
+/// leaderboard nobody can quite reproduce, not as a failure.
+///
+/// Asserted against `state::read_snapshot` itself, which is what
+/// `standings::service::snapshot` and `match::cache`'s loader both now call.
+#[tokio::test]
+async fn the_read_snapshot_is_repeatable_read_and_read_only() {
+    let app = TestApp::spawn().await;
+    let mut tx = umfl_server::state::read_snapshot(app.pool())
+        .await
+        .expect("open the read snapshot");
+
+    let isolation: String = sqlx::query_scalar("select current_setting('transaction_isolation')")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        isolation, "repeatable read",
+        "the isolation level was silently left at the default"
+    );
+
+    let read_only: String = sqlx::query_scalar("select current_setting('transaction_read_only')")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(read_only, "on", "the snapshot must also be read-only");
+}
+
+/// A cache miss assembles its six queries inside that snapshot, so the list it
+/// stores is internally coherent even if a write commits while it is loading.
+///
+/// The observable proxy is that the load still succeeds and still agrees with
+/// the SQL: a loader that failed to open its transaction, or opened one it
+/// could not read through, would show up here rather than in production.
+#[tokio::test]
+async fn a_cache_miss_assembles_its_queries_inside_one_snapshot() {
+    let app = TestApp::spawn().await;
+    let summer = summer(&app).await;
+
+    let cached = app
+        .state
+        .match_cache
+        .find_by_tournament(app.pool(), summer)
+        .await
+        .expect("a miss loads through its own snapshot");
+
+    let mut conn = app.pool().acquire().await.unwrap();
+    let direct = query::find_by_tournament(&mut conn, summer, None)
+        .await
+        .unwrap();
+
+    assert!(!cached.is_empty(), "Summer of Legends has recorded matches");
+    assert_eq!(cached.as_ref(), &direct);
+}

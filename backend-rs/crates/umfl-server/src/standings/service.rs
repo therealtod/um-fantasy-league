@@ -16,7 +16,7 @@
 //! precisely that reason, so re-pricing a hero, retuning a coefficient or
 //! changing a roster is visible on the very next request.
 
-use sqlx::{Executor, PgConnection, Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 use umfl_domain::scoring_engine::ScoringRules;
 use umfl_domain::standings as fold;
 use umfl_domain::standings::{StandingsBoard, TickerEntry};
@@ -129,11 +129,14 @@ pub async fn ticker(
 /// COMMITTED (PORTING.md §7) -- it is not an error to try, which is exactly why
 /// this is a named helper both entry points call rather than a line each of
 /// them could drift on.
+///
+/// The SQL itself moved to [`crate::state::read_snapshot`] once
+/// [`crate::r#match::cache`]'s loader needed the same guarantee: two features
+/// opening the same kind of transaction should not each carry their own
+/// spelling of it. `tests/it/match_cache.rs` asserts the level actually takes
+/// effect, which is what a silent degradation would otherwise hide.
 async fn snapshot(state: &AppState) -> sqlx::Result<Transaction<'static, Postgres>> {
-    let mut tx = state.pool.begin().await?;
-    tx.execute("set transaction isolation level repeatable read read only")
-        .await?;
-    Ok(tx)
+    crate::state::read_snapshot(&state.pool).await
 }
 
 /// The tournament's active rules, with a note in the log for any metric this

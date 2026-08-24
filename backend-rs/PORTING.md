@@ -175,28 +175,41 @@ that only assert a status, and `security.rs` uses it. A test that wants the *eve
 see `standings.rs`'s `a_committed_match_write_pushes_an_update_to_an_open_stream`.
 
 §13's headline assertion now lives in `tests/it/standings.rs`, asserted off the HTTP response rather
-than off the service. One deferred piece is left: `roster_flow.rs`'s UMFL-06 case still drops the
-Kotlin's cross-check against `StandingsQuery.rosters`, which `standings::query::rosters` can now
-satisfy.
+than off the service. **The deferred UMFL-06 cross-check is now in.** `roster_flow.rs`'s
+`a_hero_pulled_from_the_pool_after_locking_is_kept_at_cost_zero` closes against
+`standings::query::rosters` the way the Kotlin does: same roster length, same spend. The two paths
+reach cost by different SQL -- the roster read joins `tournament_hero` via `find_roster_heroes`, the
+board read **left** joins it and leans on `unwrap_or(0)` -- so a hero pulled from the pool after a
+lock is the one input that can make them disagree, and the failure it catches is a leaderboard
+pricing a locked roster differently from the Roster Builder.
 
-**One known gap, raised rather than smuggled in (PORTING.md §1).** `match/cache.rs`'s loader runs its
-six assembly queries on a pooled connection in autocommit, so on a *miss* the assembled list is not
-itself a single snapshot — the Kotlin's loader runs inside `StandingsService`'s REPEATABLE READ
-transaction and is. The standings service cannot pass its transaction in: `get_or_load` takes a
-`Fn() -> Fut` shared by every waiter, which is exactly what collapses the burst. Closing it means
-`load` opening its own `repeatable read read only` transaction — a two-line change to another
-feature's file, and a change rather than a port, so it is filed here instead of being made in the
-standings commit.
+**The one known gap is closed, and it had a worse one underneath it.** As filed, the gap was that
+`match/cache.rs`'s loader ran its six assembly queries on a pooled connection in autocommit, so on a
+*miss* the assembled list was not itself a single snapshot — the Kotlin's loader runs inside
+`StandingsService`'s REPEATABLE READ transaction and is. A review then found the reason it could not
+simply be fixed in place: `board`/`ticker` opened their snapshot transaction and *then* called the
+cache, so a miss asked the pool for a second connection while holding the first. At
+`max_connections(10)` ten concurrent standings requests over a miss held every connection and each
+waited for an eleventh — a self-deadlock, under precisely the SSE burst the cache exists to absorb,
+resolving only when sqlx's acquire timeout fired. Giving `load` its own transaction while the call
+was still nested would have deepened that, not fixed it.
 
-**Still open, and now unblocked.** A review found that the gap above sat on top of a worse one:
-`board`/`ticker` opened the snapshot transaction and *then* called the cache, so a miss asked the
-pool for a second connection while holding the first. At `max_connections(10)` ten concurrent
-standings requests over a miss held every connection and each waited for an eleventh — a
-self-deadlock, under precisely the SSE burst the cache exists to absorb, resolving only when sqlx's
-acquire timeout fired. The cache read is now hoisted **above** `snapshot(state)` in both, and
-`tests/it/standings.rs` pins it with a one-connection pool. Read that fix before closing the gap
-above: giving `load` its own transaction while the call was still nested would have made the
-deadlock strictly worse, so the hoist is its prerequisite, not an alternative to it.
+Both are now done, in that order, and they are one design rather than two fixes:
+
+- the cache read is hoisted **above** `snapshot(state)` in `board` and `ticker`, so no pooled
+  connection is held while the cache loads (`tests/it/standings.rs` pins it with a one-connection
+  pool, which is the smallest pool that expresses "no spare connection");
+- `load` then opens its own snapshot, so a miss assembles under one.
+
+The SQL for that snapshot is `state::read_snapshot`, shared by both callers rather than spelled out
+in each: `set transaction isolation level` is accepted only before a transaction's first query and
+is a **silent no-op** afterwards (§7), so the rule is one that has to be stated once and asserted.
+`tests/it/match_cache.rs::the_read_snapshot_is_repeatable_read_and_read_only` is that assertion —
+it reads `current_setting('transaction_isolation')` back and fails if the level silently degraded,
+which is the only way this defect ever announces itself.
+
+`get_or_load` still takes a `Fn() -> Fut` shared by every waiter, which is what collapses the burst;
+the loader owning its own transaction is what makes that shared closure safe to run.
 
 ## 4. Serialization — six rules, all of them wire contract
 
