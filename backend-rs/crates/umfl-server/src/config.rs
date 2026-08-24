@@ -36,13 +36,19 @@ const USERINFO: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     /// `SPRING_PROFILES_ACTIVE`, split on commas. Empty means the default
     /// profile: no seed data, prod-shaped security.
     pub profiles: Vec<String>,
     pub port: u16,
     /// The libpq-shaped URL `sqlx` connects with, derived from `DB_URL`.
+    ///
+    /// Carries the username and password inline (`to_libpq_url` put them
+    /// there), which is exactly why [`Config`] does not derive `Debug`: this
+    /// process talks to Supabase Postgres in `prod`, and nothing stops a
+    /// future `tracing::info!(?config)` from putting that password in the
+    /// logs. See the manual `impl Debug` below.
     pub database_url: String,
     /// HikariCP's default, stated explicitly because it is the number
     /// `MatchResultCache`'s entire rationale is written against: one match
@@ -56,6 +62,48 @@ pub struct Config {
     /// through the Cloudflare Worker's same-origin `/api/*` proxy.
     pub frontend_origin: Option<String>,
     pub rate_limit: RateLimitConfig,
+}
+
+/// Redacts `database_url`'s userinfo and prints every other field unchanged.
+///
+/// A bare `"<redacted>"` for the whole field would also work, but the host,
+/// port, database name and query string are not secret and are exactly what
+/// you'd reach for `?config` to check -- which host did this process actually
+/// connect to. Only the credential is the thing that must never reach a log.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("profiles", &self.profiles)
+            .field("port", &self.port)
+            .field("database_url", &redact_userinfo(&self.database_url))
+            .field("max_connections", &self.max_connections)
+            .field("scraper_base_url", &self.scraper_base_url)
+            .field("supabase_jwks_uri", &self.supabase_jwks_uri)
+            .field("frontend_origin", &self.frontend_origin)
+            .field("rate_limit", &self.rate_limit)
+            .finish()
+    }
+}
+
+/// `scheme://user:pass@host:port/db?query` -> `scheme://<redacted>@host:port/db?query`.
+/// A URL with no userinfo (or no recognisable `scheme://` at all) passes
+/// through untouched, since there is nothing in it to redact.
+fn redact_userinfo(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_owned();
+    };
+    let authority_start = scheme_end + "://".len();
+    let authority_end = url[authority_start..]
+        .find(['/', '?'])
+        .map_or(url.len(), |i| authority_start + i);
+    let Some(at) = url[authority_start..authority_end].rfind('@') else {
+        return url.to_owned();
+    };
+    format!(
+        "{}<redacted>@{}",
+        &url[..authority_start],
+        &url[authority_start + at + 1..]
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -93,7 +141,11 @@ impl Config {
 
 /// The flat env-shaped view. Field names are the environment variable names
 /// lowercased, which is exactly how `Env::raw()` presents them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Same exposure `Config` has, one field earlier: `db_password` is the plain
+/// credential `to_libpq_url` has not yet folded into a URL. Not derived, for
+/// the same reason -- see the manual `impl Debug` below.
+#[derive(Clone, Serialize, Deserialize)]
 struct RawConfig {
     spring_profiles_active: String,
     server_port: u16,
@@ -110,6 +162,35 @@ struct RawConfig {
     rate_limit_api_max_tracked_ips: u64,
     /// Comma-separated CIDRs.
     rate_limit_api_trusted_proxies: String,
+}
+
+impl std::fmt::Debug for RawConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawConfig")
+            .field("spring_profiles_active", &self.spring_profiles_active)
+            .field("server_port", &self.server_port)
+            .field("db_url", &self.db_url)
+            .field("db_user", &self.db_user)
+            .field("db_password", &"<redacted>")
+            .field("db_max_connections", &self.db_max_connections)
+            .field("scraper_base_url", &self.scraper_base_url)
+            .field("supabase_jwks_uri", &self.supabase_jwks_uri)
+            .field("frontend_origin", &self.frontend_origin)
+            .field("rate_limit_api_capacity", &self.rate_limit_api_capacity)
+            .field(
+                "rate_limit_api_refill_period",
+                &self.rate_limit_api_refill_period,
+            )
+            .field(
+                "rate_limit_api_max_tracked_ips",
+                &self.rate_limit_api_max_tracked_ips,
+            )
+            .field(
+                "rate_limit_api_trusted_proxies",
+                &self.rate_limit_api_trusted_proxies,
+            )
+            .finish()
+    }
 }
 
 impl Default for RawConfig {
@@ -135,6 +216,18 @@ impl Default for RawConfig {
 
 impl RawConfig {
     fn into_config(self) -> Result<Config, ConfigError> {
+        // A capacity of zero is not a stricter throttle, it is a throttle
+        // that admits nothing -- indistinguishable from the API being down --
+        // so it is refused here as a misconfiguration rather than accepted as
+        // a mode anyone wants. It also used to reach `RateLimiter::try_consume`
+        // and divide-by-zero its way into a panic on the very first throttled
+        // request; see the `try_from_secs_f64` fallback in `ratelimit.rs` for
+        // the belt-and-braces half of that fix, which holds even for a
+        // `RateLimitConfig` built directly (as the unit tests there do),
+        // bypassing this check.
+        if self.rate_limit_api_capacity == 0 {
+            return Err(ConfigError::RateLimitCapacity);
+        }
         Ok(Config {
             profiles: split_list(&self.spring_profiles_active),
             port: self.server_port,
@@ -219,7 +312,14 @@ fn parse_iso8601_duration(text: &str) -> Result<Duration, ConfigError> {
     if !number.is_empty() {
         return Err(bad());
     }
-    Ok(Duration::from_secs_f64(total))
+    // `Duration::from_secs_f64` panics on either failure mode here: a finite
+    // `total` too large to represent (an operator-set env var is one typo
+    // away -- see the test below) and a non-finite one (a number literal past
+    // `f64::MAX` parses as `inf` before it ever reaches this line). This is
+    // the same "reject rather than guess" category as `P1D` and a bare `60`
+    // above -- `try_from_secs_f64` is the non-panicking twin of the call this
+    // function already returns `Result` for.
+    Duration::try_from_secs_f64(total).map_err(|_| bad())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -230,11 +330,84 @@ pub enum ConfigError {
     DbUrl(String),
     #[error("not an ISO-8601 duration: `{0}`")]
     Duration(String),
+    #[error(
+        "RATE_LIMIT_API_CAPACITY must be greater than 0 -- a zero-capacity throttle admits no \
+         requests at all, which is a misconfiguration rather than a mode anyone wants"
+    )]
+    RateLimitCapacity,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redact_userinfo_strips_the_credential_but_keeps_the_rest_of_the_url() {
+        assert_eq!(
+            redact_userinfo(
+                "postgres://umfl:s3cret@db.example.supabase.co:5432/postgres?sslmode=require"
+            ),
+            "postgres://<redacted>@db.example.supabase.co:5432/postgres?sslmode=require"
+        );
+    }
+
+    #[test]
+    fn redact_userinfo_passes_a_url_with_no_credential_through_untouched() {
+        assert_eq!(
+            redact_userinfo("postgres://db.example.supabase.co:5432/postgres"),
+            "postgres://db.example.supabase.co:5432/postgres"
+        );
+    }
+
+    /// The whole point: a password in `Config` must never reach whatever
+    /// formats `{:?}` on it (a future `tracing::info!(?config)`, most
+    /// plausibly), while the host stays visible because that's what makes
+    /// `?config` worth reaching for in the first place.
+    #[test]
+    fn configs_debug_output_never_contains_the_database_password() {
+        let config = Config {
+            profiles: vec!["prod".to_owned()],
+            port: 8080,
+            database_url: "postgres://umfl:s3cret@db.example.supabase.co:5432/postgres".to_owned(),
+            max_connections: 10,
+            scraper_base_url: "http://localhost:3000".to_owned(),
+            supabase_jwks_uri: None,
+            frontend_origin: None,
+            rate_limit: RateLimitConfig {
+                capacity: 300,
+                refill_period: Duration::from_secs(60),
+                max_tracked_ips: 100_000,
+                trusted_proxies: vec![],
+            },
+        };
+
+        let debug = format!("{config:?}");
+        assert!(
+            !debug.contains("s3cret"),
+            "the password leaked into Debug output: {debug}"
+        );
+        assert!(
+            debug.contains("db.example.supabase.co"),
+            "the host should stay visible for debuggability: {debug}"
+        );
+    }
+
+    /// Same exposure, one layer down: `RawConfig::db_password` is the plain
+    /// credential before `to_libpq_url` folds it into a URL at all.
+    #[test]
+    fn raw_configs_debug_output_never_contains_the_database_password() {
+        let raw = RawConfig {
+            db_password: "s3cret".to_owned(),
+            ..RawConfig::default()
+        };
+
+        let debug = format!("{raw:?}");
+        assert!(
+            !debug.contains("s3cret"),
+            "the password leaked into Debug output: {debug}"
+        );
+        assert!(debug.contains("<redacted>"), "{debug}");
+    }
 
     #[test]
     fn converts_the_jdbc_url_the_vps_env_already_carries() {
@@ -292,6 +465,53 @@ mod tests {
         );
         assert!(parse_iso8601_duration("P1D").is_err());
         assert!(parse_iso8601_duration("60").is_err());
+    }
+
+    /// Reproduces, then closes, the panic this function used to have before it
+    /// switched from `Duration::from_secs_f64` to `Duration::try_from_secs_f64`.
+    /// Confirmed directly against `core::time` first, so this test is honest
+    /// about what it is proving rather than about this function's plumbing:
+    /// `Duration::from_secs_f64` panics outright both on a finite value too
+    /// large to represent and on a non-finite one ("value is either too big or
+    /// NaN"). `RATE_LIMIT_API_REFILL_PERIOD` is an operator-set env var, so an
+    /// absurd hour count -- the PORTING.md-cited `...999H` -- is one typo away.
+    #[test]
+    fn an_overflowing_or_non_finite_duration_is_rejected_not_panicked() {
+        // The hazard, confirmed at the primitive `core::time` gave us, so a
+        // future change to that stdlib behaviour would fail this assertion
+        // rather than leave the rest of the test silently proving nothing.
+        assert!(
+            std::panic::catch_unwind(|| Duration::from_secs_f64(1e30)).is_err(),
+            "Duration::from_secs_f64 itself must still panic on overflow, or this test is stale"
+        );
+        assert!(
+            std::panic::catch_unwind(|| Duration::from_secs_f64(f64::INFINITY)).is_err(),
+            "Duration::from_secs_f64 itself must still panic on a non-finite value, or this test is stale"
+        );
+
+        // Finite (huge, but well under f64::MAX) and still overflows Duration
+        // once multiplied out -- the PORTING.md example.
+        assert!(parse_iso8601_duration("PT99999999999999999999999999999H").is_err());
+        // A number literal past f64::MAX itself parses as `inf`, driving
+        // `total` non-finite before it ever reaches the `Duration` conversion.
+        assert!(parse_iso8601_duration(&format!("PT{}H", "9".repeat(400))).is_err());
+    }
+
+    /// A zero capacity used to reach `RateLimiter::try_consume` and divide by
+    /// its own zero refill rate -- see `ratelimit.rs`. Rejecting it here,
+    /// before a `RateLimitConfig` is ever built, is the primary fix; that
+    /// module's `try_from_secs_f64` fallback is the belt-and-braces half for
+    /// a caller who bypasses this validation, as its own unit tests do.
+    #[test]
+    fn a_zero_rate_limit_capacity_is_rejected_at_config_time() {
+        let raw = RawConfig {
+            rate_limit_api_capacity: 0,
+            ..RawConfig::default()
+        };
+        assert!(matches!(
+            raw.into_config(),
+            Err(ConfigError::RateLimitCapacity)
+        ));
     }
 
     #[test]
