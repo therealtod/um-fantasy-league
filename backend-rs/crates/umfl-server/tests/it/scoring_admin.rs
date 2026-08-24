@@ -613,6 +613,36 @@ async fn a_broken_request_body_is_a_400_naming_every_bad_field() {
     );
 }
 
+/// A coefficient that is present but not a number at all -- neither absent
+/// nor an explicit `null` -- is not something `garde` should ever see: it
+/// never becomes "coefficient is required". Jackson can't parse a `BigDecimal`
+/// out of `"abc"` either, and answers the same way: a 400 naming the
+/// malformed-body problem type, not the validation one, with the same
+/// `"Failed to read request"` sentence `AppJson` copies from
+/// `HttpMessageNotReadableException`.
+#[tokio::test]
+async fn a_non_numeric_coefficient_token_is_a_malformed_body_not_a_validation_failure() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+
+    let response = app
+        .send_as(
+            "POST",
+            &format!("/api/admin/tournaments/{winter}/scoring-rule-sets"),
+            admin(&app).await,
+            Some(&json!({
+                "name": "Retuned Weights",
+                "coefficients": [{ "metric": "WIN", "coefficient": "abc", "sortOrder": 0 }],
+            })),
+        )
+        .await;
+
+    assert_eq!(response.status, 400, "{}", response.text());
+    let body = response.json();
+    assert_eq!(body["type"], "https://umfl.dev/problems/bad-request");
+    assert_eq!(body["detail"], "Failed to read request");
+}
+
 #[tokio::test]
 async fn an_empty_coefficient_list_is_rejected_but_an_absent_one_is_not() {
     let app = TestApp::spawn().await;
