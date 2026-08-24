@@ -39,6 +39,23 @@ const MAX_PROVISION_ATTEMPTS: usize = 3;
 /// stream of outbound requests to Supabase.
 const MIN_REFETCH_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Short: either Supabase answers or it doesn't, and "doesn't" should surface
+/// as a rejected token quickly rather than a request that never returns.
+///
+/// Contrast the scraper's 90s `SCRAPE_TIMEOUT` (`matchimport/scraper.rs`): that
+/// call drives a real browser rendering a page and can legitimately take
+/// close to a minute. This one is a small JSON GET against an identity
+/// provider, sitting on the request path of *every* bearer-authenticated
+/// call once the cache misses -- a different kind of call by an order of
+/// magnitude, not just a smaller one.
+const JWKS_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Same reasoning as [`JWKS_CONNECT_TIMEOUT`]: bound the whole round trip, not
+/// just the connect, so a Supabase that accepts the connection and then
+/// hangs (or is blackholed mid-response) can't stall the write-locked
+/// [`JwksCache::refresh`] below indefinitely.
+const JWKS_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The signing keys, fetched on first use and refreshed when a token names a
 /// `kid` this process has not seen.
 ///
@@ -55,10 +72,18 @@ pub struct JwksCache {
 
 impl JwksCache {
     pub fn new(uri: Option<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .connect_timeout(JWKS_CONNECT_TIMEOUT)
+            .timeout(JWKS_REQUEST_TIMEOUT)
+            .build()
+            // Only fails if the TLS backend cannot be initialised, which is a
+            // start-up fault rather than a request-time one -- same rationale
+            // as `HttpScraperClient::new`.
+            .expect("build the Supabase JWKS HTTP client");
         Self {
             inner: Arc::new(RwLock::new(None)),
             last_fetch: Arc::new(RwLock::new(None)),
-            client: reqwest::Client::new(),
+            client,
             uri,
         }
     }
@@ -72,6 +97,20 @@ impl JwksCache {
         self.inner.read().await.as_ref()?.find(kid).cloned()
     }
 
+    /// Fetches the key set and swaps it in, serialised by `last_fetch`'s write
+    /// lock -- which is held across the network round trip below, not just
+    /// the timestamp check, **on purpose**: every request whose `kid` misses
+    /// the cache calls this, and holding the lock for the whole fetch is what
+    /// collapses a burst of concurrent misses onto one outbound call instead
+    /// of N. Read [`key`](Self::key) queues on this same lock during that
+    /// window, so callers stall, not stack.
+    ///
+    /// That is only safe because `client` above carries `JWKS_CONNECT_TIMEOUT`
+    /// / `JWKS_REQUEST_TIMEOUT`: an unbounded client would turn "one fetch for
+    /// everyone" into "everyone hangs together" the moment Supabase's JWKS
+    /// endpoint stalls or blackholes a connection. The lock and the timeout
+    /// are one decision -- removing the timeout without also removing the
+    /// held-lock structure reopens the stall this pair exists to prevent.
     async fn refresh(&self) {
         let Some(uri) = self.uri.as_deref() else {
             // `SUPABASE_JWKS_URI` unset. Every token is then unverifiable, which
@@ -265,4 +304,51 @@ async fn unique_handle(state: &AppState, base: &str) -> Result<String, ApiError>
         suffix += 1;
     }
     Ok(candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The scenario the two changes above exist to prevent: a JWKS endpoint
+    /// that accepts the TCP connection (so `JWKS_CONNECT_TIMEOUT` never
+    /// fires) and then never writes a response. Before the client carried a
+    /// request timeout, `refresh()` -- and the write lock it holds for the
+    /// whole fetch, see its doc comment -- would have hung forever, and every
+    /// request behind an unknown `kid` with it.
+    ///
+    /// `reqwest`'s configured timeouts aren't inspectable, so this is the
+    /// honest version of that assertion: not "a timeout is set", but "the
+    /// call this timeout guards actually returns". The outer
+    /// `tokio::time::timeout` is only there so a regression fails this test
+    /// instead of hanging the suite; it is deliberately looser than
+    /// `JWKS_REQUEST_TIMEOUT` so the assertion is about the client's own
+    /// bound, not a race against it.
+    #[tokio::test]
+    async fn refresh_returns_rather_than_hanging_against_an_endpoint_that_never_responds() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local listener");
+        let addr = listener.local_addr().expect("local addr");
+        std::thread::spawn(move || {
+            // Accept the connection and then just sit on it -- no response,
+            // ever. The thread (and the socket) outlive the assertion below;
+            // the test process exiting is what cleans it up.
+            let _ = listener.accept();
+            std::thread::sleep(Duration::from_secs(60));
+        });
+
+        let cache = JwksCache::new(Some(format!("http://{addr}/jwks")));
+
+        tokio::time::timeout(
+            JWKS_REQUEST_TIMEOUT + Duration::from_secs(5),
+            cache.refresh(),
+        )
+        .await
+        .expect(
+            "refresh() did not return well within its own request timeout -- \
+                 the HTTP client is unbounded again",
+        );
+
+        // The fetch failed (it timed out), so there is still nothing cached.
+        assert!(cache.inner.read().await.is_none());
+    }
 }
