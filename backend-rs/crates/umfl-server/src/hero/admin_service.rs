@@ -8,7 +8,7 @@ use indexmap::{IndexMap, IndexSet};
 use sqlx::PgConnection;
 use umfl_domain::DomainError;
 
-use crate::error::ApiResult;
+use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
 use crate::tournament::service::require_tournament;
 
@@ -103,11 +103,30 @@ pub async fn set_pool_cost(
     require_tournament(&mut *tx, tournament_id).await?;
     require_hero(&mut tx, hero_id).await?;
     pool_admin::upsert_cost(&mut *tx, tournament_id, hero_id, cost).await?;
+    // This read is inside the same transaction that just upserted the price,
+    // so `None` here means a bug in this service, not a race with another
+    // writer -- nothing else can see the row until we commit. It still
+    // answers 500 either way; the point of `ok_or_else` over the `.expect()`
+    // this replaced is that it does so without unwinding through
+    // `CatchPanicLayer` (see `http::panic_response`) and dropping a live
+    // transaction mid-flight, and the log line names the ids a bare panic
+    // message would not have reached anyone with. There is no cache
+    // announcement to worry about skipping here, unlike the match writes in
+    // `match::admin_service`: hero cost is joined live and never cached (see
+    // the "no cost snapshot" invariant), so an early return costs nothing
+    // beyond the ordinary rollback-on-drop of `tx`.
     let view = query::find_by_ids(&mut *tx, tournament_id, &[hero_id])
         .await?
         .into_iter()
         .next()
-        .expect("just-priced hero not found");
+        .ok_or_else(|| {
+            tracing::error!(
+                tournament_id,
+                hero_id,
+                "Just-priced hero not found by its own transaction"
+            );
+            ApiError::Internal
+        })?;
     tx.commit().await?;
     Ok(view)
 }
