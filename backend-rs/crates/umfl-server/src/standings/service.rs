@@ -50,17 +50,50 @@ use super::query;
 /// describe facts uncorrelated with match writes, so nothing skews against
 /// anything. The worst case is a board pricing a match list one write behind,
 /// which is the staleness the cache is for and which the SSE push corrects.
+///
+/// # The cache read happens before the snapshot opens, and that order is load-bearing
+///
+/// `MatchResultCache::find_by_tournament` is called *first*, while this
+/// function is not holding any pooled connection at all -- not after
+/// `snapshot(state)`, even though the match list is exactly the input the
+/// paragraph above says needs no correlation with the rules/roster reads. On a
+/// cache hit the ordering costs nothing either way. On a *miss*, `load`
+/// (`match/cache.rs`) calls `pool.acquire()` for a connection of its own,
+/// separate from whatever this function is holding -- so nesting the cache
+/// read inside `snapshot`'s transaction means every concurrent caller needs
+/// **two** pooled connections at once to make progress: one held by its own
+/// snapshot, one for its own cache load. Against `max_connections(10)`, ten
+/// concurrent misses each hold one connection and each block acquiring a
+/// second, and nothing left in the pool is ever going to hand one back --
+/// a self-deadlock that resolves only when sqlx's acquire timeout fires. That
+/// is exactly the burst this cache exists to absorb (one match write tells up
+/// to 200 tabs per tournament to refetch, and each pulls both the board and
+/// the ticker head), so the ordering is not a style choice: a reader who
+/// "tidies" the cache call back inside the transaction reintroduces the
+/// deadlock under the load the cache was built for. The regression is pinned
+/// against a one-connection pool -- the smallest pool that expresses "no
+/// spare connection available" -- by `tests/it/standings.rs`'s
+/// `the_board_and_ticker_do_not_hold_a_connection_while_the_cache_loads`.
+///
+/// This ordering is also a prerequisite for PORTING.md §3b's open item --
+/// giving `load` its own `repeatable read read only` transaction so a miss is
+/// itself a coherent snapshot. Doing that while the call is still nested here
+/// would make the nesting strictly worse: two transactions open on two
+/// connections *simultaneously* for the whole load, per caller, rather than
+/// today's two connections open only briefly and non-overlapping in the
+/// common case. Closing that gap has to start from this function already
+/// calling the cache before it opens anything of its own.
 pub async fn board(state: &AppState, tournament_id: i64) -> ApiResult<StandingsBoard> {
-    let mut tx = snapshot(state).await?;
-
-    let rules = resolve_rules(&mut tx, tournament_id).await?;
     let matches = state
         .match_cache
         .find_by_tournament(&state.pool, tournament_id)
         .await?;
-    let rosters = query::rosters(&mut *tx, tournament_id).await?;
 
+    let mut tx = snapshot(state).await?;
+    let rules = resolve_rules(&mut tx, tournament_id).await?;
+    let rosters = query::rosters(&mut *tx, tournament_id).await?;
     tx.commit().await?;
+
     Ok(fold::board(tournament_id, &matches, &rules, &rosters))
 }
 
@@ -69,22 +102,24 @@ pub async fn board(state: &AppState, tournament_id: i64) -> ApiResult<StandingsB
 /// `since_match_id` is the polling key rather than a timestamp: parallel tables
 /// in a round share a `played_at`, while the match id is a monotonic
 /// `bigserial`. See the isolation note on [`board`] -- the same cross-statement
-/// race applies here.
+/// race applies here, and so does the cache-before-snapshot ordering: the
+/// cache read below runs before [`snapshot`] opens a connection, for the
+/// identical pool-self-deadlock reason documented there.
 pub async fn ticker(
     state: &AppState,
     tournament_id: i64,
     since_match_id: i64,
     limit: usize,
 ) -> ApiResult<Vec<TickerEntry>> {
-    let mut tx = snapshot(state).await?;
-
-    let rules = resolve_rules(&mut tx, tournament_id).await?;
     let matches = state
         .match_cache
         .find_by_tournament_since(&state.pool, tournament_id, since_match_id, limit)
         .await?;
 
+    let mut tx = snapshot(state).await?;
+    let rules = resolve_rules(&mut tx, tournament_id).await?;
     tx.commit().await?;
+
     Ok(fold::ticker(&matches, &rules))
 }
 
