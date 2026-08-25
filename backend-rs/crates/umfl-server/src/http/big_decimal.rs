@@ -65,7 +65,23 @@ fn parse(token: &str) -> Option<Decimal> {
 /// The same, for an `Option` field — a request DTO whose `@NotNull` is enforced
 /// by `garde` rather than by the type, so the absent case has to survive
 /// deserialization to be reported as a validation failure.
+///
+/// Two things are allowed to become `None` here, and only two: the field is
+/// absent (never reaches this function at all — see `ScoringCoefficientRequest`'s
+/// `#[serde(default, ...)]`) and an explicit JSON `null`. Both are the
+/// validator's business: `garde`'s `@NotNull`-equivalent turns either into the
+/// "coefficient is required" message on a 400 `validation-failed`. A token
+/// that is *present* and is not `null` but is also not a number — `"abc"`,
+/// `true`, `[]` — is not a missing value, it is a malformed one, and that is
+/// the parser's business: it has to fail deserialization so the request comes
+/// back as Jackson's own `HttpMessageNotReadableException` would render it, a
+/// 400 `bad-request` with detail `"Failed to read request"`. Folding that case
+/// into `None` (as `super::parse(...).unwrap_or(None)` would) makes a garbled
+/// body indistinguishable from an absent one on the wire — a different problem
+/// type and a different sentence than Jackson produces for the same input.
 pub mod option {
+    use serde::de::Error as _;
+
     use super::{Decimal, Deserialize, Deserializer, RawValue};
 
     pub fn deserialize<'de, D: Deserializer<'de>>(
@@ -80,7 +96,12 @@ pub mod option {
         if raw.get() == "null" {
             return Ok(None);
         }
-        Ok(super::parse(raw.get()))
+        super::parse(raw.get()).map(Some).ok_or_else(|| {
+            D::Error::custom(format!(
+                "cannot deserialize value as decimal: {}",
+                raw.get()
+            ))
+        })
     }
 }
 
@@ -97,7 +118,11 @@ mod tests {
 
     #[derive(Debug, Deserialize, PartialEq, Eq)]
     struct OptHolder {
-        #[serde(with = "super::option")]
+        // `default` matches `ScoringCoefficientRequest.coefficient`'s own
+        // attribute: an absent field never reaches `option::deserialize` at
+        // all, since serde substitutes `Option`'s `Default` (`None`) for a
+        // missing key before the field deserializer ever runs.
+        #[serde(default, with = "super::option")]
         coefficient: Option<Decimal>,
     }
 
@@ -158,5 +183,49 @@ mod tests {
     fn an_explicit_null_is_none_rather_than_an_error() {
         let holder: OptHolder = serde_json::from_str(r#"{"coefficient":null}"#).unwrap();
         assert_eq!(holder.coefficient, None);
+    }
+
+    /// An absent field is also `None`, and for the same reason as an explicit
+    /// `null`: there is nothing to fail parsing here, only a value for `garde`
+    /// to judge.
+    #[test]
+    fn an_absent_field_is_none_rather_than_an_error() {
+        let holder: OptHolder = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(holder.coefficient, None);
+    }
+
+    /// The quoted-number carve-out (Jackson accepts one) has to survive on the
+    /// `Option` form too, not just the scalar one above.
+    #[test]
+    fn a_present_value_still_parses_through_the_option_form() {
+        let holder: OptHolder = serde_json::from_str(r#"{"coefficient":"1.5"}"#).unwrap();
+        assert_eq!(holder.coefficient, Some(Decimal::from_str("1.5").unwrap()));
+    }
+
+    /// The bug this module was fixed for: a token that is not a number at all
+    /// used to fall through `parse`'s `None` and come out indistinguishable
+    /// from an absent field, so `{"coefficient":"abc"}` reported `@NotNull`
+    /// ("coefficient is required") instead of the malformed-body error Jackson
+    /// actually raises. `garde`'s job is "is it there"; the parser's job is
+    /// "is it a number" -- and those are different problem types on the wire
+    /// (`validation-failed` vs. `bad-request`), so collapsing them here would
+    /// smuggle the wrong one through.
+    #[test]
+    fn a_non_numeric_string_is_a_deserialization_error_not_none() {
+        assert!(serde_json::from_str::<OptHolder>(r#"{"coefficient":"abc"}"#).is_err());
+    }
+
+    /// Same bug, a different malformed shape: a JSON `true` is not `null` and
+    /// not a number, so it must error rather than silently read as absent.
+    #[test]
+    fn a_boolean_token_is_a_deserialization_error_not_none() {
+        assert!(serde_json::from_str::<OptHolder>(r#"{"coefficient":true}"#).is_err());
+    }
+
+    /// And a non-scalar shape: an array is not `null` and not a number
+    /// either.
+    #[test]
+    fn an_array_token_is_a_deserialization_error_not_none() {
+        assert!(serde_json::from_str::<OptHolder>(r#"{"coefficient":[]}"#).is_err());
     }
 }

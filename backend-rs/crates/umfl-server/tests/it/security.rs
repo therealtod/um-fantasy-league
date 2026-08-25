@@ -266,3 +266,62 @@ async fn a_preflight_is_answered_rather_than_denied() {
         .await;
     assert_ne!(response.status, StatusCode::UNAUTHORIZED);
 }
+
+/// **Invariant: the authorization layer and the router must agree about what
+/// a path *is*.** `authorize` matches its Ant patterns against
+/// `req.uri().path()` -- the raw, undecoded path -- and axum's router
+/// (matchit) also matches the raw path. Because the two agree, an encoded or
+/// traversal spelling of an admin route matches *neither* the `/api/admin/**`
+/// rule *nor* the admin route itself, and falls through to a 404.
+///
+/// That agreement is a property of matchit's behaviour, not of this codebase:
+/// an upstream change to how axum normalises or decodes a path before routing
+/// could silently decouple the two layers, which is exactly the shape of an
+/// authorization bypass (a rule table that no longer covers what the router
+/// will actually dispatch). Hence a pinned test rather than a comment.
+///
+/// A 404 is the *correct* answer here, not a weaker stand-in for 403: nothing
+/// routes at these spellings, and the four-row table in `authorize.rs`'s
+/// module doc (also PORTING.md §12's first "assumed wrong and corrected
+/// against the running backend" bullet) says an authenticated caller under
+/// `/api/**` is handed to the router, which is free to 404 its own way.
+/// `%61` is `a`, so `/api/%61dmin/heroes` is the percent-encoded spelling of
+/// `/api/admin/heroes`; `/api/x/../admin/heroes` is the `..`-traversal
+/// spelling of the same route.
+#[tokio::test]
+async fn an_encoded_or_traversal_spelling_of_an_admin_route_reaches_neither_the_rule_nor_the_route()
+{
+    let app = TestApp::spawn().await;
+    let admin = manager_id(&app, "NeonStrategist").await.to_string();
+    let non_admin = manager_id(&app, "SherlockMain").await.to_string();
+
+    // Baseline: the plain spelling is gated by the table as expected.
+    assert_eq!(
+        get(&app, "/api/admin/heroes", Some(&admin)).await.status,
+        StatusCode::OK,
+        "plain spelling, admin"
+    );
+    assert_eq!(
+        get(&app, "/api/admin/heroes", Some(&non_admin))
+            .await
+            .status,
+        StatusCode::FORBIDDEN,
+        "plain spelling, non-admin"
+    );
+
+    // The encoded and traversal spellings: matched by neither `authorize`'s
+    // raw-path patterns nor the router's own raw-path matching, so they 404
+    // for any manager rather than answering 200 or 403.
+    for uri in ["/api/%61dmin/heroes", "/api/x/../admin/heroes"] {
+        assert_eq!(
+            get(&app, uri, Some(&admin)).await.status,
+            StatusCode::NOT_FOUND,
+            "GET {uri} (admin)"
+        );
+        assert_eq!(
+            get(&app, uri, Some(&non_admin)).await.status,
+            StatusCode::NOT_FOUND,
+            "GET {uri} (non-admin)"
+        );
+    }
+}

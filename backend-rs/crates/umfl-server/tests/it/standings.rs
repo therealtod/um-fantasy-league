@@ -947,6 +947,54 @@ async fn every_standings_route_404s_on_an_unknown_tournament() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pool exhaustion under a cache miss
+// ---------------------------------------------------------------------------
+
+/// `board`/`ticker` must not hold a pooled connection while the match cache
+/// loads, or a burst of concurrent readers self-deadlocks the pool.
+///
+/// A single connection is the smallest pool that expresses "no spare
+/// connection available" -- exactly what ten concurrent standings requests
+/// produce against the real `max_connections(10)` pool on a cache miss, since
+/// each of the ten holds the snapshot's connection and then needs a second one
+/// for `MatchResultCache::find_by_tournament`'s `pool.acquire()`
+/// (`match/cache.rs`'s `load`). One connection reproduces the same shape with
+/// one request instead of ten: if the cache read runs *inside* the snapshot
+/// transaction, that lone connection is the one already held by `snapshot`,
+/// so the second acquire has nothing left to wait for but its own three-second
+/// timeout, and this test fails with a pool-acquire timeout
+/// (`ApiError::Internal` wrapping `sqlx::Error::PoolTimedOut`). Moving the
+/// cache read above `snapshot` -- see the "cache read precedes the snapshot"
+/// note on `board`'s doc comment -- frees the only connection before the
+/// snapshot ever opens one, so the same call succeeds even at this pool size.
+#[tokio::test]
+async fn the_board_and_ticker_do_not_hold_a_connection_while_the_cache_loads() {
+    let mut app = TestApp::spawn().await;
+    let summer = app.tournament_id(SUMMER).await;
+
+    let one_connection_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(3))
+        .connect(&app.state.config.database_url)
+        .await
+        .expect("connect a single-connection pool to the test database");
+    app.state.pool = one_connection_pool;
+
+    assert!(
+        umfl_server::standings::service::board(&app.state, summer)
+            .await
+            .is_ok(),
+        "board() must release the snapshot's connection before the cache load needs one"
+    );
+    assert!(
+        umfl_server::standings::service::ticker(&app.state, summer, 0, 25)
+            .await
+            .is_ok(),
+        "ticker() must release the snapshot's connection before the cache load needs one"
+    );
+}
+
 /// All three are `permitAll` -- nobody needs an account to watch a tournament.
 #[tokio::test]
 async fn the_standings_routes_need_no_credential() {

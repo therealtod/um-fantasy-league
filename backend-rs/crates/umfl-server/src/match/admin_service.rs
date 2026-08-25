@@ -91,9 +91,31 @@ pub async fn record(
         .map_err(|e| link_conflict_or(e, link))?;
 
     announce(state, tournament_id);
-    let saved = query::find_by_id(&mut tx, match_id)
-        .await?
-        .expect("just-saved match not found");
+    // This read is inside the same transaction that just inserted `match_id`,
+    // so `None` here can only mean a bug in this service, never a race with
+    // another writer -- nothing else can see the row until we commit. It
+    // still answers 500 either way; the point of `ok_or_else` over the
+    // `.expect()` this replaced is that it does so without unwinding through
+    // `CatchPanicLayer` (see `http::panic_response`) and dropping a live
+    // transaction mid-flight, and the log line below names the ids a bare
+    // panic message would not have reached anyone with.
+    //
+    // Returning early here instead of falling through to `announce_completed`
+    // is safe: `tx` is never committed on this path, so it rolls back on drop
+    // and the insert above is undone. A reader who raced the window between
+    // `announce` and the rollback sees exactly the pre-write rows -- which,
+    // because the write never actually took effect, is not stale, so there is
+    // no second invalidation for `announce_completed` to buy. (The pre-existing
+    // `?` on the line above, for a genuine query failure rather than a missing
+    // row, already relied on the same reasoning.)
+    let saved = query::find_by_id(&mut tx, match_id).await?.ok_or_else(|| {
+        tracing::error!(
+            tournament_id,
+            match_id,
+            "Just-saved match not found by its own transaction"
+        );
+        ApiError::Internal
+    })?;
     let outcome = tx.commit().await;
     announce_completed(state, tournament_id);
     outcome?;
@@ -136,9 +158,20 @@ pub async fn correct(
         .map_err(|e| link_conflict_or(e, link))?;
 
     announce(state, tournament_id);
-    let saved = query::find_by_id(&mut tx, match_id)
-        .await?
-        .expect("just-saved match not found");
+    // Same reasoning as the identical read in `record`: this transaction just
+    // wrote `match_id` itself, so `None` is this service's own bug rather
+    // than a race, a controlled 500 beats a panic unwinding a live
+    // transaction, and skipping `announce_completed` on this early return is
+    // safe because the uncommitted write it would be protecting a reader from
+    // never survives the rollback that not calling `tx.commit()` triggers.
+    let saved = query::find_by_id(&mut tx, match_id).await?.ok_or_else(|| {
+        tracing::error!(
+            tournament_id,
+            match_id,
+            "Just-corrected match not found by its own transaction"
+        );
+        ApiError::Internal
+    })?;
     let outcome = tx.commit().await;
     announce_completed(state, tournament_id);
     outcome?;

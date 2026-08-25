@@ -238,13 +238,41 @@ mod tests {
         assert_eq!(body, serde_json::json!({}));
     }
 
-    /// `default-property-inclusion: non_null` as a blanket assertion. The
-    /// differential rig runs this same walk over every parity response body.
+    /// The first `Value::Null` found in a depth-first walk of `value`, as a
+    /// JSON pointer path (e.g. `/violations/0/message`), or `None` if there
+    /// is none anywhere in the tree.
+    ///
+    /// Structural, not textual: a `serde_json::Value::String` containing the
+    /// letters "null" (a hero named "Nullable", a `detail` sentence that
+    /// mentions the word) is not a match. Only an actual JSON `null` token is.
+    fn find_json_null(value: &serde_json::Value, path: &str) -> Option<String> {
+        match value {
+            serde_json::Value::Null => Some(path.to_owned()),
+            serde_json::Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .find_map(|(i, v)| find_json_null(v, &format!("{path}/{i}"))),
+            serde_json::Value::Object(map) => map
+                .iter()
+                .find_map(|(k, v)| find_json_null(v, &format!("{path}/{k}"))),
+            _ => None,
+        }
+    }
+
+    /// `default-property-inclusion: non_null` as a blanket assertion, walked
+    /// structurally rather than matched as a substring of the rendered body --
+    /// a substring match fires on any legitimate **string value** containing
+    /// the letters "null" and says nothing about *where* an offending null
+    /// is. `find_json_null` is the same shape as the differential rig's own
+    /// walk, which runs over every parity response body and fails on any
+    /// JSON `null` anywhere in it.
     #[tokio::test]
     async fn no_response_body_contains_a_json_null() {
         for uri in ["/nope", "/actuator/info"] {
             let (_, _, body) = get(uri).await;
-            assert!(!body.to_string().contains("null"), "{uri} -> {body}");
+            if let Some(path) = find_json_null(&body, "") {
+                panic!("{uri} -> {body} has a JSON null at {path}");
+            }
         }
     }
 }

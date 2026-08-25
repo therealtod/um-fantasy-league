@@ -50,6 +50,14 @@ const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 /// direction to fail -- it throttles rather than exempts.
 const UNKNOWN_PEER: &str = "unknown";
 
+/// The `Retry-After` a zero-refill-rate bucket reports instead of panicking.
+/// Only reachable when `RateLimiter::new` is built with `capacity: 0`, which
+/// `config::into_config` already refuses at startup -- see the comment at the
+/// `try_from_secs_f64` call site in [`RateLimiter::try_consume`]. One day is
+/// arbitrary but deliberately finite and small enough not to itself become a
+/// header a client or proxy chokes on.
+const UNREACHABLE_CAPACITY_RETRY_AFTER: Duration = Duration::from_secs(86_400);
+
 #[derive(Debug)]
 struct BucketState {
     tokens: f64,
@@ -119,9 +127,22 @@ impl RateLimiter {
             state.tokens -= 1.0;
             return Ok(());
         }
-        Err(Duration::from_secs_f64(
-            (1.0 - state.tokens) / self.refill_rate,
-        ))
+        // `try_from_secs_f64` rather than `from_secs_f64`: a `RATE_LIMIT_API_CAPACITY=0`
+        // config makes `self.refill_rate` `0.0`, so the division above is
+        // `inf`, which the panicking constructor would take down every
+        // throttled request with it. `config::into_config` rejects that
+        // config at startup already (a zero-capacity throttle admits nothing
+        // and is a misconfiguration, not a mode anyone wants), but this
+        // constructor is also built directly by the unit tests below with a
+        // hand-built `RateLimitConfig`, bypassing that check -- so the
+        // fallback has to hold regardless of how a caller got here. The
+        // fallback is unreachable through any config that passed validation;
+        // its value only has to be finite and sane for a `Retry-After`
+        // header, not exact.
+        Err(
+            Duration::try_from_secs_f64((1.0 - state.tokens) / self.refill_rate)
+                .unwrap_or(UNREACHABLE_CAPACITY_RETRY_AFTER),
+        )
     }
 
     /// The address to charge this request to.
@@ -255,6 +276,30 @@ mod tests {
         .unwrap();
         req.extensions_mut().insert(ConnectInfo(addr));
         req
+    }
+
+    /// Reproduces, then closes, the panic a `RATE_LIMIT_API_CAPACITY=0`
+    /// misconfiguration used to cause on the very first throttled request.
+    /// `RateLimiter::new` is built directly here rather than through
+    /// `Config::from_env` -- exactly what the fix has to keep safe, since
+    /// `config::into_config` rejecting zero at parse time does not stop a
+    /// test (or a future caller) from constructing a `RateLimitConfig` with
+    /// `capacity: 0` by hand, as every test in this module already does.
+    /// `block_on` rather than `#[tokio::test]` so the panic can be caught
+    /// with a plain `catch_unwind` instead of laundering it through a
+    /// `JoinError`.
+    #[test]
+    fn a_zero_capacity_bucket_does_not_panic_on_the_first_throttled_request() {
+        let limiter = limiter(0, 100_000);
+        // Starts empty (capacity 0), so this call is immediately the
+        // over-capacity path that used to divide by a zero refill rate.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            futures::executor::block_on(limiter.try_consume("1.2.3.4"))
+        }));
+        let wait = outcome
+            .expect("try_consume must not panic on a zero-capacity bucket")
+            .expect_err("a zero-capacity bucket must never grant a token");
+        assert_eq!(wait, UNREACHABLE_CAPACITY_RETRY_AFTER);
     }
 
     #[tokio::test]

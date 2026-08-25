@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{Executor, PgPool, Postgres, Transaction};
 
 use crate::auth::supabase::JwksCache;
 use crate::config::Config;
@@ -68,4 +68,31 @@ impl AppState {
             scraper,
         })
     }
+}
+
+/// `BEGIN`, then the isolation level as the **very next statement**.
+///
+/// Postgres accepts `set transaction isolation level` only before the
+/// transaction's first query; issued any later it is not an error, it is a
+/// silent no-op that leaves the transaction at READ COMMITTED (PORTING.md §7).
+/// A multi-statement read that quietly degrades that way still returns
+/// plausible rows -- just rows from several different snapshots -- so nothing
+/// surfaces until someone doubts the leaderboard. That is exactly the failure
+/// mode a named helper exists to make unrepeatable.
+///
+/// Read-only as well as REPEATABLE READ, and the pairing matters: Postgres
+/// raises a serialization failure only on a write/write conflict, so a
+/// read-only transaction at this level needs no retry handling at all.
+///
+/// It lives here rather than in either caller because there are now two --
+/// `standings::service`'s board/ticker snapshot and `match::cache`'s loader --
+/// and they are in different features. One of them holding the definition
+/// would make the other import a transaction boundary from a module it has no
+/// other business with; duplicating three lines of SQL would leave the rule
+/// stated twice and fixable once. `state` is what both already depend on.
+pub async fn read_snapshot(pool: &PgPool) -> sqlx::Result<Transaction<'static, Postgres>> {
+    let mut tx = pool.begin().await?;
+    tx.execute("set transaction isolation level repeatable read read only")
+        .await?;
+    Ok(tx)
 }
