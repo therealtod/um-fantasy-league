@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Hero } from '@/api/types'
 import { formatCredits } from '@/lib/format'
 
@@ -20,6 +20,22 @@ const initials = computed(() =>
     .slice(0, 2)
     .toUpperCase(),
 )
+
+/**
+ * `image_url` is free text an admin typed, so a URL that 404s is expected rather
+ * than exceptional — a failed load falls back to the same initials a hero with no
+ * artwork gets. The grid reuses card instances across tournaments, so the flag has
+ * to reset whenever the URL itself changes or a stale failure outlives its hero.
+ */
+const imageFailed = ref(false)
+watch(
+  () => props.hero.imageUrl,
+  () => {
+    imageFailed.value = false
+  },
+)
+
+const showImage = computed(() => Boolean(props.hero.imageUrl) && !imageFailed.value)
 </script>
 
 <template>
@@ -34,17 +50,26 @@ const initials = computed(() =>
     :aria-pressed="selected"
     @click="$emit('toggle', hero.id)"
   >
-    <!-- Portrait: falls back to initials when no artwork is on file. -->
+    <!--
+      Portrait: a fixed 3:4 box, so every card in the grid is the same height whatever
+      the artwork measures. The image is `object-contain` rather than `object-cover` —
+      hero art is not authored to this ratio and cropping it loses the top of a portrait —
+      and the scanline backdrop is what fills the letterbox gaps. Falls back to initials
+      when no artwork is on file or the URL fails to load.
+    -->
     <div
-      class="scanline-bg relative flex h-28 items-center justify-center overflow-hidden border-b border-edge bg-surface-mid"
+      class="scanline-bg relative flex aspect-[3/4] items-center justify-center overflow-hidden border-b border-edge bg-surface-mid"
     >
       <img
-        v-if="hero.imageUrl"
-        :src="hero.imageUrl"
-        :alt="hero.name"
-        class="size-full object-cover"
+        v-if="showImage"
+        :src="hero.imageUrl!"
+        alt=""
+        loading="lazy"
+        decoding="async"
+        class="size-full object-contain"
+        @error="imageFailed = true"
       />
-      <span v-else class="headline text-3xl text-ink-dim/40">{{ initials }}</span>
+      <span v-else class="headline text-4xl text-ink-dim/40">{{ initials }}</span>
 
       <span
         v-if="selected"
