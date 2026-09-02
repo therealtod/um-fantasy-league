@@ -83,11 +83,11 @@ class AdminTournamentService(
      *
      * All foreign keys have `ON DELETE CASCADE`, so this operation will
      * automatically remove:
-     * - tournament_hero entries (hero pool with prices)
-     * - tournament_map entries (legal board pool)
-     * - tournament_entry entries (manager registrations)
-     * - scoring_rule_set entries and their coefficients
-     * - tournament_match entries and their participants/bans
+     * - tournament_heroes entries (hero pool with prices)
+     * - tournament_maps entries (legal board pool)
+     * - tournament_entries entries (manager registrations)
+     * - scoring_rule_sets entries and their coefficients
+     * - tournament_matches entries and their participants/bans
      *
      * The operation is allowed for any tournament status, but requires that
      * the tournament exists.

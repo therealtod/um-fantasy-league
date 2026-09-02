@@ -24,7 +24,7 @@ pub async fn find_all_ordered(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<Tourn
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant
-           from tournament order by start_date asc"#
+           from tournaments order by start_date asc"#
     )
     .fetch_all(db)
     .await?;
@@ -53,7 +53,7 @@ pub async fn find_by_status_ordered(
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant
-           from tournament where status = $1 order by start_date asc"#,
+           from tournaments where status = $1 order by start_date asc"#,
         status.as_str()
     )
     .fetch_all(db)
@@ -79,7 +79,7 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
     let Some(r) = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant
-           from tournament where id = $1"#,
+           from tournaments where id = $1"#,
         id
     )
     .fetch_optional(db)
@@ -100,13 +100,13 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
     }))
 }
 
-/// `findByName` -- `tournament.name` is `unique`, so this is at most one row.
+/// `findByName` -- `tournaments.name` is `unique`, so this is at most one row.
 /// The admin create/update collision check's oracle.
 pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<Option<Tournament>> {
     let Some(r) = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant
-           from tournament where name = $1"#,
+           from tournaments where name = $1"#,
         name
     )
     .fetch_optional(db)
@@ -135,7 +135,7 @@ pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<O
 /// against each other. Locking the tournament row — not the entries — gives
 /// every concurrent registration for the same tournament one queue to stand in,
 /// and costs nothing anywhere else: no other statement on the manager path
-/// writes `tournament`.
+/// writes `tournaments`.
 ///
 /// It returns capacity rather than just the id because the lock alone only
 /// serialises the *write*: a concurrent admin capacity change commits and
@@ -147,7 +147,7 @@ pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<O
 /// pooled connection that is then returned is a lock released immediately.
 pub async fn lock_capacity_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option<i32>> {
     sqlx::query_scalar!(
-        "select capacity from tournament where id = $1 for update",
+        "select capacity from tournaments where id = $1 for update",
         id
     )
     .fetch_optional(db)
@@ -157,7 +157,7 @@ pub async fn lock_capacity_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Resu
 /// `countByTournamentId`.
 pub async fn count_entries(db: impl PgExecutor<'_>, tournament_id: i64) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from tournament_entry where tournament_id = $1"#,
+        r#"select count(*) as "count!" from tournament_entries where tournament_id = $1"#,
         tournament_id
     )
     .fetch_one(db)
@@ -171,8 +171,8 @@ pub async fn count_entries_per_tournament(
 ) -> sqlx::Result<IndexMap<i64, i64>> {
     let rows = sqlx::query!(
         r#"select t.id as tournament_id, count(e.id) as "entry_count!"
-           from tournament t
-           left join tournament_entry e on e.tournament_id = t.id
+           from tournaments t
+           left join tournament_entries e on e.tournament_id = t.id
            group by t.id"#
     )
     .fetch_all(db)
@@ -202,7 +202,7 @@ pub async fn find_entry(
 ) -> sqlx::Result<Option<TournamentEntry>> {
     let Some(r) = sqlx::query!(
         r#"select id, tournament_id, manager_id, status, credit_grant, registered_at, locked_at
-           from tournament_entry where tournament_id = $1 and manager_id = $2"#,
+           from tournament_entries where tournament_id = $1 and manager_id = $2"#,
         tournament_id,
         manager_id
     )
@@ -213,7 +213,7 @@ pub async fn find_entry(
     };
 
     let slots = sqlx::query_scalar!(
-        "select hero_id from entry_slot where entry_id = $1 order by slot_index",
+        "select hero_id from entry_slots where entry_id = $1 order by slot_index",
         r.id
     )
     .fetch_all(&mut *conn)
@@ -239,13 +239,13 @@ pub async fn find_entry(
 ///
 /// A projection rather than a loaded aggregate: the Lobby only asks "which of
 /// these am I in, and is my roster locked?", and loading entries to answer that
-/// costs a second query per entry to populate `entry_slot`.
+/// costs a second query per entry to populate `entry_slots`.
 pub async fn statuses_by_tournament(
     db: impl PgExecutor<'_>,
     manager_id: i64,
 ) -> sqlx::Result<IndexMap<i64, EntryStatus>> {
     let rows = sqlx::query!(
-        "select tournament_id, status from tournament_entry where manager_id = $1",
+        "select tournament_id, status from tournament_entries where manager_id = $1",
         manager_id
     )
     .fetch_all(db)
@@ -262,7 +262,7 @@ pub async fn status_for(
     tournament_id: i64,
 ) -> sqlx::Result<Option<EntryStatus>> {
     let row = sqlx::query_scalar!(
-        "select status from tournament_entry where manager_id = $1 and tournament_id = $2",
+        "select status from tournament_entries where manager_id = $1 and tournament_id = $2",
         manager_id,
         tournament_id
     )
@@ -297,7 +297,7 @@ fn format_from_db(raw: &str) -> sqlx::Result<TournamentFormat> {
     match raw {
         "BANQUEST" => Ok(TournamentFormat::Banquest),
         "ARSENAL" => Ok(TournamentFormat::Arsenal),
-        other => Err(decode(format!("unknown tournament.format {other:?}"))),
+        other => Err(decode(format!("unknown tournaments.format {other:?}"))),
     }
 }
 
@@ -307,7 +307,7 @@ fn status_from_db(raw: &str) -> sqlx::Result<TournamentStatus> {
         "REGISTRATION_OPEN" => Ok(TournamentStatus::RegistrationOpen),
         "LIVE" => Ok(TournamentStatus::Live),
         "COMPLETED" => Ok(TournamentStatus::Completed),
-        other => Err(decode(format!("unknown tournament.status {other:?}"))),
+        other => Err(decode(format!("unknown tournaments.status {other:?}"))),
     }
 }
 
@@ -315,7 +315,9 @@ pub(crate) fn entry_status_from_db(raw: &str) -> sqlx::Result<EntryStatus> {
     match raw {
         "DRAFT" => Ok(EntryStatus::Draft),
         "LOCKED" => Ok(EntryStatus::Locked),
-        other => Err(decode(format!("unknown tournament_entry.status {other:?}"))),
+        other => Err(decode(format!(
+            "unknown tournament_entries.status {other:?}"
+        ))),
     }
 }
 

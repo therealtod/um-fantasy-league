@@ -13,7 +13,7 @@ import java.time.Instant
  * derived from these at read time.
  */
 data class MatchParticipantResult(
-    /** 0 or 1 — a stable ordinal for the whole series, matching `match_participant.side`. */
+    /** 0 or 1 — a stable ordinal for the whole series, matching `match_participants.side`. */
     val side: Int,
     /** Who piloted this side, as free text. Null when recorded unattributed. */
     val playerLabel: String?,
@@ -65,7 +65,7 @@ data class GameResult(
  *
  * [side] is whose draft it came out of; [banType] is who struck it. Null for a
  * `PRE_BAN` -- struck before sides were assigned, so it belongs to neither --
- * and for anything recorded before `hero_ban.side` existed.
+ * and for anything recorded before `hero_bans.side` existed.
  */
 data class BanResult(
     val heroId: Long,

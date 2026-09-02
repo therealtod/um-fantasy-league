@@ -226,7 +226,7 @@ async fn resolve_manager(state: &AppState, claims: &Claims) -> Result<Manager, A
 }
 
 /// Just-in-time provisioning: the first request from a brand-new Supabase
-/// identity has no linked `manager` row yet.
+/// identity has no linked `managers` row yet.
 ///
 /// There is no starting balance to hand out -- budget is granted per tournament
 /// registration -- so the row is a handle, a display name and the link.

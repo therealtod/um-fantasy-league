@@ -26,7 +26,7 @@ enum class MatchRule {
      * A ban names a side that cannot exist -- one outside 0..1, or any side at
      * all on a `PRE_BAN`, which is struck before sides are assigned. A typed
      * ban with *no* side is deliberately not a violation: every row recorded
-     * before `hero_ban.side` existed looks like that, and rejecting them would
+     * before `hero_bans.side` existed looks like that, and rejecting them would
      * make an already-recorded match uncorrectable.
      */
     BAN_SIDE_INVALID,

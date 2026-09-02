@@ -25,7 +25,7 @@ const MANAGER_ID: &str = "X-Manager-Id";
 /// integration tests assert on the seed's numbers exactly, and a handle is the
 /// stable half of that.
 async fn manager_id(app: &TestApp, handle: &str) -> i64 {
-    sqlx::query_scalar!("select id from manager where handle = $1", handle)
+    sqlx::query_scalar!("select id from managers where handle = $1", handle)
         .fetch_one(app.pool())
         .await
         .unwrap_or_else(|e| panic!("no seeded manager {handle}: {e}"))

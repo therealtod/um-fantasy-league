@@ -136,9 +136,9 @@ class MatchImportService(
         }
 
         // Both sides' typed bans and the shared pre-ban pool flatten into one
-        // list, as `hero_ban` stores them — but the side survives now. The
+        // list, as `hero_bans` stores them — but the side survives now. The
         // source already groups a typed ban under the side that owned the hero,
-        // and `hero_ban.side` finally has somewhere to put it; a pre-ban
+        // and `hero_bans.side` finally has somewhere to put it; a pre-ban
         // precedes side assignment and so carries none.
         //
         // The table is still keyed (match_id, hero_id), so the same hero cannot

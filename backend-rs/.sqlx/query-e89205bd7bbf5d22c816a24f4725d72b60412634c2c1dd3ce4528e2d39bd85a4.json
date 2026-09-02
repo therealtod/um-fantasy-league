@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select t.id as tournament_id, count(e.id) as \"entry_count!\"\n           from tournaments t\n           left join tournament_entries e on e.tournament_id = t.id\n           group by t.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tournament_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournaments",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "entry_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "e89205bd7bbf5d22c816a24f4725d72b60412634c2c1dd3ce4528e2d39bd85a4"
+}

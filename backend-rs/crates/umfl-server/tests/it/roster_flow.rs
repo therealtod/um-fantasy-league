@@ -91,7 +91,7 @@ async fn a_full_tournament_is_closed_to_new_entries() {
     // managers the seed does not have.
     let taken = query::count_entries(app.pool(), winter).await.unwrap();
     sqlx::query!(
-        "update tournament set capacity = $1 where id = $2",
+        "update tournaments set capacity = $1 where id = $2",
         i32::try_from(taken).unwrap(),
         winter
     )
@@ -283,8 +283,8 @@ async fn a_real_hero_outside_this_tournaments_pool_is_just_as_unknown() {
     // Spring is SCHEDULED, so it takes no registrations yet -- the entry is
     // created directly. Rosters still accept changes in that state.
     sqlx::query!(
-        "insert into tournament_entry (tournament_id, manager_id, status, credit_grant)
-         select $1, $2, 'DRAFT', credit_grant from tournament where id = $1",
+        "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
+         select $1, $2, 'DRAFT', credit_grant from tournaments where id = $1",
         spring,
         manager.id
     )
@@ -312,7 +312,7 @@ async fn a_real_hero_outside_this_tournaments_pool_is_just_as_unknown() {
     assert!(message.contains("Spring of Myths"), "{message}");
 }
 
-/// The "no cost snapshot" invariant, exercised: `entry_slot` stores only the
+/// The "no cost snapshot" invariant, exercised: `entry_slots` stores only the
 /// hero, so re-pricing the pool re-prices an unlocked roster.
 #[tokio::test]
 async fn re_pricing_a_hero_re_prices_an_unlocked_roster() {
@@ -333,7 +333,7 @@ async fn re_pricing_a_hero_re_prices_an_unlocked_roster() {
     // the draft re-prices itself and is now over budget.
     let bigfoot = app.hero_id("Bigfoot").await;
     sqlx::query!(
-        "update tournament_hero set cost = 3000 where tournament_id = $1 and hero_id = $2",
+        "update tournament_heroes set cost = 3000 where tournament_id = $1 and hero_id = $2",
         winter,
         bigfoot
     )
@@ -359,14 +359,14 @@ async fn re_pricing_a_hero_re_prices_an_unlocked_roster() {
 }
 
 /// UMFL-06: a hero still on a locked roster is later pulled from
-/// `tournament_hero`. The slot survives, priced at 0, rather than being
+/// `tournament_heroes`. The slot survives, priced at 0, rather than being
 /// silently dropped -- which is why `find_roster_heroes` exists alongside
 /// `find_by_ids`.
 ///
 /// The Kotlin closes with a cross-check against `StandingsQuery.rosters`, and
 /// so does this: both reads must report the same roster length and the same
 /// spend. That half is not decoration. The two paths reach cost by genuinely
-/// different SQL -- the roster read joins `tournament_hero` through
+/// different SQL -- the roster read joins `tournament_heroes` through
 /// `find_roster_heroes`, while `standings::query::rosters` **left** joins it and
 /// leans on `unwrap_or(0)` for the missing row -- so a hero pulled from the pool
 /// is the one input that can make them disagree, and a leaderboard that prices a
@@ -391,7 +391,7 @@ async fn a_hero_pulled_from_the_pool_after_locking_is_kept_at_cost_zero() {
 
     let bigfoot = app.hero_id("Bigfoot").await;
     sqlx::query!(
-        "delete from tournament_hero where tournament_id = $1 and hero_id = $2",
+        "delete from tournament_heroes where tournament_id = $1 and hero_id = $2",
         winter,
         bigfoot
     )

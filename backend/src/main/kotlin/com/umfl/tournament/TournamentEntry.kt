@@ -21,10 +21,10 @@ enum class EntryStatus {
  * makes a granted budget stable for the manager who received it.
  *
  * The roster's cost is deliberately *not* stored anywhere: it is the live sum of
- * the slots' `tournament_hero.cost`, so the two can never disagree, and an
+ * the slots' `tournament_heroes.cost`, so the two can never disagree, and an
  * unlocked roster simply re-prices when an admin retunes the pool.
  */
-@Table("tournament_entry")
+@Table("tournament_entries")
 data class TournamentEntry(
     @Id val id: Long? = null,
     val tournamentId: Long,
@@ -50,9 +50,9 @@ data class TournamentEntry(
 
 /**
  * A single hero on a roster. Child of the [TournamentEntry] aggregate; its
- * position is the list index, persisted to `entry_slot.slot_index`.
+ * position is the list index, persisted to `entry_slots.slot_index`.
  */
-@Table("entry_slot")
+@Table("entry_slots")
 data class EntrySlot(
     val heroId: Long,
 )

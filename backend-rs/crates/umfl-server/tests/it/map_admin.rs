@@ -21,7 +21,7 @@ async fn admin(app: &TestApp) -> i64 {
 }
 
 async fn map_id(app: &TestApp, name: &str) -> i64 {
-    sqlx::query_scalar!("select id from game_map where name = $1", name)
+    sqlx::query_scalar!("select id from game_maps where name = $1", name)
         .fetch_one(app.pool())
         .await
         .unwrap_or_else(|e| panic!("no board {name}: {e}"))
@@ -32,7 +32,7 @@ async fn map_id(app: &TestApp, name: &str) -> i64 {
 /// the endpoint so a pool assertion cannot be satisfied by a broken read path.
 async fn pool_map_ids(app: &TestApp, tournament_id: i64) -> Vec<i64> {
     sqlx::query_scalar!(
-        "select map_id from tournament_map where tournament_id = $1",
+        "select map_id from tournament_maps where tournament_id = $1",
         tournament_id
     )
     .fetch_all(app.pool())
@@ -492,8 +492,8 @@ async fn removing_a_map_not_in_the_pool_is_rejected() {
     );
 }
 
-/// The asymmetry with the hero pool, and the reason for it: `match_game`
-/// carries a composite FK onto `tournament_map`, so a board with a recorded
+/// The asymmetry with the hero pool, and the reason for it: `match_games`
+/// carries a composite FK onto `tournament_maps`, so a board with a recorded
 /// game on it cannot leave the pool. Dropping a *hero* is always allowed and
 /// simply re-prices the rosters still holding it.
 #[tokio::test]

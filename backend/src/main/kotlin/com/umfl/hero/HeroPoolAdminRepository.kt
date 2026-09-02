@@ -4,7 +4,7 @@ import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 
 /**
- * Writes to `tournament_hero`, the composite-keyed link table Spring Data JDBC
+ * Writes to `tournament_heroes`, the composite-keyed link table Spring Data JDBC
  * cannot map as an entity (see the note in `V1__core_schema.sql`).
  *
  * There is no separate "add to pool" and "re-price": the row's only non-key
@@ -17,7 +17,7 @@ class HeroPoolAdminRepository(private val jdbcClient: JdbcClient) {
     fun upsertCost(tournamentId: Long, heroId: Long, cost: Int) {
         jdbcClient.sql(
             """
-            insert into tournament_hero (tournament_id, hero_id, cost)
+            insert into tournament_heroes (tournament_id, hero_id, cost)
             values (:tournamentId, :heroId, :cost)
             on conflict (tournament_id, hero_id) do update set cost = excluded.cost
             """
@@ -34,7 +34,7 @@ class HeroPoolAdminRepository(private val jdbcClient: JdbcClient) {
         val statement = entries.foldIndexed(
             jdbcClient.sql(
                 """
-                insert into tournament_hero (tournament_id, hero_id, cost)
+                insert into tournament_heroes (tournament_id, hero_id, cost)
                 values $valuesSql
                 on conflict (tournament_id, hero_id) do update set cost = excluded.cost
                 """
@@ -47,8 +47,8 @@ class HeroPoolAdminRepository(private val jdbcClient: JdbcClient) {
      * Removes [heroId] from [tournamentId]'s pool. Returns false if it wasn't
      * there to begin with.
      *
-     * Nothing in the schema stops this — `entry_slot.hero_id` references
-     * `heroes(id)` directly, never `tournament_hero` — so a roster still
+     * Nothing in the schema stops this — `entry_slots.hero_id` references
+     * `heroes(id)` directly, never `tournament_heroes` — so a roster still
      * holding this hero doesn't break. It re-prices to 0 on its next read via
      * the `coalesce` in [HeroQueryRepository.findRosterHeroes], the same
      * "cost is never snapshotted" behaviour that already applies when a hero
@@ -57,7 +57,7 @@ class HeroPoolAdminRepository(private val jdbcClient: JdbcClient) {
      */
     fun removeFromPool(tournamentId: Long, heroId: Long): Boolean {
         val rowsDeleted = jdbcClient.sql(
-            "delete from tournament_hero where tournament_id = :tournamentId and hero_id = :heroId"
+            "delete from tournament_heroes where tournament_id = :tournamentId and hero_id = :heroId"
         ).param("tournamentId", tournamentId).param("heroId", heroId).update()
         return rowsDeleted > 0
     }

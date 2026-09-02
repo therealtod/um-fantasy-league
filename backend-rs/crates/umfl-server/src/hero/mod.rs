@@ -37,7 +37,7 @@ use crate::state::AppState;
 pub use query::{HeroFilter, HeroSort, HeroView};
 
 /// A hero's identity — name and artwork, nothing else. Cost is
-/// tournament-scoped and lives in `tournament_hero`, not here.
+/// tournament-scoped and lives in `tournament_heroes`, not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hero {
     pub id: Option<i64>,

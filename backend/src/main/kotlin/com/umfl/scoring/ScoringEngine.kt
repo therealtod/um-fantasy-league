@@ -5,7 +5,7 @@ import java.math.RoundingMode
 
 /**
  * One tournament's active scoring configuration, as read out of
- * `scoring_rule_set` / `scoring_coefficient`.
+ * `scoring_rule_sets` / `scoring_coefficients`.
  *
  * [coefficients] is insertion-ordered by `sort_order`, which is what fixes the
  * leaderboard's left-to-right column order -- the backend cannot know it any

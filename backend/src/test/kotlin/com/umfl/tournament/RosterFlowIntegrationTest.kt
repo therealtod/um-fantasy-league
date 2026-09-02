@@ -74,7 +74,7 @@ class RosterFlowIntegrationTest @Autowired constructor(
         // Shrink capacity to what is already taken rather than registering 64
         // managers the seed does not have.
         val taken = entryRepository.countByTournamentId(tournament)
-        jdbcClient.sql("update tournament set capacity = :c where id = :id")
+        jdbcClient.sql("update tournaments set capacity = :c where id = :id")
             .param("c", taken)
             .param("id", tournament)
             .update()
@@ -238,7 +238,7 @@ class RosterFlowIntegrationTest @Autowired constructor(
         // An admin retunes Bigfoot from 2,100 to 3,000. Nothing was snapshotted,
         // so the draft re-prices itself and is now over budget.
         jdbcClient
-            .sql("update tournament_hero set cost = 3000 where tournament_id = :t and hero_id = :h")
+            .sql("update tournament_heroes set cost = 3000 where tournament_id = :t and hero_id = :h")
             .param("t", tournament)
             .param("h", heroId("Bigfoot"))
             .update()
@@ -265,9 +265,9 @@ class RosterFlowIntegrationTest @Autowired constructor(
         tournamentService.lockRoster(tournament, manager(handle))
 
         // Bigfoot leaves Winter's pool entirely (UMFL-06's premise: a hero
-        // still on a locked roster is later pulled from tournament_hero).
+        // still on a locked roster is later pulled from tournament_heroes).
         jdbcClient
-            .sql("delete from tournament_hero where tournament_id = :t and hero_id = :h")
+            .sql("delete from tournament_heroes where tournament_id = :t and hero_id = :h")
             .param("t", tournament)
             .param("h", heroId("Bigfoot"))
             .update()

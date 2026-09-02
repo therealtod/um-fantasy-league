@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tournament_heroes set cost = 3000 where tournament_id = $1 and hero_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "89294fa9a2bc4a0807e5d58fc3ebcc2a3cc09eb1dda9acb9034a9aa736e94a12"
+}

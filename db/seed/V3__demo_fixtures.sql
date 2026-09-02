@@ -11,16 +11,16 @@
 -- to that list, which is what pulls this file in for local dev and for the
 -- test suite.
 --
--- Nothing here writes `heroes` or `game_map`. Those are reference data, not
+-- Nothing here writes `heroes` or `game_maps`. Those are reference data, not
 -- fixtures, so they migrate in every profile from `V2__reference_data.sql`;
 -- this file only *references* them, and would fail loudly on a name that
 -- migration does not carry.
 --
 -- The fixture: three tournaments in three lifecycle states, one of them
 -- (Summer of Legends) with a complete recorded result set. Reference rows are
--- joined by their natural key (heroes.name, game_map.name, manager.handle,
--- tournament.name) rather than by assumed serial ids, which is why those
--- columns are unique. The one exception is `tournament_match`, which has no
+-- joined by their natural key (heroes.name, game_maps.name, managers.handle,
+-- tournaments.name) rather than by assumed serial ids, which is why those
+-- columns are unique. The one exception is `tournament_matches`, which has no
 -- natural key -- see the comment there.
 --
 -- NeonStrategist is flagged admin (see below) -- the only such manager here,
@@ -41,7 +41,7 @@
 -- is sent. No credit balances: budget is granted per registration.
 -- ---------------------------------------------------------------------------
 
-insert into manager (handle, display_name, is_admin) values
+insert into managers (handle, display_name, is_admin) values
     ('NeonStrategist',  'Neon Strategist',  true),
     ('SherlockMain',    'Sherlock Main',    false),
     ('MythicMind',      'Mythic Mind',      false),
@@ -54,7 +54,7 @@ insert into manager (handle, display_name, is_admin) values
 -- tournament the Roster Builder walkthrough registers for.
 -- ---------------------------------------------------------------------------
 
-insert into tournament (name, format, status, start_date, end_date,
+insert into tournaments (name, format, status, start_date, end_date,
                         capacity, roster_size, credit_grant) values
     ('Summer of Legends',   'BANQUEST', 'COMPLETED',         date '2026-06-05', date '2026-06-07', 128, 3, 10000),
     ('Winter of Champions', 'ARSENAL',  'REGISTRATION_OPEN', date '2026-08-14', null,               64, 3, 10000),
@@ -75,7 +75,7 @@ insert into tournament (name, format, status, start_date, end_date,
 -- is a reachable UNKNOWN_HERO case.
 -- ---------------------------------------------------------------------------
 
-insert into tournament_hero (tournament_id, hero_id, cost)
+insert into tournament_heroes (tournament_id, hero_id, cost)
 select t.id, h.id, v.cost
 from (values
     -- Summer of Legends -- all twelve
@@ -114,10 +114,10 @@ from (values
     ('Spring of Myths',     'Beowulf',         2500),
     ('Spring of Myths',     'Sinbad',          2000)
 ) as v(tournament_name, hero_name, cost)
-    join tournament t on t.name = v.tournament_name
+    join tournaments t on t.name = v.tournament_name
     join heroes h on h.name = v.hero_name;
 
-insert into tournament_map (tournament_id, map_id)
+insert into tournament_maps (tournament_id, map_id)
 select t.id, m.id
 from (values
     ('Summer of Legends',   'Baskerville Manor'),
@@ -128,8 +128,8 @@ from (values
     ('Spring of Myths',     'Sherwood Forest'),
     ('Spring of Myths',     'Raptor Paddock')
 ) as v(tournament_name, map_name)
-    join tournament t on t.name = v.tournament_name
-    join game_map m on m.name = v.map_name;
+    join tournaments t on t.name = v.tournament_name
+    join game_maps m on m.name = v.map_name;
 
 -- ---------------------------------------------------------------------------
 -- Scoring. One active rule set per tournament, all carrying the same weights.
@@ -141,13 +141,13 @@ from (values
 -- sort_order fixes the leaderboard's left-to-right column order.
 -- ---------------------------------------------------------------------------
 
-insert into scoring_rule_set (tournament_id, name, is_active)
+insert into scoring_rule_sets (tournament_id, name, is_active)
 select t.id, 'Season 2026 Standard', true
-from tournament t;
+from tournaments t;
 
-insert into scoring_coefficient (rule_set_id, metric, coefficient, sort_order)
+insert into scoring_coefficients (rule_set_id, metric, coefficient, sort_order)
 select rs.id, v.metric, v.coefficient, v.sort_order
-from scoring_rule_set rs
+from scoring_rule_sets rs
     cross join (values
         ('WIN',                10.0000, 0),
         ('HEALTH_REMAINING',    0.7500, 1),
@@ -166,7 +166,7 @@ from scoring_rule_set rs
 -- apiece; every one of the twelve pooled heroes is played at least twice.
 --
 -- Match ids are given explicitly, which is the one place this file does not
--- key off a natural column: `tournament_match` has none, and the game/
+-- key off a natural column: `tournament_matches` has none, and the game/
 -- participant/ban rows below have to point at a specific match. Writing the
 -- ids out also makes the invariant checkable by eye -- ids ascend with
 -- played_at, so the ticker can filter on `id` while sorting on `played_at`.
@@ -176,19 +176,22 @@ from scoring_rule_set rs
 -- Match 13 is the one multi-game series in the seed, proving Bo3 works end to
 -- end without disturbing any of the twelve hand-verified single-game matches
 -- above. Medusa and Achilles are deliberately reused here because the
--- `entry_slot` comment below already calls them out as "on nobody's roster",
+-- `entry_slots` comment below already calls them out as "on nobody's roster",
 -- so every point this match generates -- game results AND its bans -- lands
 -- on zero fantasy totals, leaving every existing standings assertion exact.
 -- Its three bans (Bruce Lee, Deadpool, Invisible Man) are outside Summer of
--- Legends' own `tournament_hero` pool for the same reason -- nothing in the
+-- Legends' own `tournament_heroes` pool for the same reason -- nothing in the
 -- schema requires a banned or played hero to be pool-priced, only that maps
--- come from `tournament_map` (see `MatchResultPolicy.UNKNOWN_HERO`, which
--- validates against `heroes`, never `tournament_hero`). `external_link` is
--- exercised only here -- every other match leaves it null.
+-- come from `tournament_maps` (see `MatchResultPolicy.UNKNOWN_HERO`, which
+-- validates against `heroes`, never `tournament_heroes`). `external_link` is
+-- required (`V1__core_schema.sql`); match 13 carries a real one, and every
+-- other match gets the same synthetic `urn:umfl:match:<id>` placeholder a
+-- hand-typed match with no page anywhere gets.
 -- ---------------------------------------------------------------------------
 
-insert into tournament_match (id, tournament_id, round, played_at, external_link)
-select v.id, t.id, v.round, v.played_at, v.external_link
+insert into tournament_matches (id, tournament_id, round, played_at, external_link)
+select v.id, t.id, v.round, v.played_at,
+       coalesce(v.external_link, 'urn:umfl:match:' || v.id)
 from (values
     ( 1, 1, timestamptz '2026-06-05 12:00:00+00', null),
     ( 2, 1, timestamptz '2026-06-05 12:00:00+00', null),
@@ -204,15 +207,15 @@ from (values
     (12, 3, timestamptz '2026-06-07 15:00:00+00', null),
     (13, 3, timestamptz '2026-06-07 16:30:00+00', 'https://challonge.com/example-bo3-decider')
 ) as v(id, round, played_at, external_link)
-    join tournament t on t.name = 'Summer of Legends';
+    join tournaments t on t.name = 'Summer of Legends';
 
-select setval('tournament_match_id_seq', (select max(id) from tournament_match));
+select setval('tournament_matches_id_seq', (select max(id) from tournament_matches));
 
 -- Two sides per match, for the whole series. Eight named competitors, each
 -- playing three matches (Rina Okafor and Dmitri Kovac also play the match 13
 -- decider) -- names carried as labels, not rows in a table (see the comment
--- on `match_participant.player_label`).
-insert into match_participant (match_id, side, player_label)
+-- on `match_participants.player_label`).
+insert into match_participants (match_id, side, player_label)
 select v.match_id, v.side, v.player_label
 from (values
     ( 1, 0, 'Tomas Ferreira'),    ( 1, 1, 'Hana Sato'),
@@ -232,7 +235,7 @@ from (values
 
 -- One game per match for the twelve original single-game matches (same board
 -- each carried before this split), plus three games for match 13's Bo3.
-insert into match_game (match_id, tournament_id, game_number, map_id)
+insert into match_games (match_id, tournament_id, game_number, map_id)
 select v.match_id, t.id, 1, m.id
 from (values
     ( 1, 'Baskerville Manor'),
@@ -248,23 +251,23 @@ from (values
     (11, 'Sherwood Forest'),
     (12, 'Raptor Paddock')
 ) as v(match_id, map_name)
-    join tournament t on t.name = 'Summer of Legends'
-    join game_map m on m.name = v.map_name;
+    join tournaments t on t.name = 'Summer of Legends'
+    join game_maps m on m.name = v.map_name;
 
-insert into match_game (match_id, tournament_id, game_number, map_id)
+insert into match_games (match_id, tournament_id, game_number, map_id)
 select 13, t.id, v.game_number, m.id
 from (values
     (1, 'Sherwood Forest'),
     (2, 'Raptor Paddock'),
     (3, 'Baskerville Manor')
 ) as v(game_number, map_name)
-    join tournament t on t.name = 'Summer of Legends'
-    join game_map m on m.name = v.map_name;
+    join tournaments t on t.name = 'Summer of Legends'
+    join game_maps m on m.name = v.map_name;
 
 -- Match 6 is the SHUTOUT: Bigfoot finishes on 11 health, Beowulf on 0.
 -- Every losing hero finishes on 0 or less health. Every game has a winner --
--- there is no drawn result to seed, see match_game_participant's comment.
-insert into match_game_participant (game_id, side, hero_id, health_remaining, is_winner)
+-- there is no drawn result to seed, see match_game_participants's comment.
+insert into match_game_participants (game_id, side, hero_id, health_remaining, is_winner)
 select mg.id, v.side, h.id, v.health_remaining, v.is_winner
 from (values
     ( 1, 0, 'Sun Wukong',       9, true),
@@ -293,19 +296,49 @@ from (values
     (12, 0, 'Yennenga',         9, true),
     (12, 1, 'Sinbad',           0, false)
 ) as v(match_id, side, hero_name, health_remaining, is_winner)
-    join match_game mg on mg.match_id = v.match_id and mg.game_number = 1
+    join match_games mg on mg.match_id = v.match_id and mg.game_number = 1
     join heroes h on h.name = v.hero_name;
 
 -- Match 13: Medusa wins game 1, Achilles ties the series in game 2, Medusa
 -- takes the decider in game 3.
-insert into match_game_participant (game_id, side, hero_id, health_remaining, is_winner)
+insert into match_game_participants (game_id, side, hero_id, health_remaining, is_winner)
 select mg.id, v.side, h.id, v.health_remaining, v.is_winner
 from (values
     (1, 0, 'Medusa',   6, true),  (1, 1, 'Achilles', 0, false),
     (2, 0, 'Medusa',   0, false), (2, 1, 'Achilles', 5, true),
     (3, 0, 'Medusa',   3, true),  (3, 1, 'Achilles', 0, false)
 ) as v(game_number, side, hero_name, health_remaining, is_winner)
-    join match_game mg on mg.match_id = 13 and mg.game_number = v.game_number
+    join match_games mg on mg.match_id = 13 and mg.game_number = v.game_number
+    join heroes h on h.name = v.hero_name;
+
+-- ---------------------------------------------------------------------------
+-- The picks half of every match's draft. Every hero that played was,
+-- necessarily, drafted by the side that played it, so this is derived from
+-- the games above rather than restating 26 rows by hand.
+-- ---------------------------------------------------------------------------
+
+insert into match_hero_picks (match_id, side, hero_id)
+select distinct mg.match_id, mgp.side, mgp.hero_id
+from match_game_participants mgp
+    join match_games mg on mg.id = mgp.game_id;
+
+-- Two heroes drafted and never fielded, so the fixture exercises the whole
+-- point of storing picks: APPEARANCE credits a hero for surviving the draft,
+-- not for reaching the table.
+--
+-- Deliberately on match 13 -- the only Bo3, whose Medusa and Achilles are on
+-- nobody's roster -- and deliberately naming heroes nobody drafted into a
+-- roster either, so these two rows demonstrate the metric without moving a
+-- single seeded leaderboard total. Neither is among match 13's bans (Bruce
+-- Lee, Deadpool, Invisible Man), which would make the pick a
+-- `BANNED_HERO_DRAFTED` violation, and like those bans neither needs to be in
+-- the tournament's priced pool.
+insert into match_hero_picks (match_id, side, hero_id)
+select 13, v.side, h.id
+from (values
+    (0, 'Tomoe Gozen'),
+    (1, 'Nikola Tesla')
+) as v(side, hero_name)
     join heroes h on h.name = v.hero_name;
 
 -- One or two bans per match, never naming a hero that then played it. Heroes
@@ -313,33 +346,41 @@ from (values
 -- Holmes, Dracula, King Arthur, Yennenga, Sun Wukong) are all banned
 -- somewhere, so the SELF_BAN/OPPONENT_BAN metrics have real work to do.
 -- `ban_type` here is illustrative fixture data, not a rule the schema
--- enforces -- nothing links the category distribution to `tournament.format`.
-insert into hero_ban (match_id, hero_id, ban_type)
-select v.match_id, h.id, v.ban_type
+-- enforces -- nothing links the category distribution to `tournaments.format`.
+--
+-- `side` is the side whose draft the hero was struck out of (see
+-- `hero_bans.side` in V1). The 13 PRE_BANs carry no side, since a pre-ban
+-- precedes side assignment; the other 9 typed bans alternate sides to keep
+-- both represented -- match 13's decider is the one to look at, its
+-- OPPONENT_BAN and SELF_BAN sitting on opposite sides so the fixture carries
+-- a hero struck by the enemy and a hero struck by its own side in the same
+-- series. Which side is fixture colour rather than fact.
+insert into hero_bans (match_id, hero_id, ban_type, side)
+select v.match_id, h.id, v.ban_type, v.side
 from (values
-    ( 1, 'Medusa',          'PRE_BAN'),
-    ( 1, 'Bigfoot',         'OPPONENT_BAN'),
-    ( 2, 'Sun Wukong',      'PRE_BAN'),
-    ( 3, 'Beowulf',         'PRE_BAN'),
-    ( 3, 'Dracula',         'OPPONENT_BAN'),
-    ( 4, 'Medusa',          'PRE_BAN'),
-    ( 5, 'Alice',           'PRE_BAN'),
-    ( 5, 'Robin Hood',      'OPPONENT_BAN'),
-    ( 6, 'Sun Wukong',      'PRE_BAN'),
-    ( 7, 'Medusa',          'PRE_BAN'),
-    ( 7, 'Sherlock Holmes', 'OPPONENT_BAN'),
-    ( 8, 'Beowulf',         'PRE_BAN'),
-    ( 9, 'Bigfoot',         'PRE_BAN'),
-    ( 9, 'Sun Wukong',      'OPPONENT_BAN'),
-    (10, 'Alice',           'PRE_BAN'),
-    (11, 'Medusa',          'PRE_BAN'),
-    (11, 'Yennenga',        'OPPONENT_BAN'),
-    (12, 'King Arthur',     'PRE_BAN'),
-    (12, 'Alice',           'OPPONENT_BAN'),
-    (13, 'Bruce Lee',       'PRE_BAN'),
-    (13, 'Deadpool',        'OPPONENT_BAN'),
-    (13, 'Invisible Man',   'SELF_BAN')
-) as v(match_id, hero_name, ban_type)
+    ( 1, 'Medusa',          'PRE_BAN',      null),
+    ( 1, 'Bigfoot',         'OPPONENT_BAN', 0),
+    ( 2, 'Sun Wukong',      'PRE_BAN',      null),
+    ( 3, 'Beowulf',         'PRE_BAN',      null),
+    ( 3, 'Dracula',         'OPPONENT_BAN', 1),
+    ( 4, 'Medusa',          'PRE_BAN',      null),
+    ( 5, 'Alice',           'PRE_BAN',      null),
+    ( 5, 'Robin Hood',      'OPPONENT_BAN', 0),
+    ( 6, 'Sun Wukong',      'PRE_BAN',      null),
+    ( 7, 'Medusa',          'PRE_BAN',      null),
+    ( 7, 'Sherlock Holmes', 'OPPONENT_BAN', 1),
+    ( 8, 'Beowulf',         'PRE_BAN',      null),
+    ( 9, 'Bigfoot',         'PRE_BAN',      null),
+    ( 9, 'Sun Wukong',      'OPPONENT_BAN', 0),
+    (10, 'Alice',           'PRE_BAN',      null),
+    (11, 'Medusa',          'PRE_BAN',      null),
+    (11, 'Yennenga',        'OPPONENT_BAN', 1),
+    (12, 'King Arthur',     'PRE_BAN',      null),
+    (12, 'Alice',           'OPPONENT_BAN', 0),
+    (13, 'Bruce Lee',       'PRE_BAN',      null),
+    (13, 'Deadpool',        'OPPONENT_BAN', 1),
+    (13, 'Invisible Man',   'SELF_BAN',     0)
+) as v(match_id, hero_name, ban_type, side)
     join heroes h on h.name = v.hero_name;
 
 -- ---------------------------------------------------------------------------
@@ -350,22 +391,22 @@ from (values
 -- registration does.
 -- ---------------------------------------------------------------------------
 
-insert into tournament_entry (tournament_id, manager_id, status, credit_grant, registered_at, locked_at)
+insert into tournament_entries (tournament_id, manager_id, status, credit_grant, registered_at, locked_at)
 select t.id,
        m.id,
        'LOCKED',
        t.credit_grant,
        timestamptz '2026-06-01 09:00:00+00',
        timestamptz '2026-06-04 18:00:00+00'
-from tournament t
-    cross join manager m
+from tournaments t
+    cross join managers m
 where t.name = 'Summer of Legends';
 
 -- Bigfoot is shared by NeonStrategist and MythicMind, and Beowulf by
 -- SherlockMain and ArthurianLegend: a hero-match is scored once and then
 -- counted into every entry that holds it, and these two pairs are what
 -- exercises that. Medusa and Achilles are on nobody's roster.
-insert into entry_slot (entry_id, slot_index, hero_id)
+insert into entry_slots (entry_id, slot_index, hero_id)
 select e.id, v.slot_index, h.id
 from (values
     -- 4100 + 3200 + 2100 = 9,400
@@ -385,7 +426,7 @@ from (values
     ('ArthurianLegend', 1, 'Yennenga'),
     ('ArthurianLegend', 2, 'Beowulf')
 ) as v(handle, slot_index, hero_name)
-    join manager mg on mg.handle = v.handle
-    join tournament t on t.name = 'Summer of Legends'
-    join tournament_entry e on e.manager_id = mg.id and e.tournament_id = t.id
+    join managers mg on mg.handle = v.handle
+    join tournaments t on t.name = 'Summer of Legends'
+    join tournament_entries e on e.manager_id = mg.id and e.tournament_id = t.id
     join heroes h on h.name = v.hero_name;

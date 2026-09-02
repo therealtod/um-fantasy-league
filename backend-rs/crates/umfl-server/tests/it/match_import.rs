@@ -76,14 +76,14 @@ async fn summer(app: &TestApp) -> i64 {
 
 /// Every board in the fixture, so the preview comes back fully resolved.
 ///
-/// Written straight to the link table: `tournament_map` is a composite-keyed
+/// Written straight to the link table: `tournament_maps` is a composite-keyed
 /// table with no aggregate, and the point here is the importer, not the pool
 /// endpoint that `map_admin.rs` already covers.
 async fn stock_pool(app: &TestApp, tournament_id: i64) {
     for name in ["Technodrome", "Raptor Paddock", "Navy Pier"] {
         sqlx::query!(
-            "insert into tournament_map (tournament_id, map_id)
-             select $1, id from game_map where name = $2
+            "insert into tournament_maps (tournament_id, map_id)
+             select $1, id from game_maps where name = $2
              on conflict do nothing",
             tournament_id,
             name
@@ -262,7 +262,7 @@ async fn maps_the_series_faithfully() {
 }
 
 /// Both sides' typed bans plus the shared pre-ban pool land in one flat list,
-/// as `hero_ban` stores them.
+/// as `hero_bans` stores them.
 #[tokio::test]
 async fn flattens_both_sides_bans_and_the_pre_ban_pool() {
     let app = app_with(sample_match()).await;
@@ -301,7 +301,7 @@ async fn flattens_both_sides_bans_and_the_pre_ban_pool() {
 }
 
 /// Flat, but not side-blind: the source files a typed ban under the side that
-/// owned the hero, and `hero_ban.side` keeps it. A pre-ban is struck before
+/// owned the hero, and `hero_bans.side` keeps it. A pre-ban is struck before
 /// sides are assigned and carries none, which is what `BAN_SIDE_INVALID`
 /// insists on.
 #[tokio::test]
@@ -340,8 +340,8 @@ async fn keeps_the_side_a_typed_ban_was_struck_from_and_leaves_a_pre_ban_unsided
     );
 }
 
-/// The board exists in `game_map` but not in this tournament's pool. It is
-/// reported, not invented -- `match_game`'s composite FK onto `tournament_map`
+/// The board exists in `game_maps` but not in this tournament's pool. It is
+/// reported, not invented -- `match_games`'s composite FK onto `tournament_maps`
 /// means recording a game on it would fail at the database.
 #[tokio::test]
 async fn reports_a_board_that_is_missing_from_this_tournaments_pool() {
@@ -375,7 +375,7 @@ async fn reports_a_board_that_is_missing_from_this_tournaments_pool() {
     );
     assert!(games[1]["mapId"].is_i64(), "the resolvable one still does");
     // Heroes are unaffected: they reference `heroes(id)`, never
-    // `tournament_hero`.
+    // `tournament_heroes`.
     assert!(unresolved.iter().all(|u| u["kind"] != "HERO"));
 }
 
@@ -493,7 +493,7 @@ async fn a_fully_resolved_preview_is_accepted_verbatim_by_the_record_endpoint() 
     assert_eq!(body["externalLink"], SOURCE_URL);
 
     // The side survives the whole round trip: the source grouped these under
-    // the side that owned the hero, the preview kept it, and `hero_ban.side`
+    // the side that owned the hero, the preview kept it, and `hero_bans.side`
     // stored it.
     let bans = body["bans"].as_array().expect("bans");
     assert_eq!(

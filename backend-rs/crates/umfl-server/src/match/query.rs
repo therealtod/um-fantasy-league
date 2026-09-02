@@ -26,7 +26,7 @@ use umfl_domain::match_result::{
     MatchParticipantResult, MatchResult,
 };
 
-/// A `tournament_match` row before its children are attached.
+/// A `tournament_matches` row before its children are attached.
 struct MatchHeader {
     match_id: i64,
     tournament_id: i64,
@@ -42,7 +42,7 @@ pub async fn find_by_id(
 ) -> sqlx::Result<Option<MatchResult>> {
     let headers = sqlx::query!(
         "select m.id, m.tournament_id, m.round, m.played_at, m.external_link
-         from tournament_match m where m.id = $1",
+         from tournament_matches m where m.id = $1",
         match_id
     )
     .fetch_all(&mut *conn)
@@ -74,7 +74,7 @@ pub async fn find_id_by_external_link(
     external_link: &str,
 ) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar!(
-        "select id from tournament_match
+        "select id from tournament_matches
          where tournament_id = $1 and external_link = $2",
         tournament_id,
         external_link
@@ -93,7 +93,7 @@ pub async fn find_by_tournament(
 ) -> sqlx::Result<Vec<MatchResult>> {
     let headers: Vec<MatchHeader> = sqlx::query!(
         "select m.id, m.tournament_id, m.round, m.played_at, m.external_link
-         from tournament_match m
+         from tournament_matches m
          where m.tournament_id = $1
            and ($2::int is null or m.round = $2::int)
          order by m.played_at, m.id",
@@ -130,7 +130,7 @@ pub async fn find_by_tournament_newest_first(
 ) -> sqlx::Result<Vec<MatchResult>> {
     let headers: Vec<MatchHeader> = sqlx::query!(
         "select m.id, m.tournament_id, m.round, m.played_at, m.external_link
-         from tournament_match m
+         from tournament_matches m
          where m.tournament_id = $1
            and ($2::int is null or m.round = $2::int)
          order by m.played_at desc, m.id desc
@@ -172,7 +172,7 @@ pub async fn find_by_tournament_since(
 ) -> sqlx::Result<Vec<MatchResult>> {
     let headers: Vec<MatchHeader> = sqlx::query!(
         "select m.id, m.tournament_id, m.round, m.played_at, m.external_link
-         from tournament_match m
+         from tournament_matches m
          where m.tournament_id = $1
            and m.id > $2
          order by m.played_at desc, m.id desc
@@ -215,7 +215,7 @@ async fn assemble(
     let mut picks: IndexMap<(i64, i32), Vec<DraftedHeroResult>> = IndexMap::new();
     for row in sqlx::query!(
         "select hp.match_id, hp.side, hp.hero_id, h.name as hero_name
-         from match_hero_pick hp
+         from match_hero_picks hp
          join heroes h on h.id = hp.hero_id
          where hp.match_id = any($1)
          order by hp.match_id, hp.side, h.name",
@@ -236,7 +236,7 @@ async fn assemble(
     let mut participants: IndexMap<i64, Vec<MatchParticipantResult>> = IndexMap::new();
     for row in sqlx::query!(
         "select mp.match_id, mp.side, mp.player_label
-         from match_participant mp
+         from match_participants mp
          where mp.match_id = any($1)
          order by mp.match_id, mp.side",
         &match_ids
@@ -260,8 +260,8 @@ async fn assemble(
     // `sortedBy { it.gameNumber }` the Kotlin applies after grouping.
     let game_rows = sqlx::query!(
         "select mg.id, mg.match_id, mg.game_number, mg.map_id, gm.name as map_name
-         from match_game mg
-         join game_map gm on gm.id = mg.map_id
+         from match_games mg
+         join game_maps gm on gm.id = mg.map_id
          where mg.match_id = any($1)
          order by mg.match_id, mg.game_number",
         &match_ids
@@ -269,14 +269,14 @@ async fn assemble(
     .fetch_all(&mut *conn)
     .await?;
 
-    // Joined through match_game to recover match_id, which
-    // match_game_participant does not itself carry.
+    // Joined through match_games to recover match_id, which
+    // match_game_participants does not itself carry.
     let mut game_participants: IndexMap<i64, Vec<GameParticipantResult>> = IndexMap::new();
     for row in sqlx::query!(
         "select mgp.game_id, mgp.side,
                 mgp.hero_id, h.name as hero_name, mgp.health_remaining, mgp.is_winner
-         from match_game_participant mgp
-         join match_game mg on mg.id = mgp.game_id
+         from match_game_participants mgp
+         join match_games mg on mg.id = mgp.game_id
          join heroes h on h.id = mgp.hero_id
          where mg.match_id = any($1)
          order by mgp.game_id, mgp.side",
@@ -314,7 +314,7 @@ async fn assemble(
         // it decodes as a String and is parsed here. An unparseable value
         // cannot reach this point -- the CHECK is the same three names.
         "select hb.match_id, hb.hero_id, h.name as hero_name, hb.ban_type, hb.side
-         from hero_ban hb
+         from hero_bans hb
          join heroes h on h.id = hb.hero_id
          where hb.match_id = any($1)
          order by hb.match_id, h.name",
@@ -349,7 +349,7 @@ async fn assemble(
 }
 
 /// `BanType.valueOf(...)`, which throws on anything else. The CHECK constraint
-/// on `hero_ban.ban_type` admits exactly these three, so the fallback is
+/// on `hero_bans.ban_type` admits exactly these three, so the fallback is
 /// unreachable and a `PRE_BAN` -- the one that scores neither ban metric -- is
 /// the safe answer if the constraint is ever relaxed without this being
 /// updated.

@@ -28,8 +28,8 @@ data class EntryRoster(
  * The read side of the Live Standings screen: who entered, and what they drafted.
  *
  * Scoring is deliberately *not* in this query. Points are folded in Kotlin from
- * `tournament_match` (see [StandingsService]) because the coefficients live in
- * `scoring_coefficient` and each (hero, match) pair is then priced exactly once,
+ * `tournament_matches` (see [StandingsService]) because the coefficients live in
+ * `scoring_coefficients` and each (hero, match) pair is then priced exactly once,
  * no matter how many rosters hold that hero — cheaper than the join's fan-out,
  * and impossible to get inconsistent with the ticker.
  */
@@ -39,7 +39,7 @@ class StandingsQuery(private val jdbcClient: JdbcClient) {
     /**
      * Every entry in the tournament with its roster, ordered by entry then slot.
      *
-     * Note the **left join** onto `entry_slot`: an entry with no picks yet is
+     * Note the **left join** onto `entry_slots`: an entry with no picks yet is
      * still an entry and still belongs on the board. An inner join silently
      * drops it.
      */
@@ -103,11 +103,11 @@ class StandingsQuery(private val jdbcClient: JdbcClient) {
                    h.id            as hero_id,
                    h.name          as hero_name,
                    th.cost         as hero_cost
-            from tournament_entry e
-                join manager mg on mg.id = e.manager_id
-                left join entry_slot es on es.entry_id = e.id
+            from tournament_entries e
+                join managers mg on mg.id = e.manager_id
+                left join entry_slots es on es.entry_id = e.id
                 left join heroes h on h.id = es.hero_id
-                left join tournament_hero th
+                left join tournament_heroes th
                     on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id
             where e.tournament_id = :tournamentId
             order by e.id, es.slot_index

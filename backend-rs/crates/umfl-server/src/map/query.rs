@@ -4,8 +4,8 @@
 //! and the read half of `map/MapPoolAdminRepository.kt`.
 //!
 //! The Kotlin keeps those in two classes because they were two *mechanisms* --
-//! Spring Data JDBC on `game_map`, a hand-written `JdbcClient` on the
-//! composite-keyed `tournament_map`. Here the split is by direction instead
+//! Spring Data JDBC on `game_maps`, a hand-written `JdbcClient` on the
+//! composite-keyed `tournament_maps`. Here the split is by direction instead
 //! (PORTING.md §3), so both mechanisms' reads land in this file and both
 //! mechanisms' writes land in `writer.rs` and `pool_admin.rs`.
 
@@ -21,7 +21,7 @@ use super::GameMap;
 /// that the *guarantee* rather than the observed behaviour, and it is the same
 /// order -- ids are a `bigserial`.
 pub async fn find_all(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<GameMap>> {
-    let rows = sqlx::query!("select id, name from game_map order by id")
+    let rows = sqlx::query!("select id, name from game_maps order by id")
         .fetch_all(db)
         .await?;
     Ok(rows
@@ -33,9 +33,9 @@ pub async fn find_all(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<GameMap>> {
         .collect())
 }
 
-/// `findByName` -- `game_map.name` is `unique`, so this is at most one row.
+/// `findByName` -- `game_maps.name` is `unique`, so this is at most one row.
 pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<Option<GameMap>> {
-    let row = sqlx::query!("select id, name from game_map where name = $1", name)
+    let row = sqlx::query!("select id, name from game_maps where name = $1", name)
         .fetch_optional(db)
         .await?;
     Ok(row.map(|r| GameMap {
@@ -46,7 +46,7 @@ pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<O
 
 /// `findById`.
 pub async fn find_by_id(db: impl PgExecutor<'_>, map_id: i64) -> sqlx::Result<Option<GameMap>> {
-    let row = sqlx::query!("select id, name from game_map where id = $1", map_id)
+    let row = sqlx::query!("select id, name from game_maps where id = $1", map_id)
         .fetch_optional(db)
         .await?;
     Ok(row.map(|r| GameMap {
@@ -69,7 +69,7 @@ pub async fn find_all_by_id(
         return Ok(Vec::new());
     }
     let rows = sqlx::query!(
-        "select id, name from game_map where id = any($1) order by id",
+        "select id, name from game_maps where id = any($1) order by id",
         map_ids
     )
     .fetch_all(db)
@@ -85,11 +85,11 @@ pub async fn find_all_by_id(
 
 /// The set of boards this tournament may record a match on.
 ///
-/// A `Vec`, not a set: the primary key on `tournament_map` already makes the
+/// A `Vec`, not a set: the primary key on `tournament_maps` already makes the
 /// rows distinct, and every caller either scans it or hands it to a policy.
 pub async fn pool_map_ids(db: impl PgExecutor<'_>, tournament_id: i64) -> sqlx::Result<Vec<i64>> {
     sqlx::query_scalar!(
-        "select map_id from tournament_map where tournament_id = $1",
+        "select map_id from tournament_maps where tournament_id = $1",
         tournament_id
     )
     .fetch_all(db)
@@ -101,8 +101,8 @@ pub async fn pool_map_ids(db: impl PgExecutor<'_>, tournament_id: i64) -> sqlx::
 pub async fn pool_maps(db: impl PgExecutor<'_>, tournament_id: i64) -> sqlx::Result<Vec<GameMap>> {
     let rows = sqlx::query!(
         "select gm.id, gm.name
-         from tournament_map tm
-         join game_map gm on gm.id = tm.map_id
+         from tournament_maps tm
+         join game_maps gm on gm.id = tm.map_id
          where tm.tournament_id = $1
          order by gm.name",
         tournament_id
@@ -120,8 +120,8 @@ pub async fn pool_maps(db: impl PgExecutor<'_>, tournament_id: i64) -> sqlx::Res
 
 /// True when this tournament has a recorded game on this board.
 ///
-/// Unlike a hero, a board *is* protected by the schema: `match_game` carries a
-/// composite FK onto `(tournament_id, map_id)` in `tournament_map`, so deleting
+/// Unlike a hero, a board *is* protected by the schema: `match_games` carries a
+/// composite FK onto `(tournament_id, map_id)` in `tournament_maps`, so deleting
 /// the pool row out from under a recorded game is a constraint violation. This
 /// check runs first so the refusal is a 409 that names the board, rather than
 /// the generic data-integrity backstop that names nothing.
@@ -132,7 +132,7 @@ pub async fn has_recorded_match(
 ) -> sqlx::Result<bool> {
     sqlx::query_scalar!(
         r#"select exists(
-             select 1 from match_game where tournament_id = $1 and map_id = $2
+             select 1 from match_games where tournament_id = $1 and map_id = $2
            ) as "exists!""#,
         tournament_id,
         map_id

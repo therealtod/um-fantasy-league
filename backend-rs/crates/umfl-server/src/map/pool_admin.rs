@@ -1,4 +1,4 @@
-//! `tournament_map` writes -- the composite-keyed link table no aggregate maps.
+//! `tournament_maps` writes -- the composite-keyed link table no aggregate maps.
 //!
 //! Oracle: the write half of `map/MapPoolAdminRepository.kt`.
 //!
@@ -15,7 +15,7 @@ pub async fn add_to_pool(
     map_id: i64,
 ) -> sqlx::Result<()> {
     sqlx::query!(
-        "insert into tournament_map (tournament_id, map_id)
+        "insert into tournament_maps (tournament_id, map_id)
          values ($1, $2) on conflict do nothing",
         tournament_id,
         map_id
@@ -39,7 +39,7 @@ pub async fn add_to_pool_batch(
         return Ok(());
     }
     sqlx::query!(
-        "insert into tournament_map (tournament_id, map_id)
+        "insert into tournament_maps (tournament_id, map_id)
          select $1, m from unnest($2::bigint[]) as t(m)
          on conflict do nothing",
         tournament_id,
@@ -57,7 +57,7 @@ pub async fn remove_from_pool(
     map_id: i64,
 ) -> sqlx::Result<bool> {
     let result = sqlx::query!(
-        "delete from tournament_map where tournament_id = $1 and map_id = $2",
+        "delete from tournament_maps where tournament_id = $1 and map_id = $2",
         tournament_id,
         map_id
     )
@@ -70,7 +70,7 @@ pub async fn remove_from_pool(
 /// restores its deferral.
 ///
 /// That FK is `DEFERRABLE INITIALLY DEFERRED` for the sake of tournament
-/// deletes (see the schema comment on `match_game`), which means a pool row
+/// deletes (see the schema comment on `match_games`), which means a pool row
 /// deleted out from under a recorded game does not fail the `delete` -- it
 /// fails at `COMMIT`, long after the service that could still name the board
 /// and the tournament has returned. `set constraints ... immediate` pulls the

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tournament_heroes (tournament_id, hero_id, cost)\n         select $1, h, c from unnest($2::bigint[], $3::integer[]) as t(h, c)\n         on conflict (tournament_id, hero_id) do update set cost = excluded.cost",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1e31c13301956d92eb691cc60a86b7cca6368b721262d9c7c04b8d9ecf60015b"
+}

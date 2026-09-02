@@ -433,7 +433,7 @@ class MatchResultPolicyTest {
         assertTrue(violations.single().message.contains("side 2"))
     }
 
-    // Every `hero_ban` row written before V7 added the column looks like this.
+    // Every `hero_bans` row written before V7 added the column looks like this.
     // Rejecting it would make an already-recorded match uncorrectable, which is
     // why BAN_SIDE_INVALID polices only an impossible side, never a missing one.
     @Test

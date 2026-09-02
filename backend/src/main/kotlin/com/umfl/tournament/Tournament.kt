@@ -36,7 +36,7 @@ enum class TournamentStatus {
  * the entry at registration, so retuning it later cannot disturb rosters that
  * were already drafted against the old number.
  */
-@Table("tournament")
+@Table("tournaments")
 data class Tournament(
     @Id val id: Long? = null,
     val name: String,

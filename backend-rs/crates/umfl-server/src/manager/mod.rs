@@ -3,11 +3,11 @@
 //! Oracle: `manager/Manager.kt`, `manager/ManagerRepository.kt`.
 //!
 //! A manager is the person who drafts a roster, as distinct from the competitor
-//! who plays the real tournament (a free-text `match_participant.player_label`,
+//! who plays the real tournament (a free-text `match_participants.player_label`,
 //! not an entity) and the `hero` they bring to it.
 //!
 //! There is no credit balance here. Budget is granted per registration
-//! (`tournament_entry.credit_grant`), not held in a global wallet, so entering a
+//! (`tournament_entries.credit_grant`), not held in a global wallet, so entering a
 //! tournament costs nothing and cannot be blocked by a wallet running dry.
 
 pub mod query;
@@ -21,7 +21,7 @@ use uuid::Uuid;
 use crate::auth::CurrentManager;
 use crate::state::AppState;
 
-/// A persisted `manager` row.
+/// A persisted `managers` row.
 ///
 /// Unlike the Kotlin, `id` is not an `Option`: Spring Data JDBC needs a null id
 /// to mean "not saved yet", but here the unsaved form is

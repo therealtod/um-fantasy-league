@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 /**
  * The roster rules, exercised directly.
  *
- * Cost literals are the seeded `tournament_hero` prices for Winter of
+ * Cost literals are the seeded `tournament_heroes` prices for Winter of
  * Champions, so a change to the seed that breaks the "one premium plus two
  * budget picks just fits" tuning shows up here as well as in the integration
  * tests.

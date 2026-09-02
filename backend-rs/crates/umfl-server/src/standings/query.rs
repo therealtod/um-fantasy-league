@@ -5,7 +5,7 @@
 //!
 //! Scoring is deliberately *not* in this query. Points are folded in
 //! [`umfl_domain::standings`] because the coefficients live in
-//! `scoring_coefficient` and each (hero, match) pair is then priced exactly
+//! `scoring_coefficients` and each (hero, match) pair is then priced exactly
 //! once, no matter how many rosters hold that hero -- cheaper than the join's
 //! fan-out, and impossible to get inconsistent with the ticker.
 
@@ -15,13 +15,13 @@ use umfl_domain::standings::{EntryRoster, RosterHero};
 
 /// Every entry in the tournament with its roster, ordered by entry then slot.
 ///
-/// Note the **left join** onto `entry_slot`: an entry with no picks yet is
+/// Note the **left join** onto `entry_slots`: an entry with no picks yet is
 /// still an entry and still belongs on the board. An inner join silently drops
 /// it, and the pickless-entry case is asserted in `tests/it/standings.rs`.
 ///
 /// `th.cost` is left-joined for the same reason it is not snapshotted onto
-/// `entry_slot`: the price is this tournament's, live. A hero that has since
-/// left the pool has no `tournament_hero` row at all, which is a 0 here rather
+/// `entry_slots`: the price is this tournament's, live. A hero that has since
+/// left the pool has no `tournament_heroes` row at all, which is a 0 here rather
 /// than a crash -- the Kotlin gets that from `ResultSet.getInt` returning 0 for
 /// SQL NULL, and `unwrap_or(0)` below is that behaviour written out.
 pub async fn rosters(
@@ -40,11 +40,11 @@ pub async fn rosters(
                   h.id            as "hero_id?",
                   h.name          as "hero_name?",
                   th.cost         as "hero_cost?"
-           from tournament_entry e
-               join manager mg on mg.id = e.manager_id
-               left join entry_slot es on es.entry_id = e.id
+           from tournament_entries e
+               join managers mg on mg.id = e.manager_id
+               left join entry_slots es on es.entry_id = e.id
                left join heroes h on h.id = es.hero_id
-               left join tournament_hero th
+               left join tournament_heroes th
                    on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id
            where e.tournament_id = $1
            order by e.id, es.slot_index"#,

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into match_participants (match_id, side, player_label)\n         select $1, s, l from unnest($2::integer[], $3::text[]) as t(s, l)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4Array",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "adaf16ad745a0c55e235bf5b5129d6dfdebb979b45841a018b9b70a55d012e69"
+}

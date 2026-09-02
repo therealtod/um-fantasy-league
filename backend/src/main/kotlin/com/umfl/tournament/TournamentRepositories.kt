@@ -19,7 +19,7 @@ interface TournamentRepository : CrudRepository<Tournament, Long> {
      * to be serialised against each other. Locking the tournament row — not the
      * entries — gives every concurrent registration for the same tournament one
      * queue to stand in, and costs nothing anywhere else: no other statement in
-     * the app writes `tournament` on the manager path.
+     * the app writes `tournaments` on the manager path.
      *
      * Returning capacity rather than just the id matters because the lock alone
      * only serialises the *write*: a concurrent admin capacity change
@@ -29,7 +29,7 @@ interface TournamentRepository : CrudRepository<Tournament, Long> {
      * pre-update value. Re-reading capacity here, after the lock is granted, is
      * what makes the seat check exact instead of checking a stale snapshot.
      */
-    @Query("select capacity from tournament where id = :id for update")
+    @Query("select capacity from tournaments where id = :id for update")
     fun lockCapacityById(id: Long): Int?
 }
 
@@ -49,8 +49,8 @@ interface TournamentEntryRepository : CrudRepository<TournamentEntry, Long> {
     @Query(
         """
         select t.id as tournament_id, count(e.id) as entry_count
-        from tournament t
-        left join tournament_entry e on e.tournament_id = t.id
+        from tournaments t
+        left join tournament_entries e on e.tournament_id = t.id
         group by t.id
         """
     )

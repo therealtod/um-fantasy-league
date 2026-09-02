@@ -8,7 +8,7 @@
 //! merge-contention argument PORTING.md §3 makes for DTOs.
 //!
 //! Note the scope: the hero catalogue is **not** filtered to the tournament's
-//! pool. `match_game_participant.hero_id` and `hero_ban.hero_id` reference
+//! pool. `match_game_participants.hero_id` and `hero_bans.hero_id` reference
 //! `heroes(id)` directly, so a hero outside the pool can still be recorded;
 //! only the board pool is a real constraint, and that is checked separately.
 
@@ -24,7 +24,7 @@ pub async fn hero_names(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<(String, i6
 
 /// Every board, same shape.
 pub async fn map_names(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<(String, i64)>> {
-    let rows = sqlx::query!("select id, name from game_map")
+    let rows = sqlx::query!("select id, name from game_maps")
         .fetch_all(db)
         .await?;
     Ok(rows.into_iter().map(|r| (r.name, r.id)).collect())

@@ -65,7 +65,7 @@ class AdminScoringServiceIntegrationTest @Autowired constructor(
         // statement tripped uq_scoring_rule_set_active against the seeded
         // active rule set instead of writing a draft.
         jdbcClient
-            .sql("insert into scoring_rule_set (tournament_id, name) values (:tournamentId, 'Hand-Written Draft')")
+            .sql("insert into scoring_rule_sets (tournament_id, name) values (:tournamentId, 'Hand-Written Draft')")
             .param("tournamentId", tournamentId)
             .update()
 

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into scoring_rule_sets (tournament_id, name) values ($1, 'Hand-Written Draft')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "17892d207fe998a508e74730764687b96efe00cd6fd7a6b4e3bd5eb050454c91"
+}

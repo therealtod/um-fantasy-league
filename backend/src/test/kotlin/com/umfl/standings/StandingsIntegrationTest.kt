@@ -81,8 +81,8 @@ class StandingsIntegrationTest @Autowired constructor(
         val configured = jdbcClient
             .sql(
                 """
-                select count(*) from scoring_coefficient c
-                    join scoring_rule_set rs on rs.id = c.rule_set_id
+                select count(*) from scoring_coefficients c
+                    join scoring_rule_sets rs on rs.id = c.rule_set_id
                 where rs.tournament_id = :t and c.metric = 'CROWD_FAVOURITE'
                 """
             )
@@ -259,7 +259,7 @@ class StandingsIntegrationTest @Autowired constructor(
     @Test
     fun `a tournament with no active rule set still returns a usable board`() {
         val summer = summerId()
-        jdbcClient.sql("delete from scoring_rule_set where tournament_id = :t").param("t", summer).update()
+        jdbcClient.sql("delete from scoring_rule_sets where tournament_id = :t").param("t", summer).update()
 
         val board = standingsService.board(summer)
 
@@ -398,7 +398,7 @@ class StandingsIntegrationTest @Autowired constructor(
 
         fun heroId(name: String) =
             jdbcClient.sql("select id from heroes where name = :name").param("name", name).query(Long::class.java).single()
-        val mapId = jdbcClient.sql("select tm.map_id from tournament_map tm where tm.tournament_id = :id limit 1")
+        val mapId = jdbcClient.sql("select tm.map_id from tournament_maps tm where tm.tournament_id = :id limit 1")
             .param("id", tournamentId).query(Long::class.java).single()
 
         // Bigfoot is on NeonStrategist's roster; it is drafted here and never played.

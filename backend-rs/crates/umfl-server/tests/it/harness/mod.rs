@@ -417,7 +417,7 @@ impl TestApp {
     pub async fn manager(&self, handle: &str) -> Manager {
         let row = sqlx::query!(
             "select id, handle, display_name, auth_user_id, is_admin
-             from manager where handle = $1",
+             from managers where handle = $1",
             handle
         )
         .fetch_one(self.pool())
@@ -433,7 +433,7 @@ impl TestApp {
     }
 
     pub async fn tournament_id(&self, name: &str) -> i64 {
-        sqlx::query_scalar!("select id from tournament where name = $1", name)
+        sqlx::query_scalar!("select id from tournaments where name = $1", name)
             .fetch_one(self.pool())
             .await
             .unwrap_or_else(|e| panic!("no seeded tournament {name}: {e}"))

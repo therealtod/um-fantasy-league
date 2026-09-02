@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update scoring_rule_sets set is_active = true where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e8b2de2a23765971f7d70204dd450b388d2b5ff608bec212c905f8095330b471"
+}

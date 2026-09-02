@@ -155,8 +155,8 @@ async fn the_seeded_crowd_favourite_metric_is_weighted_but_scores_nothing_anywhe
     let summer = app.tournament_id(SUMMER).await;
 
     let configured = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from scoring_coefficient c
-               join scoring_rule_set rs on rs.id = c.rule_set_id
+        r#"select count(*) as "count!" from scoring_coefficients c
+               join scoring_rule_sets rs on rs.id = c.rule_set_id
            where rs.tournament_id = $1 and c.metric = 'CROWD_FAVOURITE'"#,
         summer
     )
@@ -339,14 +339,14 @@ async fn an_entry_with_no_picks_still_appears_and_ties_share_a_rank() {
 
     for handle in ["EmptyDrafterA", "EmptyDrafterB"] {
         let manager_id = sqlx::query_scalar!(
-            "insert into manager (handle, display_name) values ($1, $1) returning id",
+            "insert into managers (handle, display_name) values ($1, $1) returning id",
             handle
         )
         .fetch_one(app.pool())
         .await
         .expect("insert a manager");
         sqlx::query!(
-            "insert into tournament_entry (tournament_id, manager_id, status, credit_grant)
+            "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
              values ($1, $2, 'DRAFT', 10000)",
             summer,
             manager_id
@@ -393,7 +393,7 @@ async fn a_tournament_with_entries_but_no_matches_scores_everyone_zero() {
     let winter = app.tournament_id(WINTER).await;
     let manager = app.manager("NeonStrategist").await;
     sqlx::query!(
-        "insert into tournament_entry (tournament_id, manager_id, status, credit_grant)
+        "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
          values ($1, $2, 'DRAFT', 10000)",
         winter,
         manager.id
@@ -420,7 +420,7 @@ async fn a_tournament_with_no_active_rule_set_still_returns_a_usable_board() {
     let app = TestApp::spawn().await;
     let summer = app.tournament_id(SUMMER).await;
     sqlx::query!(
-        "delete from scoring_rule_set where tournament_id = $1",
+        "delete from scoring_rule_sets where tournament_id = $1",
         summer
     )
     .execute(app.pool())
@@ -743,7 +743,7 @@ async fn drafting_a_rostered_hero_without_fielding_it_moves_that_roster_by_one_a
     let bigfoot = app.hero_id("Bigfoot").await;
     let achilles = app.hero_id("Achilles").await;
     let map = sqlx::query_scalar!(
-        "select tm.map_id from tournament_map tm where tm.tournament_id = $1 limit 1",
+        "select tm.map_id from tournament_maps tm where tm.tournament_id = $1 limit 1",
         summer
     )
     .fetch_one(app.pool())
@@ -801,7 +801,7 @@ async fn a_recorded_match_is_on_the_board_and_the_ticker_immediately() {
     let alice = app.hero_id("Alice").await;
     let robin = app.hero_id("Robin Hood").await;
     let map = sqlx::query_scalar!(
-        "select tm.map_id from tournament_map tm where tm.tournament_id = $1 limit 1",
+        "select tm.map_id from tournament_maps tm where tm.tournament_id = $1 limit 1",
         winter
     )
     .fetch_one(app.pool())
@@ -865,7 +865,7 @@ async fn a_committed_match_write_pushes_an_update_to_an_open_stream() {
     let alice = app.hero_id("Alice").await;
     let robin = app.hero_id("Robin Hood").await;
     let map = sqlx::query_scalar!(
-        "select tm.map_id from tournament_map tm where tm.tournament_id = $1 limit 1",
+        "select tm.map_id from tournament_maps tm where tm.tournament_id = $1 limit 1",
         winter
     )
     .fetch_one(app.pool())

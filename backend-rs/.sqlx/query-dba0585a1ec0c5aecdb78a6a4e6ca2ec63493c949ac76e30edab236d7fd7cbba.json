@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into match_game_participants (game_id, side, hero_id, health_remaining, is_winner)\n         select $1, s, h, r, w\n         from unnest($2::integer[], $3::bigint[], $4::integer[], $5::boolean[]) as t(s, h, r, w)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4Array",
+        "Int8Array",
+        "Int4Array",
+        "BoolArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dba0585a1ec0c5aecdb78a6a4e6ca2ec63493c949ac76e30edab236d7fd7cbba"
+}

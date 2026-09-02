@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select c.coefficient from scoring_coefficients c\n         join scoring_rule_sets rs on rs.id = c.rule_set_id\n         where rs.tournament_id = $1 and rs.is_active and c.metric = 'WIN'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "coefficient",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "scoring_coefficients",
+            "name": "coefficient"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e6375890ea6c51c57cc83ba218d15c2056dd5ddba1e8bac5bf196dacb935c43b"
+}

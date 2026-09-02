@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tournament_matches\n            set tournament_id = $2, round = $3, played_at = $4, external_link = $5\n          where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9b31b7e055b0cd2f3d447cfd4e48ea11a3ee5f70b7b6549a9a441f85f0efee3"
+}

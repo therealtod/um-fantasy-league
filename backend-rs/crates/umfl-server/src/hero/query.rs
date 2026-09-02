@@ -4,7 +4,7 @@
 //!
 //! Everything here is keyed by `tournament_id` rather than by a season, because
 //! cost is per tournament: the same hero is a bargain at one event and a
-//! premium pick at the next. A hero absent from `tournament_hero` is simply not
+//! premium pick at the next. A hero absent from `tournament_heroes` is simply not
 //! in that tournament's pool, which is what makes `UNKNOWN_HERO` a real check
 //! rather than an existence test.
 
@@ -63,7 +63,7 @@ pub async fn find_by_tournament(
             sqlx::query_as!(
                 HeroView,
                 r#"select h.id, h.name, h.image_url, th.cost
-                   from tournament_hero th
+                   from tournament_heroes th
                    join heroes h on h.id = th.hero_id
                    where th.tournament_id = $1
                      and ($2::text is null or h.name ilike $2 escape '\')
@@ -78,7 +78,7 @@ pub async fn find_by_tournament(
             sqlx::query_as!(
                 HeroView,
                 r#"select h.id, h.name, h.image_url, th.cost
-                   from tournament_hero th
+                   from tournament_heroes th
                    join heroes h on h.id = th.hero_id
                    where th.tournament_id = $1
                      and ($2::text is null or h.name ilike $2 escape '\')
@@ -108,7 +108,7 @@ pub async fn find_by_ids(
     sqlx::query_as!(
         HeroView,
         r#"select h.id, h.name, h.image_url, th.cost
-           from tournament_hero th
+           from tournament_heroes th
            join heroes h on h.id = th.hero_id
            where th.tournament_id = $1 and h.id = any($2)
            order by h.name"#,
@@ -119,7 +119,7 @@ pub async fn find_by_ids(
     .await
 }
 
-/// Identity for ids already committed to a roster (an `entry_slot`), priced by
+/// Identity for ids already committed to a roster (an `entry_slots`), priced by
 /// this tournament's *current* pool — cost 0 if the hero has since left it.
 ///
 /// Unlike [`find_by_ids`], this never drops an id: a locked or in-progress
@@ -143,7 +143,7 @@ pub async fn find_roster_heroes(
         r#"select h.id as "id!", h.name as "name!", h.image_url,
                   coalesce(th.cost, 0) as "cost!"
            from heroes h
-           left join tournament_hero th
+           left join tournament_heroes th
                on th.tournament_id = $1 and th.hero_id = h.id
            where h.id = any($2)"#,
         tournament_id,

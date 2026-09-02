@@ -10,7 +10,7 @@
 //! [`umfl_domain::scoring_rule_set_policy`] -- and the standings fold calls it
 //! through [`query::active_rules`].
 //!
-//! Points are never stored. `scoring_coefficient` is mutable reference data
+//! Points are never stored. `scoring_coefficients` is mutable reference data
 //! retuned with a bare `UPDATE`, so a stored total would be a cache with
 //! nothing to invalidate it (AGENTS.md, "Nothing writes points"). Everything
 //! written here is an *input* to a fold that happens at read time.

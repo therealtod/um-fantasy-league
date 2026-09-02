@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tournament_maps (tournament_id, map_id)\n             select $1, id from game_maps where name = $2\n             on conflict do nothing",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "58c476495e723599a47a81e0e068e8d881864e8c6bb8449bfec1352c7f498e2a"
+}

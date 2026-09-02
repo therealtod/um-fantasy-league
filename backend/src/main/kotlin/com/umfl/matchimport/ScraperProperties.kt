@@ -10,7 +10,7 @@ import java.time.Duration
  * rule, and it earns it the same way [com.umfl.ratelimit.RateLimitProperties]
  * does: the address of a sibling service is operational infrastructure config,
  * the same category as `DB_URL` and `SUPABASE_JWKS_URI`, not domain data that
- * could live in a table. A scoring weight belongs in `scoring_coefficient`
+ * could live in a table. A scoring weight belongs in `scoring_coefficients`
  * because an admin retunes it; a hostname belongs here because it changes when
  * the deployment topology changes, and the application cannot read it from a
  * database it has not connected to yet.

@@ -26,7 +26,7 @@ fn a_link() -> String {
 }
 
 async fn map_id(app: &TestApp, name: &str) -> i64 {
-    sqlx::query_scalar!("select id from game_map where name = $1", name)
+    sqlx::query_scalar!("select id from game_maps where name = $1", name)
         .fetch_one(app.pool())
         .await
         .unwrap_or_else(|e| panic!("no board {name}: {e}"))
@@ -633,7 +633,7 @@ async fn correcting_a_match_replaces_the_draft_rather_than_adding_to_it() {
         "the mistaken Medusa pick is gone, not merged"
     );
     let picks = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from match_hero_pick where match_id = $1"#,
+        r#"select count(*) as "count!" from match_hero_picks where match_id = $1"#,
         match_id
     )
     .fetch_one(app.pool())
@@ -642,7 +642,7 @@ async fn correcting_a_match_replaces_the_draft_rather_than_adding_to_it() {
     assert_eq!(picks, 2);
 }
 
-/// The half of the draft `hero_ban` could not record before V7: which side's
+/// The half of the draft `hero_bans` could not record before V7: which side's
 /// arsenal a hero was struck out of. A correction has to *move* it, since
 /// `correct` replaces the ban set outright rather than merging into it.
 #[tokio::test]
@@ -1051,17 +1051,17 @@ async fn deleting_a_match_removes_its_participants_games_bans_and_picks() {
     assert_eq!(response.status, 204, "{}", response.text());
     assert!(response.body.is_empty(), "204 carries no body");
     assert_eq!(
-        count("match_participant", "match_id", match_id, &app).await,
+        count("match_participants", "match_id", match_id, &app).await,
         0
     );
-    assert_eq!(count("match_game", "match_id", match_id, &app).await, 0);
+    assert_eq!(count("match_games", "match_id", match_id, &app).await, 0);
     assert_eq!(
-        count("match_game_participant", "game_id", game_id, &app).await,
+        count("match_game_participants", "game_id", game_id, &app).await,
         0
     );
-    assert_eq!(count("hero_ban", "match_id", match_id, &app).await, 0);
+    assert_eq!(count("hero_bans", "match_id", match_id, &app).await, 0);
     assert_eq!(
-        count("match_hero_pick", "match_id", match_id, &app).await,
+        count("match_hero_picks", "match_id", match_id, &app).await,
         0
     );
 
@@ -1078,36 +1078,36 @@ async fn deleting_a_match_removes_its_participants_games_bans_and_picks() {
 /// rather than one built by `format!`, because `sqlx` only checks a literal.
 async fn count(table: &str, column: &str, value: i64, app: &TestApp) -> i64 {
     match (table, column) {
-        ("match_participant", _) => sqlx::query_scalar!(
-            r#"select count(*) as "c!" from match_participant where match_id = $1"#,
+        ("match_participants", _) => sqlx::query_scalar!(
+            r#"select count(*) as "c!" from match_participants where match_id = $1"#,
             value
         )
         .fetch_one(app.pool())
         .await
         .unwrap(),
-        ("match_game", _) => sqlx::query_scalar!(
-            r#"select count(*) as "c!" from match_game where match_id = $1"#,
+        ("match_games", _) => sqlx::query_scalar!(
+            r#"select count(*) as "c!" from match_games where match_id = $1"#,
             value
         )
         .fetch_one(app.pool())
         .await
         .unwrap(),
-        ("match_game_participant", _) => sqlx::query_scalar!(
-            r#"select count(*) as "c!" from match_game_participant where game_id = $1"#,
+        ("match_game_participants", _) => sqlx::query_scalar!(
+            r#"select count(*) as "c!" from match_game_participants where game_id = $1"#,
             value
         )
         .fetch_one(app.pool())
         .await
         .unwrap(),
-        ("hero_ban", _) => sqlx::query_scalar!(
-            r#"select count(*) as "c!" from hero_ban where match_id = $1"#,
+        ("hero_bans", _) => sqlx::query_scalar!(
+            r#"select count(*) as "c!" from hero_bans where match_id = $1"#,
             value
         )
         .fetch_one(app.pool())
         .await
         .unwrap(),
         _ => sqlx::query_scalar!(
-            r#"select count(*) as "c!" from match_hero_pick where match_id = $1"#,
+            r#"select count(*) as "c!" from match_hero_picks where match_id = $1"#,
             value
         )
         .fetch_one(app.pool())

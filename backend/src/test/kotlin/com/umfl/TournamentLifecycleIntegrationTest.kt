@@ -61,7 +61,7 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
         jdbcClient.sql("select id from $table where name = :name").param("name", name).query(Long::class.java).single()
 
     private fun heroId(name: String) = id("heroes", name)
-    private fun mapId(name: String) = id("game_map", name)
+    private fun mapId(name: String) = id("game_maps", name)
 
     @Test
     fun `a tournament runs from creation to a decided winner`() {
@@ -216,7 +216,7 @@ class TournamentLifecycleIntegrationTest @Autowired constructor(
 
         assertEquals(
             TournamentStatus.COMPLETED,
-            requireNotNull(jdbcClient.sql("select status from tournament where id = :id").param("id", tournamentId)
+            requireNotNull(jdbcClient.sql("select status from tournaments where id = :id").param("id", tournamentId)
                 .query(String::class.java).single()).let(TournamentStatus::valueOf),
         )
         assertTrue(entryRepository.findByTournamentId(tournamentId).all { it.isLocked }, "results only ever landed on locked rosters")

@@ -19,7 +19,7 @@ import java.time.Instant
  * correcting or deleting a match here is the entire surface area; no total is
  * ever recomputed and stored.
  *
- * Because this is the *only* writer of `tournament_match` and its children, the
+ * Because this is the *only* writer of `tournament_matches` and its children, the
  * [StandingsUpdateEvent] published by all three methods is a complete account of
  * when that data changes. Two things listen to it: [com.umfl.standings.StandingsSseHub],
  * which tells watching tabs to refetch, and [MatchResultCache], which drops the
@@ -216,9 +216,9 @@ class AdminMatchService(
 
     /**
      * The draft rides in on the participants — a pick belongs to a side — but
-     * persists as a child of the match, since `match_participant` is composite-
+     * persists as a child of the match, since `match_participants` is composite-
      * keyed and cannot own children of its own. The side is the participant's
-     * list position, the same ordinal `match_participant.side` is written from.
+     * list position, the same ordinal `match_participants.side` is written from.
      */
     private fun toPicks(participants: List<MatchParticipantInput>): Set<HeroPick> =
         participants.flatMapIndexed { side, participant ->
@@ -226,7 +226,7 @@ class AdminMatchService(
         }.toSet()
 
     private companion object {
-        /** Named in `V9__external_link_required.sql`; Postgres quotes it in the violation message. */
+        /** Named in `V1__core_schema.sql`; Postgres quotes it in the violation message. */
         const val LINK_INDEX = "uq_tournament_match_external_link"
     }
 }

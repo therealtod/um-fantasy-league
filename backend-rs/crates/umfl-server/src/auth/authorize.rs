@@ -48,7 +48,7 @@ pub enum Access {
     Permit,
     /// `authenticated()`
     Authenticated,
-    /// `hasRole("ADMIN")` -- from `manager.is_admin`, never from a token claim.
+    /// `hasRole("ADMIN")` -- from `managers.is_admin`, never from a token claim.
     Admin,
     /// `denyAll()`
     Deny,

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository
  * entire `participants`/`games`/`bans` collections — including each game's
  * own nested `participants` — the same "delete and reinsert the child rows"
  * semantics [com.umfl.tournament.TournamentEntryRepository] already has for
- * `entry_slot`.
+ * `entry_slots`.
  */
 @Repository
 interface TournamentMatchRepository : CrudRepository<TournamentMatch, Long>

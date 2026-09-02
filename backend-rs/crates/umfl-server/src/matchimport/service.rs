@@ -146,8 +146,8 @@ pub async fn preview(
 }
 
 /// Both sides' typed bans and the shared pre-ban pool, flattened into one list
-/// as `hero_ban` stores them -- but the side survives. The source already
-/// groups a typed ban under the side that owned the hero, and `hero_ban.side`
+/// as `hero_bans` stores them -- but the side survives. The source already
+/// groups a typed ban under the side that owned the hero, and `hero_bans.side`
 /// has somewhere to put it; a pre-ban precedes side assignment and so carries
 /// none.
 ///
@@ -270,8 +270,8 @@ impl Resolution {
             });
             return None;
         };
-        // The one that fires in practice: `match_game` carries a composite
-        // foreign key onto `tournament_map`, so a board this league knows about
+        // The one that fires in practice: `match_games` carries a composite
+        // foreign key onto `tournament_maps`, so a board this league knows about
         // but has not added to *this* tournament's pool cannot be recorded
         // against it. Heroes have no equivalent constraint.
         if !self.pool_map_ids.contains(&map_id) {

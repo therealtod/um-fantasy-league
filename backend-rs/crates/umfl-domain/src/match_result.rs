@@ -63,7 +63,7 @@ pub struct DraftedHeroResult {
 #[serde(rename_all = "camelCase")]
 pub struct MatchParticipantResult {
     /// 0 or 1 -- a stable ordinal for the whole series, matching
-    /// `match_participant.side`.
+    /// `match_participants.side`.
     pub side: i32,
     /// Who piloted this side, as free text. `None` when recorded unattributed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -127,7 +127,7 @@ impl GameResult {
 ///
 /// `side` is whose draft it came out of; `ban_type` is who struck it. `None`
 /// for a `PRE_BAN` -- struck before sides were assigned, so it belongs to
-/// neither -- and for anything recorded before `hero_ban.side` existed.
+/// neither -- and for anything recorded before `hero_bans.side` existed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BanResult {
@@ -164,7 +164,7 @@ impl MatchResult {
 
     /// Every hero either side drafted, once for the series however many sides
     /// took it. There is deliberately no `unique (match_id, hero_id)` on
-    /// `match_hero_pick` -- games are independent, so a hero may go to one side
+    /// `match_hero_picks` -- games are independent, so a hero may go to one side
     /// in game 1 and the other in game 2 -- so the de-duplication happens here.
     ///
     /// First-encounter order, like Kotlin's `distinct()`.
@@ -472,7 +472,7 @@ mod tests {
         assert_eq!(roles_of(&m.hero_contexts(), 4), vec![HeroRole::Banned]);
     }
 
-    /// `hero_ban` is keyed `(match_id, hero_id)`, so this cannot arrive from the
+    /// `hero_bans` is keyed `(match_id, hero_id)`, so this cannot arrive from the
     /// database -- but `distinctBy` is in the Kotlin and dropping it would
     /// double a ban's points if it ever did.
     #[test]

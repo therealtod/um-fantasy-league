@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select e.id            as entry_id,\n                  mg.id           as manager_id,\n                  mg.handle,\n                  mg.display_name,\n                  e.credit_grant,\n                  es.slot_index   as \"slot_index?\",\n                  h.id            as \"hero_id?\",\n                  h.name          as \"hero_name?\",\n                  th.cost         as \"hero_cost?\"\n           from tournament_entries e\n               join managers mg on mg.id = e.manager_id\n               left join entry_slots es on es.entry_id = e.id\n               left join heroes h on h.id = es.hero_id\n               left join tournament_heroes th\n                   on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id\n           where e.tournament_id = $1\n           order by e.id, es.slot_index",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_entries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "manager_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "managers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "handle",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "managers",
+            "name": "handle"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "managers",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "credit_grant",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament_entries",
+            "name": "credit_grant"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "slot_index?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "entry_slots",
+            "name": "slot_index"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "hero_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "hero_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "hero_cost?",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournament_heroes",
+            "name": "cost"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2c0b17db08f544a0e38a62542395f0c0837ca1c7808d7cc1225e3b39ac195657"
+}

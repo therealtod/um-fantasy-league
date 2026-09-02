@@ -4,7 +4,7 @@
 //! inserts when the `@Id` is null and updates when it is not.
 //!
 //! `heroes` owns no child collection -- cost is tournament-scoped and lives in
-//! `tournament_hero` (see `pool_admin.rs`), not here -- so there is none of the
+//! `tournament_heroes` (see `pool_admin.rs`), not here -- so there is none of the
 //! delete-and-reinsert cascade `scoring::writer` and `tournament::writer` have
 //! to reproduce.
 

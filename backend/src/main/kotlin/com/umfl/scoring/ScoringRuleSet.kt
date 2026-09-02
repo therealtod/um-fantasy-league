@@ -16,7 +16,7 @@ import java.math.BigDecimal
  * service-level operation (see `AdminScoringService.activate`), not just a
  * field flip on this class.
  */
-@Table("scoring_rule_set")
+@Table("scoring_rule_sets")
 data class ScoringRuleSet(
     @Id val id: Long? = null,
     val tournamentId: Long,
@@ -26,7 +26,7 @@ data class ScoringRuleSet(
     val coefficients: Set<ScoringCoefficient> = emptySet(),
 )
 
-@Table("scoring_coefficient")
+@Table("scoring_coefficients")
 data class ScoringCoefficient(
     @Id val id: Long? = null,
     val metric: String,

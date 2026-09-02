@@ -17,7 +17,7 @@ async fn admin(app: &TestApp) -> i64 {
 
 async fn hero_cost(app: &TestApp, tournament_id: i64, hero_id: i64) -> Option<i32> {
     sqlx::query_scalar!(
-        "select cost from tournament_hero where tournament_id = $1 and hero_id = $2",
+        "select cost from tournament_heroes where tournament_id = $1 and hero_id = $2",
         tournament_id,
         hero_id
     )

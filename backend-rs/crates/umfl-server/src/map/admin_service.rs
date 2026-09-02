@@ -60,7 +60,7 @@ pub async fn create(state: &AppState, name: &str) -> ApiResult<GameMap> {
 /// back, since a rollback un-writes rows the cache may already hold.
 ///
 /// It is gated on the name actually **changing**: `image_url` and
-/// `tournament_hero.cost` never reach an assembled match, so nothing else
+/// `tournament_heroes.cost` never reach an assembled match, so nothing else
 /// edited through this API can stale a cached copy. `AdminHeroService.update`
 /// carries the identical pair and is still to port (PORTING.md §3b).
 pub async fn update(state: &AppState, map_id: i64, name: &str) -> ApiResult<GameMap> {
@@ -95,7 +95,7 @@ pub async fn update(state: &AppState, map_id: i64, name: &str) -> ApiResult<Game
 }
 
 /// Adds one board to a tournament's pool. Idempotent -- there is nothing to
-/// "re-price", because `tournament_map` has no column beyond its key.
+/// "re-price", because `tournament_maps` has no column beyond its key.
 pub async fn add_to_pool(state: &AppState, tournament_id: i64, map_id: i64) -> ApiResult<GameMap> {
     let mut tx = state.pool.begin().await?;
     require_tournament(&mut *tx, tournament_id).await?;

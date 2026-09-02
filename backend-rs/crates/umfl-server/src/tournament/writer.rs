@@ -11,7 +11,7 @@
 //! * **Existing root**: update the root, **delete every child row**, then
 //!   re-insert them. It does not diff. Reproducing the delete-and-reinsert
 //!   matters because it is what makes reordering a roster work at all —
-//!   `entry_slot` is keyed `(entry_id, slot_index)`, so an in-place update of
+//!   `entry_slots` is keyed `(entry_id, slot_index)`, so an in-place update of
 //!   two swapped rows would collide with the unique key mid-statement.
 //!
 //! Every function takes the connection rather than an executor: each is more
@@ -26,7 +26,7 @@ use super::query::{entry_status_to_db, format_to_db, status_to_db};
 // ---------------------------------------------------------------------------
 // The tournament root itself -- oracle: `TournamentRepository.save`
 // (Spring Data JDBC's `CrudRepository`), which inserts when the `@Id` is
-// null and updates when it is not. Unlike the entry above, `tournament` owns
+// null and updates when it is not. Unlike the entry above, `tournaments` owns
 // no `@MappedCollection` child, so there is no delete-and-reinsert cascade
 // here -- see `map::writer` and `hero::writer` for the same shape on a
 // childless root.
@@ -35,7 +35,7 @@ use super::query::{entry_status_to_db, format_to_db, status_to_db};
 /// Inserts a tournament, returning the generated id.
 pub async fn insert_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
-        r#"insert into tournament
+        r#"insert into tournaments
                (name, format, status, start_date, end_date, capacity, roster_size, credit_grant)
            values ($1, $2, $3, $4, $5, $6, $7, $8)
            returning id"#,
@@ -64,7 +64,7 @@ pub async fn insert_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
 pub async fn update_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx::Result<()> {
     let id = t.id.expect("a loaded tournament has an id");
     sqlx::query!(
-        r#"update tournament
+        r#"update tournaments
               set name = $2, format = $3, status = $4, start_date = $5,
                   end_date = $6, capacity = $7, roster_size = $8, credit_grant = $9
             where id = $1"#,
@@ -83,13 +83,13 @@ pub async fn update_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
     Ok(())
 }
 
-/// Deletes a tournament. Every foreign key onto `tournament` is `on delete
+/// Deletes a tournament. Every foreign key onto `tournaments` is `on delete
 /// cascade` (see `V1__core_schema.sql`), so this alone removes its hero
 /// pool, board pool, entries (and their slots), scoring rule sets (and
 /// their coefficients), and matches (and their participants, games and
 /// bans) -- see `AdminTournamentService.delete`'s doc for the itemised list.
 pub async fn delete_tournament(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<()> {
-    sqlx::query!("delete from tournament where id = $1", id)
+    sqlx::query!("delete from tournaments where id = $1", id)
         .execute(db)
         .await?;
     Ok(())
@@ -103,7 +103,7 @@ pub async fn delete_tournament(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result
 /// carries back.
 pub async fn insert_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> sqlx::Result<i64> {
     let id = sqlx::query_scalar!(
-        r#"insert into tournament_entry
+        r#"insert into tournament_entries
                (tournament_id, manager_id, status, credit_grant, registered_at, locked_at)
            values ($1, $2, $3, $4, $5, $6)
            returning id"#,
@@ -132,7 +132,7 @@ pub async fn update_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> s
     let id = entry.id.expect("a loaded entry has an id");
 
     sqlx::query!(
-        r#"update tournament_entry
+        r#"update tournament_entries
               set tournament_id = $2, manager_id = $3, status = $4,
                   credit_grant = $5, registered_at = $6, locked_at = $7
             where id = $1"#,
@@ -147,7 +147,7 @@ pub async fn update_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> s
     .execute(&mut *conn)
     .await?;
 
-    sqlx::query!("delete from entry_slot where entry_id = $1", id)
+    sqlx::query!("delete from entry_slots where entry_id = $1", id)
         .execute(&mut *conn)
         .await?;
     insert_slots(conn, id, &entry.hero_ids()).await?;
@@ -155,7 +155,7 @@ pub async fn update_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> s
 }
 
 /// Writes the roster in list order, because the list index **is**
-/// `entry_slot.slot_index`.
+/// `entry_slots.slot_index`.
 ///
 /// `unnest` with `generate_subscripts` rather than a loop: one statement, and
 /// the index comes from the array's own position so nothing here can drift out
@@ -169,7 +169,7 @@ async fn insert_slots(
         return Ok(());
     }
     sqlx::query!(
-        r#"insert into entry_slot (entry_id, slot_index, hero_id)
+        r#"insert into entry_slots (entry_id, slot_index, hero_id)
            select $1, i - 1, ids[i]
            from (select $2::bigint[] as ids) s,
                 generate_subscripts(s.ids, 1) as i"#,

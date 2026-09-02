@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"count!\" from scoring_coefficients c\n               join scoring_rule_sets rs on rs.id = c.rule_set_id\n           where rs.tournament_id = $1 and c.metric = 'CROWD_FAVOURITE'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1e84c9df53f0be90228205ab35f356ed27b11e44d74cb61c9ecd8e6a426791ae"
+}

@@ -1,4 +1,4 @@
-//! `tournament_hero` writes -- the composite-keyed link table no aggregate
+//! `tournament_heroes` writes -- the composite-keyed link table no aggregate
 //! maps.
 //!
 //! Oracle: `hero/HeroPoolAdminRepository.kt`.
@@ -18,7 +18,7 @@ pub async fn upsert_cost(
     cost: i32,
 ) -> sqlx::Result<()> {
     sqlx::query!(
-        "insert into tournament_hero (tournament_id, hero_id, cost)
+        "insert into tournament_heroes (tournament_id, hero_id, cost)
          values ($1, $2, $3)
          on conflict (tournament_id, hero_id) do update set cost = excluded.cost",
         tournament_id,
@@ -46,7 +46,7 @@ pub async fn upsert_costs(
     let hero_ids: Vec<i64> = entries.iter().map(|e| e.hero_id).collect();
     let costs: Vec<i32> = entries.iter().map(|e| e.cost).collect();
     sqlx::query!(
-        "insert into tournament_hero (tournament_id, hero_id, cost)
+        "insert into tournament_heroes (tournament_id, hero_id, cost)
          select $1, h, c from unnest($2::bigint[], $3::integer[]) as t(h, c)
          on conflict (tournament_id, hero_id) do update set cost = excluded.cost",
         tournament_id,
@@ -61,8 +61,8 @@ pub async fn upsert_costs(
 /// Removes [`hero_id`] from [`tournament_id`]'s pool. Returns false if it
 /// wasn't there to begin with.
 ///
-/// Nothing in the schema stops this -- `entry_slot.hero_id` references
-/// `heroes(id)` directly, never `tournament_hero` -- so a roster still
+/// Nothing in the schema stops this -- `entry_slots.hero_id` references
+/// `heroes(id)` directly, never `tournament_heroes` -- so a roster still
 /// holding this hero doesn't break. It re-prices to 0 on its next read via
 /// the `coalesce` in [`super::query::find_roster_heroes`], the same
 /// "cost is never snapshotted" behaviour that already applies when a hero is
@@ -74,7 +74,7 @@ pub async fn remove_from_pool(
     hero_id: i64,
 ) -> sqlx::Result<bool> {
     let result = sqlx::query!(
-        "delete from tournament_hero where tournament_id = $1 and hero_id = $2",
+        "delete from tournament_heroes where tournament_id = $1 and hero_id = $2",
         tournament_id,
         hero_id
     )

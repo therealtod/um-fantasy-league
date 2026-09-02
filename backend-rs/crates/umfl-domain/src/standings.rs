@@ -40,7 +40,7 @@ pub struct RosterHero {
 /// [`board`].
 ///
 /// An entry with no picks yet is still an entry and still belongs on the board,
-/// which is why the query behind this is a **left** join onto `entry_slot` and
+/// which is why the query behind this is a **left** join onto `entry_slots` and
 /// why `heroes` may legitimately be empty.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryRoster {
@@ -63,7 +63,7 @@ impl EntryRoster {
 /// One leaderboard column.
 ///
 /// The board carries its own column definitions because the backend does not
-/// know which columns exist until it has read `scoring_coefficient` -- an admin
+/// know which columns exist until it has read `scoring_coefficients` -- an admin
 /// adds a metric with an INSERT, not a redeploy.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

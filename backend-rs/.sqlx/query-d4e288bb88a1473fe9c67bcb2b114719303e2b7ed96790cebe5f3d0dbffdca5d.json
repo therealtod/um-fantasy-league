@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from match_game_participants\n         where game_id in (select id from match_games where match_id = $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d4e288bb88a1473fe9c67bcb2b114719303e2b7ed96790cebe5f3d0dbffdca5d"
+}

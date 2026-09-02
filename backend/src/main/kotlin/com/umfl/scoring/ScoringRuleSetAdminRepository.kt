@@ -4,7 +4,7 @@ import org.springframework.jdbc.core.simple.JdbcClient
 import org.springframework.stereotype.Repository
 
 /**
- * Targeted `is_active` writes for `scoring_rule_set`.
+ * Targeted `is_active` writes for `scoring_rule_sets`.
  *
  * [ScoringRuleSet] is an aggregate root owning `coefficients` via
  * `@MappedCollection`, so saving it through [ScoringRuleSetRepository] deletes
@@ -25,7 +25,7 @@ class ScoringRuleSetAdminRepository(private val jdbcClient: JdbcClient) {
     fun deactivateOthers(tournamentId: Long, exceptRuleSetId: Long) {
         jdbcClient.sql(
             """
-            update scoring_rule_set
+            update scoring_rule_sets
                set is_active = false
              where tournament_id = :tournamentId
                and id <> :exceptRuleSetId
@@ -35,7 +35,7 @@ class ScoringRuleSetAdminRepository(private val jdbcClient: JdbcClient) {
     }
 
     fun activate(ruleSetId: Long) {
-        jdbcClient.sql("update scoring_rule_set set is_active = true where id = :ruleSetId")
+        jdbcClient.sql("update scoring_rule_sets set is_active = true where id = :ruleSetId")
             .param("ruleSetId", ruleSetId).update()
     }
 }

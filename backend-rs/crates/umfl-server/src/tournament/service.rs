@@ -24,7 +24,7 @@ use crate::state::AppState;
 use super::{query, writer};
 
 /// Postgres's default name for the inline `unique (tournament_id, manager_id)`
-/// on `tournament_entry` (see `V1__core_schema.sql`).
+/// on `tournament_entries` (see `V1__core_schema.sql`).
 const ENTRY_UNIQUE_INDEX: &str = "tournament_entry_tournament_id_manager_id_key";
 
 /// An entry together with the heroes on it, priced now, and its budget position.
@@ -234,7 +234,7 @@ pub fn not_registered(tournament_id: i64) -> DomainError {
 /// Turn requested hero ids into priced picks, preserving the caller's ordering
 /// so slot positions are stable.
 ///
-/// The price comes from `tournament_hero`, so "unknown" means *not in this
+/// The price comes from `tournament_heroes`, so "unknown" means *not in this
 /// tournament's pool* — a stronger and more correct check than asking whether
 /// the hero exists at all.
 async fn resolve_picks(

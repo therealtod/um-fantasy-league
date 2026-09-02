@@ -41,23 +41,23 @@ class SchemaAndSeedTest @Autowired constructor(
         // fixtures: the hero and board catalogue migrates in every profile, so a
         // `prod` database carries these same counts with everything below at zero.
         assertEquals(74, count("heroes"))
-        assertEquals(35, count("game_map"))
-        assertEquals(4, count("manager"))
-        assertEquals(3, count("tournament"))
-        assertEquals(32, count("tournament_hero"), "12 + 12 + Spring's narrower 8")
-        assertEquals(7, count("tournament_map"))
-        assertEquals(4, count("tournament_entry"))
-        assertEquals(12, count("entry_slot"), "4 entries x roster size 3")
-        assertEquals(3, count("scoring_rule_set"))
-        assertEquals(24, count("scoring_coefficient"), "3 rule sets x 8 metrics")
-        assertEquals(13, count("tournament_match"), "12 single-game matches + the Bo3 decider")
-        assertEquals(26, count("match_participant"), "13 matches x 2 sides")
-        assertEquals(15, count("match_game"), "12 single-game matches + the Bo3's 3 games")
-        assertEquals(30, count("match_game_participant"), "15 games x 2 sides")
-        assertEquals(22, count("hero_ban"), "19 original + the Bo3's one ban per category")
+        assertEquals(35, count("game_maps"))
+        assertEquals(4, count("managers"))
+        assertEquals(3, count("tournaments"))
+        assertEquals(32, count("tournament_heroes"), "12 + 12 + Spring's narrower 8")
+        assertEquals(7, count("tournament_maps"))
+        assertEquals(4, count("tournament_entries"))
+        assertEquals(12, count("entry_slots"), "4 entries x roster size 3")
+        assertEquals(3, count("scoring_rule_sets"))
+        assertEquals(24, count("scoring_coefficients"), "3 rule sets x 8 metrics")
+        assertEquals(13, count("tournament_matches"), "12 single-game matches + the Bo3 decider")
+        assertEquals(26, count("match_participants"), "13 matches x 2 sides")
+        assertEquals(15, count("match_games"), "12 single-game matches + the Bo3's 3 games")
+        assertEquals(30, count("match_game_participants"), "15 games x 2 sides")
+        assertEquals(22, count("hero_bans"), "19 original + the Bo3's one ban per category")
         assertEquals(
             28,
-            count("match_hero_pick"),
+            count("match_hero_picks"),
             "26 heroes fielded (12 matches x 2 sides, plus the Bo3's one hero per side across its " +
                 "three games) + the Bo3's 2 drafted-and-never-fielded picks",
         )
@@ -99,8 +99,8 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select t.name as tournament, th.cost
-                from tournament_hero th
-                    join tournament t on t.id = th.tournament_id
+                from tournament_heroes th
+                    join tournaments t on t.id = th.tournament_id
                     join heroes h on h.id = th.hero_id
                 where h.name = 'Sun Wukong'
                 order by t.name
@@ -120,8 +120,8 @@ class SchemaAndSeedTest @Autowired constructor(
         val springHeroCount = jdbcClient
             .sql(
                 """
-                select count(*) from tournament_hero th
-                    join tournament t on t.id = th.tournament_id
+                select count(*) from tournament_heroes th
+                    join tournaments t on t.id = th.tournament_id
                 where t.name = 'Spring of Myths'
                 """
             )
@@ -149,10 +149,10 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select mg.handle, sum(th.cost) as spent, e.credit_grant
-                from tournament_entry e
-                    join manager mg on mg.id = e.manager_id
-                    join entry_slot es on es.entry_id = e.id
-                    join tournament_hero th
+                from tournament_entries e
+                    join managers mg on mg.id = e.manager_id
+                    join entry_slots es on es.entry_id = e.id
+                    join tournament_heroes th
                         on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id
                 group by mg.handle, e.credit_grant
                 order by mg.handle
@@ -195,8 +195,8 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select t.name, count(rs.id) filter (where rs.is_active) as active_sets
-                from tournament t
-                    left join scoring_rule_set rs on rs.tournament_id = t.id
+                from tournaments t
+                    left join scoring_rule_sets rs on rs.tournament_id = t.id
                 group by t.name
                 order by t.name
                 """
@@ -220,9 +220,9 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from match_game_participant mgp
-                    join match_game mg on mg.id = mgp.game_id
-                    left join match_hero_pick hp
+                from match_game_participants mgp
+                    join match_games mg on mg.id = mgp.game_id
+                    left join match_hero_picks hp
                         on hp.match_id = mg.match_id and hp.side = mgp.side and hp.hero_id = mgp.hero_id
                 where hp.hero_id is null
                 """
@@ -244,7 +244,7 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from hero_ban
+                from hero_bans
                 where (ban_type = 'PRE_BAN') <> (side is null)
                 """
             )
@@ -260,10 +260,10 @@ class SchemaAndSeedTest @Autowired constructor(
 
         assertEquals(
             13,
-            count("hero_ban", "side is null"),
+            count("hero_bans", "side is null"),
             "one pre-ban per seeded match",
         )
-        assertEquals(9, count("hero_ban", "side is not null"), "the 8 opponent bans + the Bo3's self ban")
+        assertEquals(9, count("hero_bans", "side is not null"), "the 8 opponent bans + the Bo3's self ban")
     }
 
     @Test
@@ -272,8 +272,8 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from match_hero_pick hp
-                    join hero_ban hb on hb.match_id = hp.match_id and hb.hero_id = hp.hero_id
+                from match_hero_picks hp
+                    join hero_bans hb on hb.match_id = hp.match_id and hb.hero_id = hp.hero_id
                 """
             )
             .query(Int::class.java)
@@ -288,9 +288,9 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from match_game_participant mgp
-                    join match_game mg on mg.id = mgp.game_id
-                    left join tournament_hero th
+                from match_game_participants mgp
+                    join match_games mg on mg.id = mgp.game_id
+                    left join tournament_heroes th
                         on th.tournament_id = mg.tournament_id and th.hero_id = mgp.hero_id
                 where th.hero_id is null
                 """
@@ -313,8 +313,8 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select count(*)
-                from match_game mg
-                    left join tournament_map tm
+                from match_games mg
+                    left join tournament_maps tm
                         on tm.tournament_id = mg.tournament_id and tm.map_id = mg.map_id
                 where tm.map_id is null
                 """
@@ -331,8 +331,8 @@ class SchemaAndSeedTest @Autowired constructor(
             .sql(
                 """
                 select mg.id, count(*) filter (where mgp.is_winner) as winners
-                from match_game mg
-                    join match_game_participant mgp on mgp.game_id = mg.id
+                from match_games mg
+                    join match_game_participants mgp on mgp.game_id = mg.id
                 group by mg.id
                 order by mg.id
                 """
@@ -357,7 +357,7 @@ class SchemaAndSeedTest @Autowired constructor(
             jdbcClient
                 .sql(
                     """
-                    update match_game_participant
+                    update match_game_participants
                     set health_remaining = 1
                     where game_id = 1 and side = 1
                     """
@@ -372,7 +372,7 @@ class SchemaAndSeedTest @Autowired constructor(
             jdbcClient
                 .sql(
                     """
-                    insert into match_game (match_id, tournament_id, game_number, map_id)
+                    insert into match_games (match_id, tournament_id, game_number, map_id)
                     values (1, 1, 99, null)
                     """
                 )
@@ -383,7 +383,7 @@ class SchemaAndSeedTest @Autowired constructor(
     @Test
     fun `match ids ascend with played_at, which is what makes the id a safe polling key`() {
         val played = jdbcClient
-            .sql("select id, played_at from tournament_match order by id")
+            .sql("select id, played_at from tournament_matches order by id")
             .query { rs, _ -> rs.getLong("id") to rs.getTimestamp("played_at").toInstant() }
             .list()
 

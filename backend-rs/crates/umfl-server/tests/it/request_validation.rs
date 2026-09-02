@@ -49,7 +49,7 @@ async fn admin(app: &TestApp) -> i64 {
 /// Reused verbatim from `match_admin.rs` so the `.sqlx/` cache entry is
 /// shared rather than duplicated.
 async fn map_id(app: &TestApp, name: &str) -> i64 {
-    sqlx::query_scalar!("select id from game_map where name = $1", name)
+    sqlx::query_scalar!("select id from game_maps where name = $1", name)
         .fetch_one(app.pool())
         .await
         .unwrap_or_else(|e| panic!("no board {name}: {e}"))
@@ -58,7 +58,7 @@ async fn map_id(app: &TestApp, name: &str) -> i64 {
 /// Winter of Champions' one seeded rule set -- see `scoring_admin.rs`.
 async fn rule_set_id(app: &TestApp, tournament_id: i64) -> i64 {
     sqlx::query_scalar!(
-        "select id from scoring_rule_set where tournament_id = $1",
+        "select id from scoring_rule_sets where tournament_id = $1",
         tournament_id
     )
     .fetch_one(app.pool())

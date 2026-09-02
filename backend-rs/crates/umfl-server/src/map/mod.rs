@@ -7,7 +7,7 @@
 //! The catalogue is reference data -- facts about Unmatched, seeded by
 //! `V2__reference_data.sql` and extended when Restoration Games releases a
 //! board. The *pool* is league data: which of those boards this tournament
-//! actually plays on, and the thing `match_game` is constrained against.
+//! actually plays on, and the thing `match_games` is constrained against.
 //!
 //! Both halves are admin-only. There is no public board route, because nothing
 //! outside the admin dashboard asks for one -- a match names its board inline.
@@ -31,7 +31,7 @@ use crate::state::AppState;
 
 /// A board a match can be played on.
 ///
-/// Legality per tournament lives in `tournament_map`, not here: the same board
+/// Legality per tournament lives in `tournament_maps`, not here: the same board
 /// can be in one tournament's pool and out of another's, which is why this
 /// carries no tournament at all.
 #[derive(Debug, Clone, PartialEq, Eq)]

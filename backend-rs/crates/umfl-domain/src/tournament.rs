@@ -8,7 +8,7 @@
 //! their feature in the server, per PORTING.md §3.
 //!
 //! Nothing here stores a roster's cost. It is the live sum of the slots'
-//! `tournament_hero.cost`, so the two can never disagree and an unlocked roster
+//! `tournament_heroes.cost`, so the two can never disagree and an unlocked roster
 //! simply re-prices when an admin retunes the pool. See AGENTS.md, "No cost
 //! snapshot".
 
@@ -113,7 +113,7 @@ pub enum EntryStatus {
 /// A single hero on a roster.
 ///
 /// Child of the [`TournamentEntry`] aggregate; its position is the list index,
-/// persisted to `entry_slot.slot_index`. That index is assigned by position and
+/// persisted to `entry_slots.slot_index`. That index is assigned by position and
 /// by nothing else -- see the plan's risk 3, "hand-assigned list indices", which
 /// is why the writer must never reorder this `Vec` on the way out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

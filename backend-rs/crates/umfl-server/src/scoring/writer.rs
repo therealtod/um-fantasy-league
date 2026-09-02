@@ -39,7 +39,7 @@ pub async fn insert_rule_set(
     rule_set: &ScoringRuleSet,
 ) -> sqlx::Result<i64> {
     let id = sqlx::query_scalar!(
-        "insert into scoring_rule_set (tournament_id, name, is_active)
+        "insert into scoring_rule_sets (tournament_id, name, is_active)
          values ($1, $2, $3) returning id",
         rule_set.tournament_id,
         rule_set.name,
@@ -66,7 +66,7 @@ pub async fn update_rule_set(
     let id = rule_set.id.expect("a loaded rule set has an id");
 
     sqlx::query!(
-        "update scoring_rule_set
+        "update scoring_rule_sets
             set tournament_id = $2, name = $3, is_active = $4
           where id = $1",
         id,
@@ -77,9 +77,12 @@ pub async fn update_rule_set(
     .execute(&mut *conn)
     .await?;
 
-    sqlx::query!("delete from scoring_coefficient where rule_set_id = $1", id)
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query!(
+        "delete from scoring_coefficients where rule_set_id = $1",
+        id
+    )
+    .execute(&mut *conn)
+    .await?;
     insert_coefficients(conn, id, &rule_set.coefficients).await?;
     Ok(())
 }
@@ -95,7 +98,7 @@ pub async fn deactivate_others(
     except_rule_set_id: i64,
 ) -> sqlx::Result<()> {
     sqlx::query!(
-        "update scoring_rule_set
+        "update scoring_rule_sets
             set is_active = false
           where tournament_id = $1
             and id <> $2
@@ -110,7 +113,7 @@ pub async fn deactivate_others(
 
 pub async fn activate(conn: &mut PgConnection, rule_set_id: i64) -> sqlx::Result<()> {
     sqlx::query!(
-        "update scoring_rule_set set is_active = true where id = $1",
+        "update scoring_rule_sets set is_active = true where id = $1",
         rule_set_id
     )
     .execute(conn)
@@ -134,7 +137,7 @@ async fn insert_coefficients(
     let sort_orders: Vec<i32> = coefficients.iter().map(|c| c.sort_order).collect();
 
     sqlx::query!(
-        "insert into scoring_coefficient (rule_set_id, metric, coefficient, sort_order)
+        "insert into scoring_coefficients (rule_set_id, metric, coefficient, sort_order)
          select $1, m, w, s
          from unnest($2::text[], $3::numeric[], $4::integer[]) as t(m, w, s)",
         rule_set_id,

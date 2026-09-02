@@ -17,7 +17,7 @@
 //!   paths ([`dev`] and [`supabase`]) differ in how a credential is *verified*
 //!   and never in what it unlocks -- the property `SecurityConfigTest` and
 //!   `DevSecurityConfigTest` assert from either side.
-//! * **The admin role comes from `manager.is_admin`**, our own data, never from
+//! * **The admin role comes from `managers.is_admin`**, our own data, never from
 //!   an identity-provider claim. That is `ManagerAuthorities`, which is one
 //!   field access here rather than a class, because a `Manager` in the
 //!   extensions already carries it.

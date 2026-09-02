@@ -28,52 +28,52 @@ fn valid_body(name: &str) -> serde_json::Value {
 
 async fn entry_count(app: &TestApp, tournament_id: i64) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from tournament_entry where tournament_id = $1"#,
+        r#"select count(*) as "count!" from tournament_entries where tournament_id = $1"#,
         tournament_id
     )
     .fetch_one(app.pool())
     .await
-    .expect("count tournament_entry")
+    .expect("count tournament_entries")
 }
 
 async fn match_count(app: &TestApp, tournament_id: i64) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from tournament_match where tournament_id = $1"#,
+        r#"select count(*) as "count!" from tournament_matches where tournament_id = $1"#,
         tournament_id
     )
     .fetch_one(app.pool())
     .await
-    .expect("count tournament_match")
+    .expect("count tournament_matches")
 }
 
 async fn hero_pool_count(app: &TestApp, tournament_id: i64) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from tournament_hero where tournament_id = $1"#,
+        r#"select count(*) as "count!" from tournament_heroes where tournament_id = $1"#,
         tournament_id
     )
     .fetch_one(app.pool())
     .await
-    .expect("count tournament_hero")
+    .expect("count tournament_heroes")
 }
 
 async fn map_pool_count(app: &TestApp, tournament_id: i64) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from tournament_map where tournament_id = $1"#,
+        r#"select count(*) as "count!" from tournament_maps where tournament_id = $1"#,
         tournament_id
     )
     .fetch_one(app.pool())
     .await
-    .expect("count tournament_map")
+    .expect("count tournament_maps")
 }
 
 async fn rule_set_count(app: &TestApp, tournament_id: i64) -> i64 {
     sqlx::query_scalar!(
-        r#"select count(*) as "count!" from scoring_rule_set where tournament_id = $1"#,
+        r#"select count(*) as "count!" from scoring_rule_sets where tournament_id = $1"#,
         tournament_id
     )
     .fetch_one(app.pool())
     .await
-    .expect("count scoring_rule_set")
+    .expect("count scoring_rule_sets")
 }
 
 // ---------------------------------------------------------------------------

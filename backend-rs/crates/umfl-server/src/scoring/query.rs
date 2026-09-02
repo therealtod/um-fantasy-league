@@ -45,8 +45,8 @@ pub async fn active_rules(
         // that the `left join` makes them optional here. The Kotlin row type
         // marks the same two fields nullable for the same reason.
         r#"select rs.id as rule_set_id, rs.name, c.metric as "metric?", c.coefficient as "coefficient?"
-           from scoring_rule_set rs
-           left join scoring_coefficient c on c.rule_set_id = rs.id
+           from scoring_rule_sets rs
+           left join scoring_coefficients c on c.rule_set_id = rs.id
            where rs.tournament_id = $1
              and rs.is_active
            order by c.sort_order, c.metric"#,
@@ -80,7 +80,7 @@ pub async fn find_by_tournament_id(
 ) -> sqlx::Result<Vec<ScoringRuleSet>> {
     let roots = sqlx::query!(
         "select id, tournament_id, name, is_active
-         from scoring_rule_set where tournament_id = $1 order by id",
+         from scoring_rule_sets where tournament_id = $1 order by id",
         tournament_id
     )
     .fetch_all(&mut *conn)
@@ -110,7 +110,7 @@ pub async fn find_by_tournament_id_and_name(
 ) -> sqlx::Result<Option<ScoringRuleSet>> {
     let Some(root) = sqlx::query!(
         "select id, tournament_id, name, is_active
-         from scoring_rule_set where tournament_id = $1 and name = $2",
+         from scoring_rule_sets where tournament_id = $1 and name = $2",
         tournament_id,
         name
     )
@@ -135,7 +135,7 @@ pub async fn find_by_id(
     rule_set_id: i64,
 ) -> sqlx::Result<Option<ScoringRuleSet>> {
     let Some(root) = sqlx::query!(
-        "select id, tournament_id, name, is_active from scoring_rule_set where id = $1",
+        "select id, tournament_id, name, is_active from scoring_rule_sets where id = $1",
         rule_set_id
     )
     .fetch_optional(&mut *conn)
@@ -165,7 +165,7 @@ async fn coefficients_of(
 ) -> sqlx::Result<Vec<ScoringCoefficient>> {
     let rows = sqlx::query!(
         "select id, metric, coefficient, sort_order
-         from scoring_coefficient where rule_set_id = $1 order by sort_order, id",
+         from scoring_coefficients where rule_set_id = $1 order by sort_order, id",
         rule_set_id
     )
     .fetch_all(conn)
@@ -192,7 +192,7 @@ async fn coefficients_by_rule_set(
     }
     let rows = sqlx::query!(
         "select rule_set_id, id, metric, coefficient, sort_order
-         from scoring_coefficient where rule_set_id = any($1) order by sort_order, id",
+         from scoring_coefficients where rule_set_id = any($1) order by sort_order, id",
         rule_set_ids
     )
     .fetch_all(conn)

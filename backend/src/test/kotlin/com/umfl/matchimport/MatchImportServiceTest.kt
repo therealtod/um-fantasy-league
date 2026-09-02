@@ -114,7 +114,7 @@ class MatchImportServiceTest @Autowired constructor(
         assertEquals("2026-08-17T20:00:00Z", preview.playedAt.toString())
     }
 
-    /** Both sides' typed bans plus the shared pre-ban pool land in one flat list, as `hero_ban` stores them. */
+    /** Both sides' typed bans plus the shared pre-ban pool land in one flat list, as `hero_bans` stores them. */
     @Test
     fun `flattens both sides' bans and the pre-ban pool`() {
         stubScrape()
@@ -137,7 +137,7 @@ class MatchImportServiceTest @Autowired constructor(
 
     /**
      * Flat list, but not side-blind: the source files a typed ban under the side
-     * that owned the hero, and `hero_ban.side` now keeps it. A pre-ban is struck
+     * that owned the hero, and `hero_bans.side` now keeps it. A pre-ban is struck
      * before sides are assigned and carries none, which is also what
      * `MatchRule.BAN_SIDE_INVALID` insists on.
      */
@@ -163,8 +163,8 @@ class MatchImportServiceTest @Autowired constructor(
     }
 
     /**
-     * The board exists in `game_map` but not in this tournament's pool. It is
-     * reported, not invented — `match_game`'s composite FK onto `tournament_map`
+     * The board exists in `game_maps` but not in this tournament's pool. It is
+     * reported, not invented — `match_games`'s composite FK onto `tournament_maps`
      * means recording a game on it would fail at the database.
      */
     @Test
@@ -183,7 +183,7 @@ class MatchImportServiceTest @Autowired constructor(
         // The unresolved games have no map, but the resolvable one still does.
         assertNull(preview.games[0].mapId)
         assertNotNull(preview.games[1].mapId)
-        // Heroes are unaffected: they reference `heroes(id)`, never `tournament_hero`.
+        // Heroes are unaffected: they reference `heroes(id)`, never `tournament_heroes`.
         assertTrue(preview.unresolved.none { it.kind == UnresolvedKind.HERO })
     }
 

@@ -15,7 +15,7 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
     sqlx::query_as!(
         Manager,
         r#"select id, handle, display_name, auth_user_id, is_admin
-           from manager where id = $1"#,
+           from managers where id = $1"#,
         id
     )
     .fetch_optional(db)
@@ -29,7 +29,7 @@ pub async fn find_by_handle(
     sqlx::query_as!(
         Manager,
         r#"select id, handle, display_name, auth_user_id, is_admin
-           from manager where handle = $1"#,
+           from managers where handle = $1"#,
         handle
     )
     .fetch_optional(db)
@@ -43,7 +43,7 @@ pub async fn find_by_auth_user_id(
     sqlx::query_as!(
         Manager,
         r#"select id, handle, display_name, auth_user_id, is_admin
-           from manager where auth_user_id = $1"#,
+           from managers where auth_user_id = $1"#,
         auth_user_id
     )
     .fetch_optional(db)

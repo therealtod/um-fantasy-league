@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from tournament_heroes where tournament_id = $1 and hero_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f35c05382fe31b6735c4ef1b3791258572c661fb8e1c3d81a32ebe7c0a7e65f2"
+}

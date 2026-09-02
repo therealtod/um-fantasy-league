@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select hp.match_id, hp.side, hp.hero_id, h.name as hero_name\n         from match_hero_picks hp\n         join heroes h on h.id = hp.hero_id\n         where hp.match_id = any($1)\n         order by hp.match_id, hp.side, h.name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "match_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "match_hero_picks",
+            "name": "match_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "side",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "match_hero_picks",
+            "name": "side"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "hero_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "match_hero_picks",
+            "name": "hero_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "hero_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "heroes",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3e8ff05edaddf9a0f6656bfdc017e1048a62dc37b2a88fba8fa690571297f74b"
+}

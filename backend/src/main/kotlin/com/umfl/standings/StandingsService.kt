@@ -16,7 +16,7 @@ import java.time.Instant
  * One leaderboard column.
  *
  * The board carries its own column definitions because the backend does not
- * know which columns exist until it has read `scoring_coefficient` — an admin
+ * know which columns exist until it has read `scoring_coefficients` — an admin
  * adds a metric with an INSERT, not a redeploy.
  */
 data class MetricColumn(

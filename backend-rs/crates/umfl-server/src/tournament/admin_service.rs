@@ -87,13 +87,13 @@ pub async fn update(
 
 /// Delete a tournament and all its related data.
 ///
-/// Every foreign key onto `tournament` carries `on delete cascade`
+/// Every foreign key onto `tournaments` carries `on delete cascade`
 /// (`V1__core_schema.sql`), so this operation automatically removes:
-/// - `tournament_hero` entries (hero pool with prices)
-/// - `tournament_map` entries (legal board pool)
-/// - `tournament_entry` entries (manager registrations, and their slots)
-/// - `scoring_rule_set` entries and their coefficients
-/// - `tournament_match` entries and their participants/games/bans
+/// - `tournament_heroes` entries (hero pool with prices)
+/// - `tournament_maps` entries (legal board pool)
+/// - `tournament_entries` entries (manager registrations, and their slots)
+/// - `scoring_rule_sets` entries and their coefficients
+/// - `tournament_matches` entries and their participants/games/bans
 ///
 /// Allowed for any tournament status, and requires only that the tournament
 /// exists.

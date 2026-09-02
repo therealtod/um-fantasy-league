@@ -127,9 +127,9 @@ class AdminTournamentServiceIntegrationTest @Autowired constructor(
         val summerId = requireNotNull(summer.id)
 
         // Verify there's related data before deletion
-        val entryCount = jdbcClient.sql("select count(*) from tournament_entry where tournament_id = :id")
+        val entryCount = jdbcClient.sql("select count(*) from tournament_entries where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
-        val matchCount = jdbcClient.sql("select count(*) from tournament_match where tournament_id = :id")
+        val matchCount = jdbcClient.sql("select count(*) from tournament_matches where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
 
         assertTrue(entryCount > 0, "Summer of Legends should have entries")
@@ -142,15 +142,15 @@ class AdminTournamentServiceIntegrationTest @Autowired constructor(
         assertNull(tournamentRepository.findByName("Summer of Legends"))
 
         // Verify related data is gone (cascade delete)
-        val entriesAfter = jdbcClient.sql("select count(*) from tournament_entry where tournament_id = :id")
+        val entriesAfter = jdbcClient.sql("select count(*) from tournament_entries where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
-        val matchesAfter = jdbcClient.sql("select count(*) from tournament_match where tournament_id = :id")
+        val matchesAfter = jdbcClient.sql("select count(*) from tournament_matches where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
-        val heroPoolAfter = jdbcClient.sql("select count(*) from tournament_hero where tournament_id = :id")
+        val heroPoolAfter = jdbcClient.sql("select count(*) from tournament_heroes where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
-        val mapPoolAfter = jdbcClient.sql("select count(*) from tournament_map where tournament_id = :id")
+        val mapPoolAfter = jdbcClient.sql("select count(*) from tournament_maps where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
-        val ruleSetsAfter = jdbcClient.sql("select count(*) from scoring_rule_set where tournament_id = :id")
+        val ruleSetsAfter = jdbcClient.sql("select count(*) from scoring_rule_sets where tournament_id = :id")
             .param("id", summerId).query(Int::class.java).single()
 
         assertEquals(0, entriesAfter, "Tournament entries should be cascade deleted")

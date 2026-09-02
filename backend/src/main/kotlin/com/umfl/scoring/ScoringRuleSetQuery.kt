@@ -50,8 +50,8 @@ class ScoringRuleSetQuery(private val jdbcClient: JdbcClient) {
     private companion object {
         const val ACTIVE_RULES_SQL = """
             select rs.id as rule_set_id, rs.name, c.metric, c.coefficient
-            from scoring_rule_set rs
-            left join scoring_coefficient c on c.rule_set_id = rs.id
+            from scoring_rule_sets rs
+            left join scoring_coefficients c on c.rule_set_id = rs.id
             where rs.tournament_id = :tournamentId
               and rs.is_active
             order by c.sort_order, c.metric

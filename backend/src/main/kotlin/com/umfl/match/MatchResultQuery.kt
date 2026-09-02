@@ -53,7 +53,7 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
         jdbcClient
             .sql(
                 """
-                select id from tournament_match
+                select id from tournament_matches
                 where tournament_id = :tournamentId and external_link = :externalLink
                 """
             )
@@ -256,31 +256,31 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
     private companion object {
         const val SELECT_MATCH = """
             select m.id, m.tournament_id, m.round, m.played_at, m.external_link
-            from tournament_match m
+            from tournament_matches m
         """
 
         const val SELECT_PARTICIPANTS = """
             select mp.match_id, mp.side, mp.player_label
-            from match_participant mp
+            from match_participants mp
             where mp.match_id in (:matchIds)
             order by mp.match_id, mp.side
         """
 
         const val SELECT_GAMES = """
             select mg.id, mg.match_id, mg.game_number, mg.map_id, gm.name as map_name
-            from match_game mg
-            join game_map gm on gm.id = mg.map_id
+            from match_games mg
+            join game_maps gm on gm.id = mg.map_id
             where mg.match_id in (:matchIds)
             order by mg.match_id, mg.game_number
         """
 
-        // Joined through match_game to recover match_id, which match_game_participant
+        // Joined through match_games to recover match_id, which match_game_participants
         // does not itself carry -- see the mapping note on MatchGameParticipant.
         const val SELECT_GAME_PARTICIPANTS = """
             select mgp.game_id, mg.match_id, mgp.side,
                    mgp.hero_id, h.name as hero_name, mgp.health_remaining, mgp.is_winner
-            from match_game_participant mgp
-            join match_game mg on mg.id = mgp.game_id
+            from match_game_participants mgp
+            join match_games mg on mg.id = mgp.game_id
             join heroes h on h.id = mgp.hero_id
             where mg.match_id in (:matchIds)
             order by mgp.game_id, mgp.side
@@ -288,7 +288,7 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
 
         const val SELECT_PICKS = """
             select hp.match_id, hp.side, hp.hero_id, h.name as hero_name
-            from match_hero_pick hp
+            from match_hero_picks hp
             join heroes h on h.id = hp.hero_id
             where hp.match_id in (:matchIds)
             order by hp.match_id, hp.side, h.name
@@ -296,7 +296,7 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
 
         const val SELECT_BANS = """
             select hb.match_id, hb.hero_id, h.name as hero_name, hb.ban_type, hb.side
-            from hero_ban hb
+            from hero_bans hb
             join heroes h on h.id = hb.hero_id
             where hb.match_id in (:matchIds)
             order by hb.match_id, h.name
@@ -304,7 +304,7 @@ class MatchResultQuery(private val jdbcClient: JdbcClient) {
     }
 }
 
-/** A `tournament_match` row before its children are attached. */
+/** A `tournament_matches` row before its children are attached. */
 private data class MatchHeader(
     val matchId: Long,
     val tournamentId: Long,
@@ -313,7 +313,7 @@ private data class MatchHeader(
     val externalLink: String,
 )
 
-/** A `match_game` row before its own participants are attached. */
+/** A `match_games` row before its own participants are attached. */
 private data class GameHeader(
     val gameId: Long,
     val gameNumber: Int,

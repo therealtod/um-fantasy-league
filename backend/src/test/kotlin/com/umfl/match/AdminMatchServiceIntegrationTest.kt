@@ -74,7 +74,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         )
     )
 
-    private fun aliceVsRobinHood(mapId: Long = id("game_map", "Baskerville Manor")) = Triple(
+    private fun aliceVsRobinHood(mapId: Long = id("game_maps", "Baskerville Manor")) = Triple(
         oneGame(mapId, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood")),
         participants(),
         emptyList<MatchBanInput>(),
@@ -99,7 +99,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `findByTournament narrows to one round when asked`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val (games, sides, bans) = aliceVsRobinHood(mapId)
         adminMatchService.record(tournamentId, round = 1, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
         adminMatchService.record(tournamentId, round = 2, playedAt = Instant.now(), externalLink = aLink(), participants = sides, games = games, bans = bans)
@@ -112,7 +112,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `findByTournamentNewestFirst reverses the fold's order and honours its limit`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val (games, sides, bans) = aliceVsRobinHood(mapId)
         val playedAt = Instant.parse("2026-03-01T18:00:00Z")
         repeat(3) { round ->
@@ -134,8 +134,8 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `records a best-of-three series with a hero repeated across games and different maps`() {
         val tournamentId = winterOfChampionsId()
-        val baskerville = id("game_map", "Baskerville Manor")
-        val sherwood = id("game_map", "Sherwood Forest")
+        val baskerville = id("game_maps", "Baskerville Manor")
+        val sherwood = id("game_maps", "Sherwood Forest")
         val medusa = id("heroes", "Medusa")
         val achilles = id("heroes", "Achilles")
 
@@ -165,7 +165,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     fun `a map outside the tournament's board pool is rejected`() {
         val tournamentId = winterOfChampionsId()
         // Raptor Paddock is not in Winter of Champions' seeded map pool.
-        val raptorPaddock = id("game_map", "Raptor Paddock")
+        val raptorPaddock = id("game_maps", "Raptor Paddock")
         val (_, sides, bans) = aliceVsRobinHood()
         val games = oneGame(raptorPaddock, heroA = id("heroes", "Alice"), heroB = id("heroes", "Robin Hood"))
 
@@ -178,7 +178,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `the same hero on both sides of a game is rejected`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val alice = id("heroes", "Alice")
 
         val error = assertFailsWith<MatchRuleException> {
@@ -198,7 +198,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `two winners on one game is rejected`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
 
         val error = assertFailsWith<MatchRuleException> {
             adminMatchService.record(
@@ -217,7 +217,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a nonexistent heroId is rejected with a 422, not a raw constraint violation`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
 
         val error = assertFailsWith<MatchRuleException> {
             adminMatchService.record(
@@ -236,7 +236,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a hero banned then played in a later game is rejected`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val alice = id("heroes", "Alice")
         val robinHood = id("heroes", "Robin Hood")
         val bigfoot = id("heroes", "Bigfoot")
@@ -272,7 +272,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a player label is free text - an unknown name, a blank and none at all all record`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
 
         val recorded = adminMatchService.record(
             tournamentId,
@@ -305,7 +305,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a game with no winner at all is rejected, not stored as a draw`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
 
         val error = assertFailsWith<MatchRuleException> {
             adminMatchService.record(
@@ -324,7 +324,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a game with a positive-health loser is rejected`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
 
         val error = assertFailsWith<MatchRuleException> {
             adminMatchService.record(
@@ -344,7 +344,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a game with a negative-health loser is accepted`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
 
         val recorded = adminMatchService.record(
             tournamentId,
@@ -374,7 +374,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
             externalLink = "https://example.com/bracket/42",
             participants = participants("Dmitri Kovac", "Hana Sato"),
             games = oneGame(
-                id("game_map", "Baskerville Manor"),
+                id("game_maps", "Baskerville Manor"),
                 heroA = id("heroes", "King Arthur"),
                 heroB = id("heroes", "Medusa"),
                 healthA = 8,
@@ -430,9 +430,9 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         // Uniqueness is scoped to the tournament, matching the importer's own
         // per-tournament duplicate check.
         val otherTournamentId = requireNotNull(tournamentRepository.findByName("Summer of Legends")?.id)
-        val otherMapId = id("game_map", "Baskerville Manor")
+        val otherMapId = id("game_maps", "Baskerville Manor")
         jdbcClient
-            .sql("insert into tournament_map (tournament_id, map_id) values (:t, :m) on conflict do nothing")
+            .sql("insert into tournament_maps (tournament_id, map_id) values (:t, :m) on conflict do nothing")
             .param("t", otherTournamentId)
             .param("m", otherMapId)
             .update()
@@ -462,7 +462,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     }
 
     /**
-     * The half of the draft `hero_ban` could not record before V7: which side's
+     * The half of the draft `hero_bans` could not record before V7: which side's
      * arsenal a hero was struck out of. A correction has to move it, since
      * `correct` replaces the ban set outright rather than merging into it.
      */
@@ -531,17 +531,17 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         fun countWhere(table: String, column: String, value: Long): Int =
             jdbcClient.sql("select count(*) from $table where $column = :id").param("id", value).query(Int::class.java).single()
 
-        assertEquals(0, countWhere("match_participant", "match_id", recorded.matchId))
-        assertEquals(0, countWhere("match_game", "match_id", recorded.matchId))
-        assertEquals(0, countWhere("match_game_participant", "game_id", gameId))
-        assertEquals(0, countWhere("hero_ban", "match_id", recorded.matchId))
-        assertEquals(0, countWhere("match_hero_pick", "match_id", recorded.matchId))
+        assertEquals(0, countWhere("match_participants", "match_id", recorded.matchId))
+        assertEquals(0, countWhere("match_games", "match_id", recorded.matchId))
+        assertEquals(0, countWhere("match_game_participants", "game_id", gameId))
+        assertEquals(0, countWhere("hero_bans", "match_id", recorded.matchId))
+        assertEquals(0, countWhere("match_hero_picks", "match_id", recorded.matchId))
     }
 
     @Test
     fun `each side's draft round-trips, including a hero it never fielded`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val alice = id("heroes", "Alice")
         val robinHood = id("heroes", "Robin Hood")
         val medusa = id("heroes", "Medusa")
@@ -571,7 +571,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `a hero fielded by a side that never drafted it is rejected with a 422`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val alice = id("heroes", "Alice")
         val robinHood = id("heroes", "Robin Hood")
 
@@ -597,7 +597,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
     @Test
     fun `correcting a match replaces the draft rather than adding to it`() {
         val tournamentId = winterOfChampionsId()
-        val mapId = id("game_map", "Baskerville Manor")
+        val mapId = id("game_maps", "Baskerville Manor")
         val alice = id("heroes", "Alice")
         val robinHood = id("heroes", "Robin Hood")
         val medusa = id("heroes", "Medusa")
@@ -636,7 +636,7 @@ class AdminMatchServiceIntegrationTest @Autowired constructor(
         )
         assertEquals(
             2,
-            jdbcClient.sql("select count(*) from match_hero_pick where match_id = :id")
+            jdbcClient.sql("select count(*) from match_hero_picks where match_id = :id")
                 .param("id", recorded.matchId).query(Int::class.java).single(),
         )
     }

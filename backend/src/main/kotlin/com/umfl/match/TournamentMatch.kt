@@ -17,7 +17,7 @@ import java.time.Instant
  * humans, fixed for the whole series; each game records its own hero, board,
  * health and winner, because a side can pilot a different hero per game.
  */
-@Table("tournament_match")
+@Table("tournament_matches")
 data class TournamentMatch(
     @Id val id: Long? = null,
     val tournamentId: Long,
@@ -30,7 +30,7 @@ data class TournamentMatch(
      */
     val externalLink: String,
     /**
-     * `side` (0 or 1) is the list position, persisted to `match_participant.side` —
+     * `side` (0 or 1) is the list position, persisted to `match_participants.side` —
      * the same `keyColumn` idiom [com.umfl.tournament.EntrySlot] uses for
      * `slot_index`, so this class carries no explicit `side` field.
      */
@@ -51,7 +51,7 @@ data class TournamentMatch(
      * owns several picks), not a list-position ordinal.
      *
      * Hangs off the root rather than off [MatchParticipant], where it would
-     * read more naturally: `match_participant` has a composite key, and Spring
+     * read more naturally: `match_participants` has a composite key, and Spring
      * Data JDBC cannot map a child of an entity keyed that way.
      */
     @MappedCollection(idColumn = "match_id")
@@ -59,7 +59,7 @@ data class TournamentMatch(
 )
 
 /** One side of the series — which human played it, for the whole match. */
-@Table("match_participant")
+@Table("match_participants")
 data class MatchParticipant(val playerLabel: String? = null)
 
 /**
@@ -67,10 +67,10 @@ data class MatchParticipant(val playerLabel: String? = null)
  *
  * [tournamentId] is denormalized off the owning [TournamentMatch] purely so
  * this table can carry the same composite "map is in this tournament's pool"
- * foreign key `tournament_match` used to carry directly — nothing besides
+ * foreign key `tournament_matches` used to carry directly — nothing besides
  * construction reads it.
  */
-@Table("match_game")
+@Table("match_games")
 data class MatchGame(
     @Id val id: Long? = null,
     val tournamentId: Long,
@@ -82,7 +82,7 @@ data class MatchGame(
 )
 
 /** One side's result in one game: the hero it brought and how the game ended. */
-@Table("match_game_participant")
+@Table("match_game_participants")
 data class MatchGameParticipant(
     val heroId: Long,
     val healthRemaining: Int,
@@ -96,10 +96,11 @@ enum class BanType { PRE_BAN, OPPONENT_BAN, SELF_BAN }
  * hero is struck at most once per series however many sides wanted it.
  *
  * [side] is the draft this hero came out of, while [banType] says who struck
- * it. Null for a `PRE_BAN`, which precedes side assignment, and for rows
- * recorded before the column existed -- see `V7__hero_ban_side.sql`.
+ * it. Null for a `PRE_BAN`, which precedes side assignment, and for a ban
+ * typed with no side to attribute -- see `hero_bans.side` in
+ * `V1__core_schema.sql`.
  */
-@Table("hero_ban")
+@Table("hero_bans")
 data class HeroBan(val heroId: Long, val banType: BanType, val side: Int? = null)
 
 /**
@@ -108,5 +109,5 @@ data class HeroBan(val heroId: Long, val banType: BanType, val side: Int? = null
  * No surrogate id either: `(match_id, side, hero_id)` is the natural key. No
  * ban category to pair with [HeroBan.banType] -- a pick is a pick.
  */
-@Table("match_hero_pick")
+@Table("match_hero_picks")
 data class HeroPick(val side: Int, val heroId: Long)

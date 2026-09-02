@@ -5,7 +5,7 @@
 //! [`crate::match_result`], because `MatchResult::hero_contexts` is their only
 //! constructor and splitting them would make the two modules circular.
 //!
-//! `scoring_coefficient.metric` is free-form text so an admin can add a weighted
+//! `scoring_coefficients.metric` is free-form text so an admin can add a weighted
 //! row without a migration. This registry prices the keys it implements and
 //! **silently ignores the rest**: an unknown metric contributes nothing, is
 //! dropped from the leaderboard's columns, and raises nothing. The seed's
@@ -125,7 +125,7 @@ fn opponent_ban(context: &MetricContext<'_>) -> f64 {
     ban_of_type(context, BanType::OpponentBan)
 }
 
-/// Prices a ban by category alone. It deliberately never reads `hero_ban.side`:
+/// Prices a ban by category alone. It deliberately never reads `hero_bans.side`:
 /// points are per hero and never per player (AGENTS.md, "A ban's `side` is the
 /// draft it came out of, not who struck it").
 fn ban_of_type(context: &MetricContext<'_>, ban_type: BanType) -> f64 {
@@ -198,7 +198,7 @@ fn health_gap(context: &MetricContext<'_>) -> Option<f64> {
 ///
 /// [`health_differential_two_way`] is the ungated variant of exactly this. The
 /// two are a deliberate pair rather than a duplication: an admin prices one or
-/// the other (or both) by adding the matching `scoring_coefficient` row, which
+/// the other (or both) by adding the matching `scoring_coefficients` row, which
 /// is why this is two registry keys instead of a flag on one. **Do not collapse
 /// them.**
 fn health_differential(context: &MetricContext<'_>) -> f64 {

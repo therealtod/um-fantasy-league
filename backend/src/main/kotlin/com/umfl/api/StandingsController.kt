@@ -22,7 +22,7 @@ class StandingsController(
 
     /**
      * The leaderboard, carrying its own column definitions — the backend cannot
-     * know which metrics exist until it has read `scoring_coefficient`.
+     * know which metrics exist until it has read `scoring_coefficients`.
      */
     @GetMapping("/standings")
     fun standings(@PathVariable id: Long): StandingsBoard {

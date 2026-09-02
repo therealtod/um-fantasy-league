@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select status from tournament_entries where manager_id = $1 and tournament_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tournament_entries",
+            "name": "status"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a52b1bf21cf48a5dd188d8a11c83323635cfc2a026e28620d5734ea692031bb4"
+}

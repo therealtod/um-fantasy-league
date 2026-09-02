@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update game_maps set name = $1 where id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "518d733c149b71cc8773d8cad55be5a8d61c19b9a0dd813a5d56cb08efd6a20c"
+}

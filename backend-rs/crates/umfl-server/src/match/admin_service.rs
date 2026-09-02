@@ -8,7 +8,7 @@
 //! time from what this saves, so recording, correcting or retracting a match is
 //! the entire surface area; no total is ever recomputed and stored.
 //!
-//! Because this is the *only* writer of `tournament_match` and its children,
+//! Because this is the *only* writer of `tournament_matches` and its children,
 //! the announcement all three write methods make is a complete account of when
 //! that data changes. In Kotlin that announcement is a `StandingsUpdateEvent`
 //! with two listeners; here it is [`announce`], [`announce_completed`] and
@@ -31,8 +31,8 @@ use super::{
     TournamentMatchWrite, query, writer,
 };
 
-/// Named in `V9__external_link_required.sql`; Postgres reports it as the
-/// violated constraint.
+/// Named in `V1__core_schema.sql`; Postgres reports it as the violated
+/// constraint.
 const LINK_INDEX: &str = "uq_tournament_match_external_link";
 
 /// Recorded matches, newest first, optionally narrowed to one round.
@@ -291,7 +291,7 @@ async fn require_match(
     match_id: i64,
 ) -> ApiResult<()> {
     let owner = sqlx::query_scalar!(
-        "select tournament_id from tournament_match where id = $1",
+        "select tournament_id from tournament_matches where id = $1",
         match_id
     )
     .fetch_optional(conn)
@@ -402,9 +402,9 @@ fn to_bans(bans: &[MatchBanInput]) -> Vec<HeroBanWrite> {
 }
 
 /// The draft rides in on the participants -- a pick belongs to a side -- but
-/// persists as a child of the match, since `match_participant` is
+/// persists as a child of the match, since `match_participants` is
 /// composite-keyed and cannot own children of its own. The side is the
-/// participant's list position, the same ordinal `match_participant.side` is
+/// participant's list position, the same ordinal `match_participants.side` is
 /// written from.
 ///
 /// The per-side `distinct()` is the Kotlin's and is load-bearing: a side that

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tournaments\n              set name = $2, format = $3, status = $4, start_date = $5,\n                  end_date = $6, capacity = $7, roster_size = $8, credit_grant = $9\n            where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Date",
+        "Date",
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28ac50c6932a99775406a37ccd224c96ea32167d0b7ff7771549d3ea344b61b6"
+}

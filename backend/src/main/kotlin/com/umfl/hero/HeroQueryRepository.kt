@@ -34,7 +34,7 @@ data class HeroView(
  *
  * Everything here is keyed by `tournamentId` rather than by a season, because
  * cost is per tournament: the same hero is a bargain at one event and a premium
- * pick at the next. A hero absent from `tournament_hero` is simply not in that
+ * pick at the next. A hero absent from `tournament_heroes` is simply not in that
  * tournament's pool, which is what makes `UNKNOWN_HERO` a real check rather
  * than an existence test.
  */
@@ -66,7 +66,7 @@ class HeroQueryRepository(private val jdbcClient: JdbcClient) {
     }
 
     /**
-     * Identity for ids already committed to a roster (an `entry_slot`), priced
+     * Identity for ids already committed to a roster (an `entry_slots`), priced
      * by this tournament's *current* pool — cost 0 if the hero has since left
      * it. Unlike [findByIds], this never drops an id: a locked or in-progress
      * roster must keep reporting every slot it holds, the same way
@@ -80,7 +80,7 @@ class HeroQueryRepository(private val jdbcClient: JdbcClient) {
                 """
                 select h.id, h.name, h.image_url, coalesce(th.cost, 0) as cost
                 from heroes h
-                left join tournament_hero th
+                left join tournament_heroes th
                     on th.tournament_id = :tournamentId and th.hero_id = h.id
                 where h.id in (:ids)
                 """
@@ -94,7 +94,7 @@ class HeroQueryRepository(private val jdbcClient: JdbcClient) {
     private companion object {
         const val SELECT_HERO_VIEW = """
             select h.id, h.name, h.image_url, th.cost
-            from tournament_hero th
+            from tournament_heroes th
             join heroes h on h.id = th.hero_id
         """
     }

@@ -22,19 +22,19 @@
 -- with a full hero and board catalogue and a league that has never been
 -- played: zero tournaments, zero managers, zero results.
 --
--- Naming: `game_map` and `tournament_match`, because MAP and MATCH are
+-- Naming: `game_maps` and `tournament_matches`, because MAP and MATCH are
 -- reserved words in the SQL standard and quoting them at every call site
 -- would be noise.
 --
 -- Note on surrogate keys: tables that Spring Data JDBC loads or writes as
 -- aggregates carry a bigserial id, because Spring Data JDBC cannot map a
--- composite primary key. The pure link tables (`tournament_hero`,
--- `tournament_map`, `entry_slot`, `match_participant`, `match_game_participant`,
--- `hero_ban`) are read through JdbcClient or mapped as @MappedCollection
--- children keyed by list position or by their own natural key, so they keep
--- their natural composite key with no surrogate. `match_game` is the one
--- exception among the match tables: it is itself the parent of
--- `match_game_participant`, so it needs a surrogate id to be referenced by.
+-- composite primary key. The pure link tables (`tournament_heroes`,
+-- `tournament_maps`, `entry_slots`, `match_participants`, `match_game_participants`,
+-- `hero_bans`, `match_hero_picks`) are read through JdbcClient or mapped as
+-- @MappedCollection children keyed by list position or by their own natural
+-- key, so they keep their natural composite key with no surrogate. `match_games`
+-- is the one exception among the match tables: it is itself the parent of
+-- `match_game_participants`, so it needs a surrogate id to be referenced by.
 -- ===========================================================================
 
 -- Names are unique because every seed insert and every integration test looks
@@ -48,7 +48,7 @@ create table heroes (
 comment on column heroes.image_url is
     'Optional artwork URL. Null for all seeded heroes -- no official Unmatched artwork is bundled.';
 
-create table game_map (
+create table game_maps (
     id   bigserial primary key,
     name text not null unique
 );
@@ -64,12 +64,12 @@ create table game_map (
 -- get just-in-time provisioned with this column set on first login.
 --
 -- There is no credit balance here. Budget is granted per registration
--- (`tournament_entry.credit_grant`), not held in a global wallet.
+-- (`tournament_entries.credit_grant`), not held in a global wallet.
 --
 -- `is_admin` is our own authorization data, not derived from any identity
 -- provider claim: a future swap of auth provider must not require
 -- re-deriving who is allowed to run the admin API (`/api/admin/**`).
-create table manager (
+create table managers (
     id            bigserial primary key,
     handle        text not null unique,
     display_name  text not null,
@@ -77,16 +77,16 @@ create table manager (
     is_admin      boolean not null default false
 );
 
-comment on column manager.auth_user_id is
+comment on column managers.auth_user_id is
     'Supabase auth.users.id (JWT "sub" claim). Null for dev-seeded managers with no linked identity.';
 
-comment on column manager.is_admin is
+comment on column managers.is_admin is
     'Grants ROLE_ADMIN for /api/admin/**. Our own authorization data, independent of any auth provider.';
 
 -- `credit_grant` is the fantasy budget every registrant receives on entering.
 -- Dates are `date`, not `timestamptz`: a real tournament is announced as a day
 -- or a weekend, not a wall-clock instant. `end_date` is null until it is over.
-create table tournament (
+create table tournaments (
     id           bigserial primary key,
     name         text    not null unique,
     format       text    not null check (format in ('BANQUEST', 'ARSENAL')),
@@ -102,19 +102,19 @@ create table tournament (
 -- design: the same hero is a bargain at one event and a premium pick at the
 -- next, and an admin retunes a pool with one UPDATE. Nothing snapshots it --
 -- an unlocked roster simply re-prices when the cost changes.
-create table tournament_hero (
-    tournament_id bigint  not null references tournament (id) on delete cascade,
+create table tournament_heroes (
+    tournament_id bigint  not null references tournaments (id) on delete cascade,
     hero_id       bigint  not null references heroes (id),
     cost          integer not null check (cost > 0),
     primary key (tournament_id, hero_id)
 );
 
--- The legal board pool for one tournament. `tournament_match` carries a
+-- The legal board pool for one tournament. `tournament_matches` carries a
 -- composite foreign key onto this primary key, which is what constrains a
 -- recorded match to a board that tournament actually played on.
-create table tournament_map (
-    tournament_id bigint not null references tournament (id) on delete cascade,
-    map_id        bigint not null references game_map (id),
+create table tournament_maps (
+    tournament_id bigint not null references tournaments (id) on delete cascade,
+    map_id        bigint not null references game_maps (id),
     primary key (tournament_id, map_id)
 );
 
@@ -125,11 +125,11 @@ create table tournament_map (
 -- tournament's grant later must not silently hand extra budget to managers who
 -- already drafted, and lowering it must not retroactively invalidate them.
 -- Total cost is deliberately NOT stored -- it is the live sum of the slots'
--- `tournament_hero.cost`, so it cannot drift.
-create table tournament_entry (
+-- `tournament_heroes.cost`, so it cannot drift.
+create table tournament_entries (
     id            bigserial   not null primary key,
-    tournament_id bigint      not null references tournament (id) on delete cascade,
-    manager_id    bigint      not null references manager (id) on delete cascade,
+    tournament_id bigint      not null references tournaments (id) on delete cascade,
+    manager_id    bigint      not null references managers (id) on delete cascade,
     status        text        not null check (status in ('DRAFT', 'LOCKED')),
     credit_grant  integer     not null check (credit_grant > 0),
     registered_at timestamptz not null default now(),
@@ -143,11 +143,11 @@ create table tournament_entry (
 -- collection: entry_id is the back-reference, slot_index the list index.
 --
 -- No acquisition_cost column: the roster's cost is joined live from
--- `tournament_hero`. The hero FK has no cascade on purpose -- deleting a hero
+-- `tournament_heroes`. The hero FK has no cascade on purpose -- deleting a hero
 -- that sits on somebody's roster should fail loudly rather than quietly shrink
 -- a locked entry.
-create table entry_slot (
-    entry_id   bigint  not null references tournament_entry (id) on delete cascade,
+create table entry_slots (
+    entry_id   bigint  not null references tournament_entries (id) on delete cascade,
     slot_index integer not null check (slot_index >= 0),
     hero_id    bigint  not null references heroes (id),
     primary key (entry_id, slot_index),
@@ -158,16 +158,16 @@ create table entry_slot (
 -- constraint above already provides that btree. manager_id has no such
 -- coverage, despite backing findByManagerId on every /api/tournaments request
 -- from a signed-in manager.
-create index idx_tournament_entry_manager on tournament_entry (manager_id);
-create index idx_tournament_hero_hero on tournament_hero (hero_id);
-create index idx_entry_slot_hero on entry_slot (hero_id);
+create index idx_tournament_entry_manager on tournament_entries (manager_id);
+create index idx_tournament_hero_hero on tournament_heroes (hero_id);
+create index idx_entry_slot_hero on entry_slots (hero_id);
 
 -- ===========================================================================
 -- Recorded results and the scoring rules that price them.
 --
 -- Nothing in here is simulated and nothing in here stores a fantasy total.
 -- Matches are facts an admin records; points are derived at read time by
--- folding `scoring_coefficient` over each (hero, match) pair. A stored total
+-- folding `scoring_coefficients` over each (hero, match) pair. A stored total
 -- would be a cache with nothing to invalidate it, because coefficients are
 -- mutable reference data.
 -- ===========================================================================
@@ -175,16 +175,24 @@ create index idx_entry_slot_hero on entry_slot (hero_id);
 -- The scoring configuration for one tournament. Multiple rule sets may exist
 -- (drafts, a retune kept for reference); exactly one may be active at a time,
 -- enforced by the partial unique index below rather than by a trigger.
-create table scoring_rule_set (
+--
+-- `is_active` defaults to false: which rule set is live is an explicit admin
+-- decision (`POST .../scoring-rule-sets/{id}/activate`), never a property of
+-- having been inserted. Spring Data JDBC writes every mapped column on
+-- insert regardless, so this default only matters to a hand-written INSERT
+-- (a fixture, a psql session) -- and there, defaulting to active is exactly
+-- wrong: it would make a draft rule set live, or trip
+-- `uq_scoring_rule_set_active` if the tournament already had one.
+create table scoring_rule_sets (
     id            bigserial primary key,
-    tournament_id bigint  not null references tournament (id) on delete cascade,
+    tournament_id bigint  not null references tournaments (id) on delete cascade,
     name          text    not null,
-    is_active     boolean not null default true,
+    is_active     boolean not null default false,
     unique (tournament_id, name)
 );
 
 create unique index uq_scoring_rule_set_active
-    on scoring_rule_set (tournament_id)
+    on scoring_rule_sets (tournament_id)
     where is_active;
 
 -- One weighted metric. `metric` is deliberately free-form text, not an enum and
@@ -200,9 +208,9 @@ create unique index uq_scoring_rule_set_active
 -- the backend cannot know any other way.
 --
 -- No check on `coefficient`: negative weights are legitimate (a penalty).
-create table scoring_coefficient (
+create table scoring_coefficients (
     id          bigserial      primary key,
-    rule_set_id bigint         not null references scoring_rule_set (id) on delete cascade,
+    rule_set_id bigint         not null references scoring_rule_sets (id) on delete cascade,
     metric      text           not null,
     coefficient numeric(10, 4) not null,
     sort_order  integer        not null default 0,
@@ -212,7 +220,7 @@ create table scoring_coefficient (
 );
 
 -- One recorded match -- a series of one or more games between the same two
--- human players. `map_id` moved to `match_game`: each game in a series can be
+-- human players. `map_id` moved to `match_games`: each game in a series can be
 -- played on a different board. `played_at` stays here (when the series
 -- happened), not derived from its games, so the existing played_at-based
 -- ticker sort/index below is undisturbed by adding games.
@@ -221,38 +229,48 @@ create table scoring_coefficient (
 -- agree. That is what lets the ticker poll on `id > :sinceMatchId` (monotonic,
 -- unique) while sorting for display on `played_at` (which is NOT unique --
 -- parallel tables share a start time).
-create table tournament_match (
+create table tournament_matches (
     id            bigserial   primary key,
-    tournament_id bigint      not null references tournament (id) on delete cascade,
+    tournament_id bigint      not null references tournaments (id) on delete cascade,
     round         integer     not null check (round > 0),
     played_at     timestamptz not null,
-    external_link text,
-    -- Redundant against the primary key, and here only so `match_game` can
+    external_link text        not null,
+    -- Redundant against the primary key, and here only so `match_games` can
     -- point a composite FK at (id, tournament_id) -- see that table's comment.
     unique (id, tournament_id)
 );
 
-comment on column tournament_match.external_link is
-    'Optional link to another platform''s record of this match (bracket site, VOD, etc). Same '
-    'shape as heroes.image_url: plain nullable text, no validation beyond nullability.';
+-- What stops the same match being imported twice: the admin match import
+-- turns a tabletopleague.com URL into a reviewable draft, and this is the
+-- duplicate check against it. Scoped to the tournament, not global, matching
+-- the importer's own per-tournament check -- a global constraint would let
+-- the wizard report "no duplicate" and then fail the save.
+create unique index uq_tournament_match_external_link
+    on tournament_matches (tournament_id, external_link);
+
+comment on column tournament_matches.external_link is
+    'Where this match is recorded on another platform (the match import''s source URL, a bracket '
+    'site, a VOD). Required, and unique within the tournament: it is what stops the same match '
+    'being imported twice. A match with no such page carries a synthetic ''urn:umfl:match:<id>'' '
+    'placeholder rather than a null.';
 
 -- One side of the series: which human played it, for the whole series. Hero,
--- map, health and winner all moved to match_game/match_game_participant,
+-- map, health and winner all moved to match_games/match_game_participants,
 -- because in a best-of-N series a side can pilot a different hero per game --
 -- only the two human competitors are fixed for the series.
 --
 -- No surrogate id: `side` (0 or 1) is a stable ordinal with no data of its
--- own, exactly like `entry_slot.slot_index` -- Spring Data JDBC maps this as
+-- own, exactly like `entry_slots.slot_index` -- Spring Data JDBC maps this as
 -- a List<MatchParticipant> child keyed by list position, so the Kotlin class
 -- carries no explicit `side` field.
-create table match_participant (
-    match_id     bigint  not null references tournament_match (id) on delete cascade,
+create table match_participants (
+    match_id     bigint  not null references tournament_matches (id) on delete cascade,
     side         integer not null check (side in (0, 1)),
     player_label text,
     primary key (match_id, side)
 );
 
-comment on column match_participant.player_label is
+comment on column match_participants.player_label is
     'Who piloted this side for the whole series, as free text. Deliberately not a `player` '
     'table: every point in this application is scored per hero -- no metric extractor, no '
     'scoring coefficient and no standings query reads the human behind the hero, so the name is '
@@ -260,8 +278,8 @@ comment on column match_participant.player_label is
     'unattributed result is still a valid result.';
 
 -- One game within a series. `tournament_id` is denormalized from
--- `tournament_match` purely so this table can carry the same composite
--- "map is in this tournament's pool" foreign key `tournament_match` used to
+-- `tournament_matches` purely so this table can carry the same composite
+-- "map is in this tournament's pool" foreign key `tournament_matches` used to
 -- carry directly -- Spring Data JDBC needs it as a real field to build that
 -- FK; nothing besides construction reads it otherwise.
 -- Being a copy, it can in principle drift from the parent match's own
@@ -271,26 +289,26 @@ comment on column match_participant.player_label is
 -- `match_game_of_match` pins the copy to its parent instead of leaving the
 -- two in step by AdminMatchService's construction alone.
 -- `match_game_map_in_pool` is DEFERRABLE INITIALLY DEFERRED: deleting a
--- tournament cascades to `tournament_map` (a direct child) and to `match_game`
--- (a grandchild, via `tournament_match`) in the same statement, and Postgres
+-- tournament cascades to `tournament_maps` (a direct child) and to `match_games`
+-- (a grandchild, via `tournament_matches`) in the same statement, and Postgres
 -- does not guarantee the grandchild is fully cascaded away before the direct
 -- child's rows are removed. Deferring the check to commit, by which point
 -- both cascades have finished, avoids a spurious FK violation on a delete
 -- that is actually consistent. `tournament_match_map_in_pool` never needed
--- this because `tournament_match` and `tournament_map` are both direct
--- children of `tournament`, one level removed either way.
-create table match_game (
+-- this because `tournament_matches` and `tournament_maps` are both direct
+-- children of `tournaments`, one level removed either way.
+create table match_games (
     id            bigserial primary key,
-    match_id      bigint  not null references tournament_match (id) on delete cascade,
+    match_id      bigint  not null references tournament_matches (id) on delete cascade,
     tournament_id bigint  not null,
     game_number   integer not null check (game_number > 0),
     map_id        bigint  not null,
     unique (match_id, game_number),
     constraint match_game_of_match
-        foreign key (match_id, tournament_id) references tournament_match (id, tournament_id)
+        foreign key (match_id, tournament_id) references tournament_matches (id, tournament_id)
         on delete cascade,
     constraint match_game_map_in_pool
-        foreign key (tournament_id, map_id) references tournament_map (tournament_id, map_id)
+        foreign key (tournament_id, map_id) references tournament_maps (tournament_id, map_id)
         deferrable initially deferred
 );
 
@@ -303,17 +321,17 @@ create table match_game (
 -- unique index could pin "at most one" but not "at least one".
 --
 -- `unique (game_id, hero_id)` is unambiguous here precisely because banned
--- heroes live in `hero_ban` and never appear as a game participant.
+-- heroes live in `hero_bans` and never appear as a game participant.
 --
--- `side` here is NOT declared as an FK back to match_participant.side --
+-- `side` here is NOT declared as an FK back to match_participants.side --
 -- doing that would require denormalizing match_id onto this table too, one
--- level further down. The side-pairing between match_participant and
--- match_game_participant (side 0 of a game is played by side 0 of the
+-- level further down. The side-pairing between match_participants and
+-- match_game_participants (side 0 of a game is played by side 0 of the
 -- series) is an APPLICATION-level invariant, enforced by MatchResultPolicy /
 -- AdminMatchService always building both lists in the same order -- the same
 -- tier of guarantee "exactly 2 participants" already was before this change.
-create table match_game_participant (
-    game_id          bigint  not null references match_game (id) on delete cascade,
+create table match_game_participants (
+    game_id          bigint  not null references match_games (id) on delete cascade,
     side             integer not null check (side in (0, 1)),
     hero_id          bigint  not null references heroes (id),
     health_remaining integer not null,
@@ -324,35 +342,81 @@ create table match_game_participant (
 );
 
 create unique index uq_match_game_participant_winner
-    on match_game_participant (game_id)
+    on match_game_participants (game_id)
     where is_winner;
 
 -- A hero banned out of the series. Modelled as its own table rather than a
--- `was_banned` flag on match_game_participant: a banned hero has no health
+-- `was_banned` flag on match_game_participants: a banned hero has no health
 -- and no result, so storing it as a participant would force
 -- health_remaining = 0, which is indistinguishable from "played and was
 -- defeated" and would poison every HEALTH_REMAINING sum and SHUTOUT check.
 --
 -- Bans happen once, before the series starts -- not per game -- which is why
--- this references tournament_match, not match_game. `ban_type` follows this
+-- this references tournament_matches, not match_games. `ban_type` follows this
 -- file's existing check-constrained text + Kotlin enum convention (see
--- tournament.status).
+-- tournaments.status).
 --
--- Who struck the ban is not recorded beyond its category: the BAN metric
--- prices the banned hero, never the person who banned it. Natural composite
--- key, no surrogate.
+-- The primary key stays (match_id, hero_id): a hero is banned at most once per
+-- series however many sides wanted it, which is exactly what
+-- MatchRule.DUPLICATE_BAN already means.
+--
+-- `side` is the side whose draft the hero was struck out of, not who struck
+-- it -- `ban_type` already says that: SELF_BAN is a side striking one of its
+-- own, OPPONENT_BAN the other side striking it, and a PRE_BAN precedes side
+-- assignment and so carries no side at all (`hero_ban_pre_ban_has_no_side`
+-- rejects one that does). It stays nullable rather than becoming a
+-- non-optional fact: a ban typed by hand with nothing to attribute it to is
+-- still a legal ban. Scoring never reads this column -- MatchMetrics.banOfType
+-- prices a ban by category alone, because points are per hero and never per
+-- player.
 --
 -- A parallel `map_ban (match_id, map_id, ban_type)` table is a plausible
 -- future extension for board draft/bans -- not built now.
-create table hero_ban (
-    match_id bigint not null references tournament_match (id) on delete cascade,
-    hero_id  bigint not null references heroes (id),
-    ban_type text   not null check (ban_type in ('PRE_BAN', 'OPPONENT_BAN', 'SELF_BAN')),
-    primary key (match_id, hero_id)
+create table hero_bans (
+    match_id bigint  not null references tournament_matches (id) on delete cascade,
+    hero_id  bigint  not null references heroes (id),
+    ban_type text    not null check (ban_type in ('PRE_BAN', 'OPPONENT_BAN', 'SELF_BAN')),
+    side     integer,
+    primary key (match_id, hero_id),
+    constraint hero_ban_side_range check (side in (0, 1)),
+    constraint hero_ban_pre_ban_has_no_side check (side is null or ban_type <> 'PRE_BAN')
 );
 
-create index idx_scoring_coefficient_rule_set on scoring_coefficient (rule_set_id, sort_order);
-create index idx_tournament_match_tournament on tournament_match (tournament_id, id desc);
-create index idx_tournament_match_played_at on tournament_match (tournament_id, played_at desc);
-create index idx_match_game_participant_hero on match_game_participant (hero_id);
-create index idx_hero_ban_hero on hero_ban (hero_id);
+comment on column hero_bans.side is
+    'The side whose draft this hero was struck out of (0 or 1), or null for a PRE_BAN -- '
+    'struck before sides were assigned -- or for a ban typed with no side to attribute. '
+    'ban_type says who cast the ban; this says whose hero it was.';
+
+-- A hero one side drafted for one series -- the picks half of the draft, with
+-- hero_bans as the bans half. A drafted hero need never have played: that is
+-- the whole point of recording it, and it is what APPEARANCE scores. Without
+-- this table, "featured in this match" and "played a game in this match" were
+-- the same fact, which made a hero drafted and then never fielded
+-- indistinguishable from a hero nobody drafted at all.
+--
+-- A separate table from `hero_bans` rather than one draft table with a kind
+-- column, because the two carry different data: a pick has an owning `side`
+-- and no category, a ban has a category (`PRE_BAN`/`OPPONENT_BAN`/`SELF_BAN`)
+-- and no side -- a pre-ban belongs to neither. A hero cannot be both; that is
+-- enforced in Kotlin as `MatchRule.BANNED_HERO_DRAFTED`, alongside
+-- `PLAYED_HERO_NOT_DRAFTED`, which is what keeps a recorded draft complete.
+--
+-- Deliberately no `unique (match_id, hero_id)`. Games in a series are
+-- independent -- side 0 may pilot a hero in game 1 and side 1 the same hero in
+-- game 2, which `match_game_participants`'s per-game `unique (game_id,
+-- hero_id)` allows -- so a cross-side unique here would retroactively outlaw a
+-- result the schema accepts today. APPEARANCE de-duplicates by hero instead,
+-- so a hero drafted by both sides still scores once for the match.
+create table match_hero_picks (
+    match_id bigint  not null references tournament_matches (id) on delete cascade,
+    side     integer not null check (side in (0, 1)),
+    hero_id  bigint  not null references heroes (id),
+    primary key (match_id, side, hero_id)
+);
+
+create index idx_scoring_coefficient_rule_set on scoring_coefficients (rule_set_id, sort_order);
+create index idx_tournament_match_tournament on tournament_matches (tournament_id, id desc);
+create index idx_tournament_match_played_at on tournament_matches (tournament_id, played_at desc);
+create index idx_match_game_participant_hero on match_game_participants (hero_id);
+create index idx_hero_ban_hero on hero_bans (hero_id);
+create index idx_match_hero_pick_hero on match_hero_picks (hero_id);

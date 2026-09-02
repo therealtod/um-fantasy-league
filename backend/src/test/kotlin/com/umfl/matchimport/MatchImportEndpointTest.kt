@@ -107,7 +107,7 @@ class MatchImportEndpointTest @Autowired constructor(
         }.andReturn().response.contentAsString
 
         // The side survives the whole round trip: the source grouped these under
-        // the side that owned the hero, the preview kept it, and `hero_ban.side`
+        // the side that owned the hero, the preview kept it, and `hero_bans.side`
         // stored it. Asserted off the parsed body rather than with a jsonPath
         // filter, which returns a length per match rather than a match count.
         val recordedBans = objectMapper.readTree(recordedJson)["bans"]

@@ -77,7 +77,7 @@ data class ImportedBan(
     /**
      * Whose draft this hero was struck out of, or null for a `PRE_BAN`. The
      * source groups its typed bans under the side that owned the hero
-     * ([ScrapedSide.bans]), which is exactly what `hero_ban.side` stores.
+     * ([ScrapedSide.bans]), which is exactly what `hero_bans.side` stores.
      */
     val side: Int?,
 )
@@ -88,11 +88,11 @@ enum class UnresolvedKind { HERO, MAP }
 /**
  * Why a name could not be used.
  *
- * [MAP_NOT_IN_POOL] is the one that will actually fire in practice: `match_game`
- * carries a composite foreign key onto `tournament_map`, so a board this league
+ * [MAP_NOT_IN_POOL] is the one that will actually fire in practice: `match_games`
+ * carries a composite foreign key onto `tournament_maps`, so a board this league
  * knows about but hasn't added to *this tournament's* pool cannot be recorded
- * against it. Heroes have no such constraint — `match_game_participant.hero_id`
- * and `hero_ban.hero_id` reference `heroes(id)` directly, never `tournament_hero`.
+ * against it. Heroes have no such constraint — `match_game_participants.hero_id`
+ * and `hero_bans.hero_id` reference `heroes(id)` directly, never `tournament_heroes`.
  */
 enum class UnresolvedReason { UNKNOWN_HERO, UNKNOWN_MAP, MAP_NOT_IN_POOL }
 

@@ -46,9 +46,9 @@ abstract class PostgresIntegrationTest {
      * is `AFTER_COMPLETION` rather than `AFTER_COMMIT` precisely so a rollback
      * clears it as surely as a commit would.
      *
-     * What that does not cover is a test which mutates `tournament_match` or its
+     * What that does not cover is a test which mutates `tournament_matches` or its
      * children by raw SQL, publishing nothing — `SchemaAndSeedTest` inserts into
-     * `match_game` directly. Clearing here makes a cross-test leak structurally
+     * `match_games` directly. Clearing here makes a cross-test leak structurally
      * impossible in whatever order JUnit runs things, rather than contingent on
      * every test remembering to write through a service. It is deliberately not
      * the same as disabling the cache under `test`: every test below still

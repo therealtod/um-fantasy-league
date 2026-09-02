@@ -65,7 +65,7 @@
 //!
 //! Bounded by size and idleness, and deliberately **not** by write age. Unlike
 //! [`crate::ratelimit`], whose key space is every IP on the internet, this one
-//! is the `tournament` table -- rows only an admin can create -- so the bounds
+//! is the `tournaments` table -- rows only an admin can create -- so the bounds
 //! are memory hygiene rather than a defence against a hostile key space. There
 //! is no `expire_after_write`: a TTL cannot add a guarantee the stamp does not
 //! already give, and its only effect would be on a *missing* hook, where it

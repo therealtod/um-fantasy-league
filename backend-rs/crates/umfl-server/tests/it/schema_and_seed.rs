@@ -49,55 +49,55 @@ async fn every_table_is_seeded_to_its_expected_size() {
     // fixtures: the hero and board catalogue migrates in every profile, so a
     // `prod` database carries these same counts with everything below at zero.
     assert_eq!(74, count(db, "heroes", "true").await);
-    assert_eq!(35, count(db, "game_map", "true").await);
-    assert_eq!(4, count(db, "manager", "true").await);
-    assert_eq!(3, count(db, "tournament", "true").await);
+    assert_eq!(35, count(db, "game_maps", "true").await);
+    assert_eq!(4, count(db, "managers", "true").await);
+    assert_eq!(3, count(db, "tournaments", "true").await);
     assert_eq!(
         32,
-        count(db, "tournament_hero", "true").await,
+        count(db, "tournament_heroes", "true").await,
         "12 + 12 + Spring's narrower 8"
     );
-    assert_eq!(7, count(db, "tournament_map", "true").await);
-    assert_eq!(4, count(db, "tournament_entry", "true").await);
+    assert_eq!(7, count(db, "tournament_maps", "true").await);
+    assert_eq!(4, count(db, "tournament_entries", "true").await);
     assert_eq!(
         12,
-        count(db, "entry_slot", "true").await,
+        count(db, "entry_slots", "true").await,
         "4 entries x roster size 3"
     );
-    assert_eq!(3, count(db, "scoring_rule_set", "true").await);
+    assert_eq!(3, count(db, "scoring_rule_sets", "true").await);
     assert_eq!(
         24,
-        count(db, "scoring_coefficient", "true").await,
+        count(db, "scoring_coefficients", "true").await,
         "3 rule sets x 8 metrics"
     );
     assert_eq!(
         13,
-        count(db, "tournament_match", "true").await,
+        count(db, "tournament_matches", "true").await,
         "12 single-game matches + the Bo3 decider"
     );
     assert_eq!(
         26,
-        count(db, "match_participant", "true").await,
+        count(db, "match_participants", "true").await,
         "13 matches x 2 sides"
     );
     assert_eq!(
         15,
-        count(db, "match_game", "true").await,
+        count(db, "match_games", "true").await,
         "12 single-game matches + the Bo3's 3 games"
     );
     assert_eq!(
         30,
-        count(db, "match_game_participant", "true").await,
+        count(db, "match_game_participants", "true").await,
         "15 games x 2 sides"
     );
     assert_eq!(
         22,
-        count(db, "hero_ban", "true").await,
+        count(db, "hero_bans", "true").await,
         "19 original + the Bo3's one ban per category"
     );
     assert_eq!(
         28,
-        count(db, "match_hero_pick", "true").await,
+        count(db, "match_hero_picks", "true").await,
         "26 heroes fielded (12 matches x 2 sides, plus the Bo3's one hero per side across its \
          three games) + the Bo3's 2 drafted-and-never-fielded picks"
     );
@@ -108,7 +108,7 @@ async fn the_three_tournaments_cover_the_lifecycle_states_the_lobby_renders() {
     let app = TestApp::spawn().await;
     let rows = sqlx::query(
         "select name, status, format, roster_size, credit_grant
-         from tournament order by start_date",
+         from tournaments order by start_date",
     )
     .fetch_all(app.pool())
     .await
@@ -145,7 +145,7 @@ async fn dates_are_calendar_days_and_only_the_finished_tournament_has_an_end() {
     let app = TestApp::spawn().await;
     let rows = sqlx::query(
         "select name, start_date::text as start_date, end_date::text as end_date
-         from tournament where name in ('Summer of Legends', 'Winter of Champions')
+         from tournaments where name in ('Summer of Legends', 'Winter of Champions')
          order by name",
     )
     .fetch_all(app.pool())
@@ -174,8 +174,8 @@ async fn hero_cost_is_per_tournament_not_global() {
     let app = TestApp::spawn().await;
     let rows = sqlx::query(
         "select t.name as tournament, th.cost
-         from tournament_hero th
-             join tournament t on t.id = th.tournament_id
+         from tournament_heroes th
+             join tournaments t on t.id = th.tournament_id
              join heroes h on h.id = th.hero_id
          where h.name = 'Sun Wukong'
          order by t.name",
@@ -203,8 +203,8 @@ async fn spring_of_myths_carries_a_narrower_pool_so_unknown_hero_is_reachable() 
     let app = TestApp::spawn().await;
     let spring_hero_count = scalar(
         app.pool(),
-        "select count(*) from tournament_hero th
-             join tournament t on t.id = th.tournament_id
+        "select count(*) from tournament_heroes th
+             join tournaments t on t.id = th.tournament_id
          where t.name = 'Spring of Myths'"
             .to_owned(),
     )
@@ -219,9 +219,9 @@ async fn the_finished_tournament_has_four_locked_rosters_inside_their_grants() {
     let rows = sqlx::query(
         "select e.status, e.locked_at, e.credit_grant, t.credit_grant as grant_of_tournament,
                 t.roster_size, count(es.hero_id) as slots
-         from tournament_entry e
-             join tournament t on t.id = e.tournament_id
-             left join entry_slot es on es.entry_id = e.id
+         from tournament_entries e
+             join tournaments t on t.id = e.tournament_id
+             left join entry_slots es on es.entry_id = e.id
          where t.name = 'Summer of Legends'
          group by e.id, e.status, e.locked_at, e.credit_grant, t.credit_grant, t.roster_size",
     )
@@ -252,10 +252,10 @@ async fn every_seeded_roster_is_affordable_at_this_tournaments_prices() {
     let app = TestApp::spawn().await;
     let rows = sqlx::query(
         "select mg.handle, sum(th.cost)::int as spent, e.credit_grant
-         from tournament_entry e
-             join manager mg on mg.id = e.manager_id
-             join entry_slot es on es.entry_id = e.id
-             join tournament_hero th
+         from tournament_entries e
+             join managers mg on mg.id = e.manager_id
+             join entry_slots es on es.entry_id = e.id
+             join tournament_heroes th
                  on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id
          group by mg.handle, e.credit_grant
          order by mg.handle",
@@ -284,8 +284,8 @@ async fn the_tournament_the_walkthrough_registers_for_is_left_empty() {
     let app = TestApp::spawn().await;
     let entries = scalar(
         app.pool(),
-        "select count(*) from tournament_entry e
-             join tournament t on t.id = e.tournament_id
+        "select count(*) from tournament_entries e
+             join tournaments t on t.id = e.tournament_id
          where t.name = 'Winter of Champions'"
             .to_owned(),
     )
@@ -295,7 +295,7 @@ async fn the_tournament_the_walkthrough_registers_for_is_left_empty() {
     // `acceptsRegistration` is derived, not stored: an entry may be created
     // only while the tournament is open for it.
     let status: String =
-        sqlx::query_scalar("select status from tournament where name = 'Winter of Champions'")
+        sqlx::query_scalar("select status from tournaments where name = 'Winter of Champions'")
             .fetch_one(app.pool())
             .await
             .expect("winter");
@@ -309,7 +309,7 @@ async fn roster_slots_keep_their_draft_order_and_never_repeat_a_hero() {
         app.pool(),
         "select count(*) from (
              select es.entry_id
-             from entry_slot es
+             from entry_slots es
              group by es.entry_id
              having count(*) <> count(distinct es.hero_id)
          ) repeated"
@@ -325,7 +325,7 @@ async fn roster_slots_keep_their_draft_order_and_never_repeat_a_hero() {
         app.pool(),
         "select count(*) from (
              select entry_id
-             from entry_slot
+             from entry_slots
              group by entry_id
              having min(slot_index) <> 0
                  or max(slot_index)::bigint <> count(*) - 1
@@ -345,8 +345,8 @@ async fn exactly_one_scoring_rule_set_is_active_per_tournament() {
     let app = TestApp::spawn().await;
     let rows = sqlx::query(
         "select t.name, count(rs.id) filter (where rs.is_active) as active_sets
-         from tournament t
-             left join scoring_rule_set rs on rs.tournament_id = t.id
+         from tournaments t
+             left join scoring_rule_sets rs on rs.tournament_id = t.id
          group by t.name
          order by t.name",
     )
@@ -374,9 +374,9 @@ async fn every_recorded_draft_is_complete_no_side_fielded_a_hero_it_never_drafte
     let undrafted = scalar(
         app.pool(),
         "select count(*)
-         from match_game_participant mgp
-             join match_game mg on mg.id = mgp.game_id
-             left join match_hero_pick hp
+         from match_game_participants mgp
+             join match_games mg on mg.id = mgp.game_id
+             left join match_hero_picks hp
                  on hp.match_id = mg.match_id and hp.side = mgp.side and hp.hero_id = mgp.hero_id
          where hp.hero_id is null"
             .to_owned(),
@@ -394,7 +394,7 @@ async fn every_recorded_draft_is_complete_no_side_fielded_a_hero_it_never_drafte
 async fn every_seeded_ban_is_sided_exactly_when_its_category_allows_one() {
     let app = TestApp::spawn().await;
     let db = app.pool();
-    let misfiled = count(db, "hero_ban", "(ban_type = 'PRE_BAN') <> (side is null)").await;
+    let misfiled = count(db, "hero_bans", "(ban_type = 'PRE_BAN') <> (side is null)").await;
     assert_eq!(
         0, misfiled,
         "a PRE_BAN precedes side assignment and carries no side, and V8 gave every other \
@@ -403,12 +403,12 @@ async fn every_seeded_ban_is_sided_exactly_when_its_category_allows_one() {
 
     assert_eq!(
         13,
-        count(db, "hero_ban", "side is null").await,
+        count(db, "hero_bans", "side is null").await,
         "one pre-ban per seeded match"
     );
     assert_eq!(
         9,
-        count(db, "hero_ban", "side is not null").await,
+        count(db, "hero_bans", "side is not null").await,
         "the 8 opponent bans + the Bo3's self ban"
     );
 }
@@ -419,8 +419,8 @@ async fn no_hero_is_both_drafted_and_banned_in_the_same_match() {
     let contradictions = scalar(
         app.pool(),
         "select count(*)
-         from match_hero_pick hp
-             join hero_ban hb on hb.match_id = hp.match_id and hb.hero_id = hp.hero_id"
+         from match_hero_picks hp
+             join hero_bans hb on hb.match_id = hp.match_id and hb.hero_id = hp.hero_id"
             .to_owned(),
     )
     .await;
@@ -436,9 +436,9 @@ async fn every_recorded_hero_was_in_the_tournaments_own_pool() {
     let strays = scalar(
         app.pool(),
         "select count(*)
-         from match_game_participant mgp
-             join match_game mg on mg.id = mgp.game_id
-             left join tournament_hero th
+         from match_game_participants mgp
+             join match_games mg on mg.id = mgp.game_id
+             left join tournament_heroes th
                  on th.tournament_id = mg.tournament_id and th.hero_id = mgp.hero_id
          where th.hero_id is null"
             .to_owned(),
@@ -459,8 +459,8 @@ async fn every_recorded_board_was_in_the_tournaments_own_map_pool() {
     let strays = scalar(
         app.pool(),
         "select count(*)
-         from match_game mg
-             left join tournament_map tm
+         from match_games mg
+             left join tournament_maps tm
                  on tm.tournament_id = mg.tournament_id and tm.map_id = mg.map_id
          where tm.map_id is null"
             .to_owned(),
@@ -474,8 +474,8 @@ async fn exactly_one_side_wins_every_seeded_game() {
     let app = TestApp::spawn().await;
     let rows = sqlx::query(
         "select mg.id, count(*) filter (where mgp.is_winner) as winners
-         from match_game mg
-             join match_game_participant mgp on mgp.game_id = mg.id
+         from match_games mg
+             join match_game_participants mgp on mgp.game_id = mg.id
          group by mg.id
          order by mg.id",
     )
@@ -511,7 +511,7 @@ async fn exactly_one_side_wins_every_seeded_game() {
 async fn the_database_rejects_positive_health_for_a_losing_hero() {
     let app = TestApp::spawn().await;
     let result = sqlx::query(
-        "update match_game_participant
+        "update match_game_participants
          set health_remaining = 1
          where game_id = 1 and side = 1",
     )
@@ -528,7 +528,7 @@ async fn the_database_rejects_positive_health_for_a_losing_hero() {
 async fn the_database_rejects_a_game_recorded_without_a_map() {
     let app = TestApp::spawn().await;
     let result = sqlx::query(
-        "insert into match_game (match_id, tournament_id, game_number, map_id)
+        "insert into match_games (match_id, tournament_id, game_number, map_id)
          values (1, 1, 99, null)",
     )
     .execute(app.pool())
@@ -543,7 +543,7 @@ async fn the_database_rejects_a_game_recorded_without_a_map() {
 #[tokio::test]
 async fn match_ids_ascend_with_played_at_which_is_what_makes_the_id_a_safe_polling_key() {
     let app = TestApp::spawn().await;
-    let rows = sqlx::query("select id, played_at from tournament_match order by id")
+    let rows = sqlx::query("select id, played_at from tournament_matches order by id")
         .fetch_all(app.pool())
         .await
         .expect("matches");

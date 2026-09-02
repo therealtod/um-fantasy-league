@@ -38,7 +38,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// The leaderboard, carrying its own column definitions -- the backend cannot
-/// know which metrics exist until it has read `scoring_coefficient`.
+/// know which metrics exist until it has read `scoring_coefficients`.
 async fn standings(
     State(state): State<AppState>,
     AppPath(id): AppPath<i64>,

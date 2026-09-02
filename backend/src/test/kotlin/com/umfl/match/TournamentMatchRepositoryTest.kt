@@ -35,7 +35,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         val bigfoot = id("heroes", "Bigfoot")
         val medusa = id("heroes", "Medusa")
         val dracula = id("heroes", "Dracula")
-        val baskerville = id("game_map", "Baskerville Manor")
+        val baskerville = id("game_maps", "Baskerville Manor")
         val playedAt = Instant.parse("2026-08-15T12:00:00Z")
 
         val saved = tournamentMatchRepository.save(
@@ -62,7 +62,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
                 bans = setOf(
                     HeroBan(heroId = bigfoot, banType = BanType.PRE_BAN),
                     // Struck out of side 1's draft by side 0 -- the attribution
-                    // `hero_ban.side` exists to keep. A hero on neither side's
+                    // `hero_bans.side` exists to keep. A hero on neither side's
                     // picks, since a ban and a pick are disjoint.
                     HeroBan(heroId = dracula, banType = BanType.OPPONENT_BAN, side = 1),
                 ),
@@ -96,13 +96,13 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         assertNull(preBan.side, "a pre-ban is struck before sides are assigned, so it has none")
 
         // A sided ban round-trips its side, which is the half of the draft
-        // `hero_ban` could not record before V7.
+        // `hero_bans` could not record before V7.
         val opponentBan = reloaded.bans.single { it.banType == BanType.OPPONENT_BAN }
         assertEquals(dracula, opponentBan.heroId)
         assertEquals(1, opponentBan.side)
 
         // The draft: side 0 took a hero it never fielded, which is the whole
-        // reason `match_hero_pick` exists.
+        // reason `match_hero_picks` exists.
         assertEquals(
             setOf(HeroPick(0, alice), HeroPick(0, medusa), HeroPick(1, robinHood)),
             reloaded.picks,
@@ -114,8 +114,8 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         val tournamentId = requireNotNull(tournamentRepository.findByName("Winter of Champions")?.id)
         val medusa = id("heroes", "Medusa")
         val achilles = id("heroes", "Achilles")
-        val baskerville = id("game_map", "Baskerville Manor")
-        val sherwood = id("game_map", "Sherwood Forest")
+        val baskerville = id("game_maps", "Baskerville Manor")
+        val sherwood = id("game_maps", "Sherwood Forest")
 
         val saved = tournamentMatchRepository.save(
             TournamentMatch(
@@ -188,7 +188,7 @@ class TournamentMatchRepositoryTest @Autowired constructor(
         val robinHood = id("heroes", "Robin Hood")
         val sherlock = id("heroes", "Sherlock Holmes")
         val dracula = id("heroes", "Dracula")
-        val baskerville = id("game_map", "Baskerville Manor")
+        val baskerville = id("game_maps", "Baskerville Manor")
 
         val saved = tournamentMatchRepository.save(
             TournamentMatch(

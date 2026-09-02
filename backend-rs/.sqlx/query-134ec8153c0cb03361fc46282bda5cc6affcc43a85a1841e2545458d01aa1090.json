@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select capacity from tournaments where id = $1 for update",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "capacity",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournaments",
+            "name": "capacity"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "134ec8153c0cb03361fc46282bda5cc6affcc43a85a1841e2545458d01aa1090"
+}

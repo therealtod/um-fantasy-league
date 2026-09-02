@@ -5,14 +5,14 @@
 -- This is NOT demo data, which is why it lives in `db/migration` next to the
 -- schema rather than in `db/seed` with the fixtures. A hero and a board are
 -- facts about Unmatched (Restoration Games), not about any one league: an
--- admin cannot price a hero into a tournament pool (`tournament_hero`) or
--- record a game on a board (`tournament_map`) that does not exist as a row
+-- admin cannot price a hero into a tournament pool (`tournament_heroes`) or
+-- record a game on a board (`tournament_maps`) that does not exist as a row
 -- here first, so a `prod` start with an empty `heroes` table leaves the Admin
 -- API with nothing to pool. Every profile therefore gets these rows; only
 -- `dev` and `test` go on to add `V3__demo_fixtures.sql` on top.
 --
 -- Names carry the identity -- there is no slug and no stable external id, and
--- `heroes.name` / `game_map.name` are unique precisely so the fixtures and the
+-- `heroes.name` / `game_maps.name` are unique precisely so the fixtures and the
 -- integration tests can join on them. No ids are written here: both tables are
 -- empty at this point, so the bigserial assigns them in listed order.
 --
@@ -103,7 +103,7 @@ insert into heroes (name) values
     ('Wyatt Earp');
 
 -- 35 boards, in the same release order as the heroes they shipped with.
-insert into game_map (name) values
+insert into game_maps (name) values
     ('Sarpedon'),
     ('Marmoreal'),
     ('Sherwood Forest'),
@@ -128,7 +128,7 @@ insert into game_map (name) values
     ('Globe Theatre'),
     ('Streets of Novigrad'),
     ('Naglfar'),
-    ('Kaer Mohren'),
+    ('Kaer Morhen'),
     ('Fayrlund Forest'),
     ('Venice'),
     ('Santa''s Workshop'),

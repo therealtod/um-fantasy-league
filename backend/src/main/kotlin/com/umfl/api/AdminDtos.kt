@@ -174,7 +174,8 @@ data class RecordMatchRequest(
     /**
      * Required and unique within the tournament: it is the duplicate check that
      * stops the same match being imported twice. A match with no page anywhere
-     * still needs an identifier of its own — see `V9__external_link_required.sql`.
+     * still needs an identifier of its own — see `external_link` in
+     * `V1__core_schema.sql`.
      */
     @field:NotBlank(message = "externalLink is required")
     val externalLink: String?,

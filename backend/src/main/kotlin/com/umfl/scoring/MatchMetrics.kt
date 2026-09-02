@@ -46,7 +46,7 @@ data class MetricContext(
 /**
  * The registry of scoring metrics this application knows how to measure.
  *
- * `scoring_coefficient.metric` is free-form text so an admin can add a weighted
+ * `scoring_coefficients.metric` is free-form text so an admin can add a weighted
  * row without a migration. This registry prices the keys it implements and
  * silently ignores the rest: an unknown metric contributes nothing, is dropped
  * from the leaderboard's columns, and throws nothing.
@@ -169,7 +169,7 @@ private fun healthGap(context: MetricContext): Double? {
  *
  * [healthDifferentialTwoWay] is the ungated variant of exactly this. The two are
  * a deliberate pair rather than a duplication: an admin prices one or the other
- * (or both) by adding the matching `scoring_coefficient` row, which is why this
+ * (or both) by adding the matching `scoring_coefficients` row, which is why this
  * is two registry keys instead of a flag on one.
  */
 private fun healthDifferential(context: MetricContext): Double {

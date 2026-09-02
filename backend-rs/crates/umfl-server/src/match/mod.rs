@@ -66,14 +66,14 @@ pub struct TournamentMatchWrite {
     /// `urn:umfl:match:<id>` placeholder instead.
     pub external_link: String,
     /// `side` (0 or 1) is the **list position**, written to
-    /// `match_participant.side`.
+    /// `match_participants.side`.
     pub participants: Vec<MatchParticipantWrite>,
     pub games: Vec<MatchGameWrite>,
     pub bans: Vec<HeroBanWrite>,
     /// The picks half of the draft, to [`Self::bans`]' bans half.
     ///
     /// Hangs off the root rather than off a participant, where it would read
-    /// more naturally: `match_participant` has a composite key, and the Kotlin
+    /// more naturally: `match_participants` has a composite key, and the Kotlin
     /// aggregate could not map a child of an entity keyed that way. The shape
     /// is kept because the *table* is the same either way.
     pub picks: Vec<HeroPickWrite>,

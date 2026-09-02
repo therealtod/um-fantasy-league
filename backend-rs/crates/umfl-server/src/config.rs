@@ -7,7 +7,7 @@
 //! Two rules from `AGENTS.md` shape this file:
 //!
 //! * **There are no `umfl.*` tunables.** Scoring weights are rows in
-//!   `scoring_coefficient` and the budget is `tournament.credit_grant`; both
+//!   `scoring_coefficients` and the budget is `tournaments.credit_grant`; both
 //!   are retuned with an UPDATE. The only configuration here is infrastructure
 //!   -- the database, the port, the scraper's address, the throttle -- which is
 //!   unreadable from a database the process has not reached yet.

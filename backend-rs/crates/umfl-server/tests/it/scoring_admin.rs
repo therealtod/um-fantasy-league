@@ -38,7 +38,7 @@ async fn create_rule_set(app: &TestApp, tournament_id: i64, body: &Value) -> Val
 /// `ScoringRuleSetQuery.activeRules(...).name` makes in the Kotlin.
 async fn active_rule_set_name(app: &TestApp, tournament_id: i64) -> String {
     sqlx::query_scalar!(
-        "select name from scoring_rule_set where tournament_id = $1 and is_active",
+        "select name from scoring_rule_sets where tournament_id = $1 and is_active",
         tournament_id
     )
     .fetch_one(app.pool())
@@ -129,7 +129,7 @@ async fn an_insert_that_omits_is_active_lands_inactive_not_active() {
     let winter = app.tournament_id("Winter of Champions").await;
 
     sqlx::query!(
-        "insert into scoring_rule_set (tournament_id, name) values ($1, 'Hand-Written Draft')",
+        "insert into scoring_rule_sets (tournament_id, name) values ($1, 'Hand-Written Draft')",
         winter
     )
     .execute(app.pool())
@@ -137,7 +137,7 @@ async fn an_insert_that_omits_is_active_lands_inactive_not_active() {
     .expect("the schema default is false, so this does not collide");
 
     let is_active = sqlx::query_scalar!(
-        "select is_active from scoring_rule_set where tournament_id = $1 and name = $2",
+        "select is_active from scoring_rule_sets where tournament_id = $1 and name = $2",
         winter,
         "Hand-Written Draft"
     )
@@ -312,7 +312,7 @@ async fn activating_a_new_rule_set_deactivates_the_previously_active_one() {
 
     assert_eq!(active_rule_set_name(&app, winter).await, "Retuned Weights");
     let seeded_active = sqlx::query_scalar!(
-        "select is_active from scoring_rule_set where tournament_id = $1 and name = $2",
+        "select is_active from scoring_rule_sets where tournament_id = $1 and name = $2",
         winter,
         "Season 2026 Standard"
     )
@@ -324,8 +324,8 @@ async fn activating_a_new_rule_set_deactivates_the_previously_active_one() {
     // The weight the newly-active set prices WIN at, read back at the column's
     // own scale.
     let weight = sqlx::query_scalar!(
-        "select c.coefficient from scoring_coefficient c
-         join scoring_rule_set rs on rs.id = c.rule_set_id
+        "select c.coefficient from scoring_coefficients c
+         join scoring_rule_sets rs on rs.id = c.rule_set_id
          where rs.tournament_id = $1 and rs.is_active and c.metric = 'WIN'",
         winter
     )
@@ -370,8 +370,8 @@ async fn activating_leaves_both_rule_sets_coefficient_rows_untouched() {
 
 async fn coefficient_ids(app: &TestApp, tournament_id: i64) -> Vec<(i64, i64)> {
     sqlx::query!(
-        "select c.rule_set_id, c.id from scoring_coefficient c
-         join scoring_rule_set rs on rs.id = c.rule_set_id
+        "select c.rule_set_id, c.id from scoring_coefficients c
+         join scoring_rule_sets rs on rs.id = c.rule_set_id
          where rs.tournament_id = $1 order by c.rule_set_id, c.id",
         tournament_id
     )
@@ -558,7 +558,7 @@ async fn a_rule_set_from_another_tournament_is_not_reachable_through_this_one() 
     let winter = app.tournament_id("Winter of Champions").await;
     let summer = app.tournament_id("Summer of Legends").await;
     let summers_rule_set = sqlx::query_scalar!(
-        "select id from scoring_rule_set where tournament_id = $1",
+        "select id from scoring_rule_sets where tournament_id = $1",
         summer
     )
     .fetch_one(app.pool())

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tournament_heroes (tournament_id, hero_id, cost)\n         values ($1, $2, $3)\n         on conflict (tournament_id, hero_id) do update set cost = excluded.cost",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "49dc8d0171bc411916aed28d709d63e61b901fefc85a6a38ee8aac0efcbd1127"
+}

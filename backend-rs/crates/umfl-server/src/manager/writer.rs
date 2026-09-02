@@ -29,7 +29,7 @@ pub async fn insert(
 ) -> sqlx::Result<Manager> {
     sqlx::query_as!(
         Manager,
-        r#"insert into manager (handle, display_name, auth_user_id, is_admin)
+        r#"insert into managers (handle, display_name, auth_user_id, is_admin)
            values ($1, $2, $3, false)
            returning id, handle, display_name, auth_user_id, is_admin"#,
         handle,
