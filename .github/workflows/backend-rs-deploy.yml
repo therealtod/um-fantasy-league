@@ -104,11 +104,17 @@ jobs:
           script: |
             set -e
             cd /opt/umfl
-            docker compose pull backend flyway
+            # `-f` is load-bearing, not stylistic: bare `docker compose` only
+            # auto-discovers a file literally named `compose.yaml`/`compose.yml`/
+            # `docker-compose.yaml`/`docker-compose.yml` -- never
+            # `docker-compose.prod.yml`. Omitting it risks silently targeting
+            # a stale same-directory `docker-compose.yml` instead (which is
+            # exactly what happened once already on this box).
+            docker compose -f docker-compose.prod.yml pull backend flyway
             # `flyway` before `backend`: compose's own `depends_on:
             # condition: service_completed_successfully` already orders
             # them, but naming it first here means a freshly pulled image
             # is what actually runs the migration, not whatever happened to
             # be sitting there from a previous deploy.
-            docker compose up -d flyway backend
+            docker compose -f docker-compose.prod.yml up -d flyway backend
             docker image prune -f

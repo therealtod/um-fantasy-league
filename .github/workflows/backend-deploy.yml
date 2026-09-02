@@ -101,6 +101,9 @@ jobs:
           script: |
             set -e
             cd /opt/umfl
-            docker compose pull scraper
-            docker compose up -d scraper
+            # `-f` is load-bearing, not stylistic -- see backend-rs-deploy.yml's
+            # deploy job for why bare `docker compose` cannot be trusted to
+            # find this file on its own.
+            docker compose -f docker-compose.prod.yml pull scraper
+            docker compose -f docker-compose.prod.yml up -d scraper
             docker image prune -f
