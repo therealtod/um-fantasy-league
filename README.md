@@ -58,22 +58,26 @@ cd frontend && npm install && npm run dev
 Then open <http://localhost:5173>. The Vite dev server proxies `/api` to `localhost:8080`.
 
 > **Pulling this schema onto an existing local database?** The migrations were rewritten in place as
-> a fresh baseline, so Flyway's checksum validation will fail against a database migrated from the
-> old files. There is no production data to preserve — drop the volume and start over:
+> a fresh baseline (most recently, renaming every table to a plural noun — `hero` → `heroes`,
+> `tournament_hero` → `tournament_heroes`, `tournament_match` → `tournament_matches`, and so on
+> throughout), so Flyway's checksum validation will fail against a database migrated from the old
+> files. There is no production data to preserve — drop the volume and start over:
 >
 > ```bash
 > docker compose down -v && docker compose up -d db
 > ```
 
-`V1__core_schema.sql` is schema only — no data at all. What follows it splits by kind rather than by
-environment. `db/migration/V2__reference_data.sql` holds the canonical catalogue: all 74 heroes and
-35 boards Unmatched has printed. That is not mock data — it is a fact about the game, and it is what
-an admin prices into a tournament pool — so it migrates in every profile, production included. The
-three demo tournaments, the seeded managers, and the recorded Summer of Legends result set are the
-part that *is* mock, and they live in `db/seed/V3__demo_fixtures.sql`, a second Flyway location that
-only the `dev` and `test` profiles add to `spring.flyway.locations`. A plain start with no profile,
-or `--spring.profiles.active=prod`, therefore boots with the full hero and board catalogue and a
-league nobody has played yet — nothing to delete before pointing this at a real tournament.
+`V1__core_schema.sql` is schema only — no data at all. `db/` lives at the repository root, not under
+`backend/src/main/resources`, since `backend-rs/` (the Rust port) migrates the same directory — Flyway
+reads it off the filesystem rather than the classpath. What follows the schema splits by kind rather
+than by environment. `db/migration/V2__reference_data.sql` holds the canonical catalogue: all 74
+heroes and 35 boards Unmatched has printed. That is not mock data — it is a fact about the game, and
+it is what an admin prices into a tournament pool — so it migrates in every profile, production
+included. The three demo tournaments, the seeded managers, and the recorded Summer of Legends result
+set are the part that *is* mock, and they live in `db/seed/V3__demo_fixtures.sql`, a second Flyway
+location that only the `dev` and `test` profiles add to `spring.flyway.locations`. A plain start with
+no profile, or `--spring.profiles.active=prod`, therefore boots with the full hero and board catalogue
+and a league nobody has played yet — nothing to delete before pointing this at a real tournament.
 
 For the local workflow, set `VITE_DEV_MANAGER_ID=1` in `frontend/.env.local` (the supplied example
 does this). Vite development builds then skip Supabase Auth and send that manager ID to the dev
@@ -151,32 +155,32 @@ decided it.
 Everything hangs off the tournament, because the tournament is what decides it:
 
 ```
-tournament ──< tournament_hero   >── hero            the pool, and its price here
-           ──< tournament_map    >── game_map        the legal boards
-           ──< scoring_rule_set  ──< scoring_coefficient
-           ──< tournament_match  ──< match_participant              the two humans, per series
-                                 ├──< match_game      >── game_map  one game, one board
-                                 │         └──< match_game_participant >── hero
-                                 ├──< match_hero_pick >── hero       drafted once per series
-                                 └──< hero_ban        >── hero       struck once per series
-           ──< tournament_entry  ──< entry_slot       >── hero
-                     │
-                  manager
+tournaments ──< tournament_heroes  >── heroes           the pool, and its price here
+            ──< tournament_maps    >── game_maps        the legal boards
+            ──< scoring_rule_sets  ──< scoring_coefficients
+            ──< tournament_matches ──< match_participants               the two humans, per series
+                                   ├──< match_games      >── game_maps  one game, one board
+                                   │         └──< match_game_participants >── heroes
+                                   ├──< match_hero_picks >── heroes       drafted once per series
+                                   └──< hero_bans        >── heroes       struck once per series
+            ──< tournament_entries ──< entry_slots       >── heroes
+                      │
+                   managers
 ```
 
 ### Why cost is per tournament
 
-`tournament_hero.cost`, not `hero.cost`. The same hero is a bargain at one event and a premium pick
+`tournament_heroes.cost`, not `heroes.cost`. The same hero is a bargain at one event and a premium pick
 at the next — pricing is a lever the organiser pulls per tournament, which is exactly the knob that
 makes drafting interesting. It also makes `UNKNOWN_HERO` a real rule rather than an existence check:
-a hero absent from `tournament_hero` is simply not legal here.
+a hero absent from `tournament_heroes` is simply not legal here.
 
 There is deliberately **no** `season` column anywhere. The tournament is the unit of scoping; a
 season is just a word someone puts in a tournament's name.
 
 ### Why the budget is per registration
 
-`tournament_entry.credit_grant`, not a `manager.credits` wallet. A wallet made entering a tournament
+`tournament_entries.credit_grant`, not a `managers.credits` wallet. A wallet made entering a tournament
 a spending decision and let a manager be locked out of the game by a balance, which is the wrong
 tension for a fantasy league. Registration is free; what it hands you is a budget for *this*
 tournament.
@@ -186,7 +190,7 @@ silently hand extra budget to managers who already drafted, nor retroactively in
 
 ### Why there is no cost snapshot on the slot
 
-`entry_slot` stores only the hero. Roster cost is joined live from `tournament_hero`, so **re-pricing
+`entry_slots` stores only the hero. Roster cost is joined live from `tournament_heroes`, so **re-pricing
 a hero re-prices every unlocked roster holding it** — intended, not a bug. A draft is a live
 scratchpad against live prices; the thing that needs stability is the grant, and that *is*
 snapshotted. Once an entry is LOCKED its slots can no longer change, so the only rosters a repricing
@@ -197,7 +201,7 @@ matches that produce them, so they cannot drift.
 
 ### Why the ban is its own table
 
-`hero_ban`, not a `was_banned` flag on a participant row. A banned hero has no health and no
+`hero_bans`, not a `was_banned` flag on a participant row. A banned hero has no health and no
 result. Storing it as a participant forces `health_remaining = 0`, which is indistinguishable
 from "played and was defeated" and silently poisons every `HEALTH_REMAINING` sum and `SHUTOUT` check.
 
@@ -205,18 +209,18 @@ The ban hangs off the match, not off a game: a hero is struck once for the whole
 not be multiplied by the number of games played (`MatchResult.heroContexts` yields exactly one
 `Banned` context per banned hero regardless of series length).
 
-Bans are per match, so they never touch `entry_slot`: a hero banned in one round can be played in
+Bans are per match, so they never touch `entry_slots`: a hero banned in one round can be played in
 the next, and its manager still scores the `SELF_BAN`/`OPPONENT_BAN` coefficient for the round it sat
 out.
 
 ### Why the picks are their own table too
 
-`match_hero_pick (match_id, side, hero_id)` — the other half of the draft, and the reason
+`match_hero_picks (match_id, side, hero_id)` — the other half of the draft, and the reason
 `APPEARANCE` can mean "was featured in the draft" rather than "reached the table". Without it, a
 hero drafted and never fielded is indistinguishable from a hero nobody took, since the only record
-of a pick was whatever `match_game_participant` happened to contain.
+of a pick was whatever `match_game_participants` happened to contain.
 
-Separate from `hero_ban` rather than one draft table with a kind column, because the two carry
+Separate from `hero_bans` rather than one draft table with a kind column, because the two carry
 different data: a pick has an owning `side` and no category, a ban has a category and no side — a
 pre-ban belongs to neither side. A hero cannot be both, which `MatchResultPolicy` enforces as
 `BANNED_HERO_DRAFTED`, and a side cannot field a hero it never drafted, which it enforces as
@@ -229,15 +233,15 @@ by hero instead, so a hero drafted by both sides still scores once.
 
 ### Schema notes
 
-- `game_map` and `tournament_match`, not `map` and `match` — both are reserved words in the SQL
-  standard, and quoting them at every call site would be noise.
+- `game_maps` and `tournament_matches`, because MAP and MATCH are reserved words in the SQL standard
+  and quoting them at every call site would be noise.
 - Tables the app loads or writes as aggregates carry a surrogate `bigserial` id, because Spring Data
-  JDBC cannot map a composite primary key. The pure link tables (`tournament_hero`, `tournament_map`,
-  `entry_slot`, `hero_ban`, `match_game_participant`) are read through `JdbcClient` or mapped as
+  JDBC cannot map a composite primary key. The pure link tables (`tournament_heroes`, `tournament_maps`,
+  `entry_slots`, `hero_bans`, `match_game_participants`) are read through `JdbcClient` or mapped as
   `@MappedCollection` children, so they keep their natural composite key.
-- A match is a **series**: the board moved from the match to `match_game.map_id` (not null — each
-  game names its board), constrained by a composite FK onto `tournament_map`, so a game can only be
-  played on a board that tournament uses. `match_game` denormalizes `tournament_id` to carry that
+- A match is a **series**: the board moved from the match to `match_games.map_id` (not null — each
+  game names its board), constrained by a composite FK onto `tournament_maps`, so a game can only be
+  played on a board that tournament uses. `match_games` denormalizes `tournament_id` to carry that
   FK, and a second composite FK pins the copy to its parent match's tournament.
 - Exactly one side of a game carries `is_winner`. A partial unique index stops two; `MatchResultPolicy`
   stops zero. **There is no draw** — a losing hero always finishes on 0 or less health, while a winner
@@ -260,7 +264,7 @@ Pure functions, no Spring, no persistence — see `RosterPolicyTest`.
 | Within the entry's credit grant (`BUDGET_EXCEEDED`) | — | ✅ |
 
 `UNKNOWN_HERO` is raised earlier, in `TournamentService.resolvePicks`: a pick is priced by joining
-`tournament_hero`, so a hero outside this tournament's pool never reaches the policy at all.
+`tournament_heroes`, so a hero outside this tournament's pool never reaches the policy at all.
 
 Going over budget is allowed **while drafting** — a draft is a scratchpad, and the builder shows a
 meter running past 100% rather than refusing the edit. The budget is enforced when locking, against
@@ -275,11 +279,11 @@ click; the server recomputes it and rejects invalid locks with `422`.
 
 ## Scoring
 
-**Scoring is data, not code.** A rule set is a row in `scoring_rule_set` (one active per tournament,
-enforced by a partial unique index) and its weights are rows in `scoring_coefficient`. An admin
+**Scoring is data, not code.** A rule set is a row in `scoring_rule_sets` (one active per tournament,
+enforced by a partial unique index) and its weights are rows in `scoring_coefficients`. An admin
 retunes the league with an `UPDATE`, not a redeploy.
 
-`scoring_coefficient.metric` is free-form text — not an enum, not a foreign key — so adding a
+`scoring_coefficients.metric` is free-form text — not an enum, not a foreign key — so adding a
 weighted metric needs no migration. The `CHECK` on it is a typo guard (`SCREAMING_SNAKE` only), not a
 whitelist. `com.umfl.scoring.MatchMetrics` is the registry that prices the keys this build
 implements:
@@ -318,8 +322,8 @@ Bo3 collects one `WIN` and one `LOSS`, plus each game's own health numbers. The 
 three that price the *draft* rather than the table — `APPEARANCE`, `SELF_BAN` and `OPPONENT_BAN` —
 which are struck once for the whole match, because the draft happens once before game 1.
 
-`APPEARANCE` is deliberately not "the hero played". A match's draft is recorded in full: `hero_ban`
-holds the heroes struck out of it and `match_hero_pick` holds the heroes each side took, and a
+`APPEARANCE` is deliberately not "the hero played". A match's draft is recorded in full: `hero_bans`
+holds the heroes struck out of it and `match_hero_picks` holds the heroes each side took, and a
 recorded draft has to cover every hero that side then fielded (`MatchResultPolicy`'s
 `PLAYED_HERO_NOT_DRAFTED`). So a hero drafted and left on the bench through a 2-0 sweep still scores
 its appearance, and a hero that plays all three games of a Bo3 scores exactly one.
@@ -341,7 +345,7 @@ fan-out, and at tournament scale (~50 matches) the whole fold is microseconds.
 Consequences worth knowing:
 
 - The leaderboard response is a `StandingsBoard` carrying its **own column definitions**, because the
-  backend cannot know which columns exist until it has read `scoring_coefficient`.
+  backend cannot know which columns exist until it has read `scoring_coefficients`.
 - Ranking is **standard competition ranking** (1, 2, 2, 4). On a finished tournament, two managers
   with overlapping rosters genuinely tie, so positional `index + 1` would lie.
 - `roundPoints` ("Last Rd") is the swing in `max(round)`.
@@ -378,7 +382,7 @@ and everything under `/entries` require a verified token.
 
 ## Admin API
 
-`/api/admin/**`, gated by `hasRole("ADMIN")` (backed by `manager.is_admin`, our own data — never an
+`/api/admin/**`, gated by `hasRole("ADMIN")` (backed by `managers.is_admin`, our own data — never an
 identity-provider claim). This is the write path for everything that used to be seed-only: tournaments,
 heroes, maps, a tournament's hero pool and pricing, its board pool, scoring rule sets and coefficients,
 and match results (create/update/delete). `/admin` in the frontend is the UI over it.
@@ -418,7 +422,7 @@ rejection.
 
 - **`prod`** — `SupabaseManagerProvider` verifies a Supabase-issued JWT (Spring Security's OAuth2
   resource server) and resolves the manager by the token's `sub` claim against
-  `manager.auth_user_id`, just-in-time provisioning a new manager on first login.
+  `managers.auth_user_id`, just-in-time provisioning a new manager on first login.
   Sign-in happens via Supabase Auth's Discord OAuth provider from the frontend
   (`supabase.auth.signInWithOAuth({ provider: 'discord' })`) — Discord is just the upstream identity
   provider; the backend only ever verifies Supabase's own signed token.

@@ -1,100 +1,242 @@
-Enum TournamentFormat {
+// Generated from db/migration/V1__core_schema.sql. Keep in step with that file --
+// this diagram is documentation, not a source of truth, and the migration wins on
+// any drift. See AGENTS.md and README.md for the design rationale behind each
+// table (why cost is per tournament, why there's no cost snapshot, why bans and
+// picks are separate tables, etc.) -- this file only models shape.
+
+Enum tournament_format {
   BANQUEST
   ARSENAL
 }
 
-Table users {
-  id int [pk, increment]
-  username varchar
-  email varchar
+Enum tournament_status {
+  SCHEDULED
+  REGISTRATION_OPEN
+  LIVE
+  COMPLETED
+}
+
+Enum tournament_entry_status {
+  DRAFT
+  LOCKED
+}
+
+Enum hero_ban_type {
+  PRE_BAN
+  OPPONENT_BAN
+  SELF_BAN
 }
 
 Table heroes {
-  id int [pk, increment]
-  name varchar
+  id        int [pk, increment]
+  name      varchar [unique, not null]
   image_url varchar
+
+  Note: 'Identity only -- (id, name, image_url). Everything that varies (price, legality, scoring) hangs off the tournament that decided it.'
 }
 
-Table maps {
-  id int [pk, increment]
-  name varchar
+// Named `game_maps`, not `maps`: MAP is a reserved word in the SQL standard.
+Table game_maps {
+  id   int [pk, increment]
+  name varchar [unique, not null]
+}
+
+Table managers {
+  id           int [pk, increment]
+  handle       varchar [unique, not null]
+  display_name varchar [not null]
+  auth_user_id uuid [unique]
+  is_admin     boolean [not null, default: false]
+
+  Note: 'auth_user_id links to Supabase auth.users.id (JWT "sub"). Null for dev-seeded managers. is_admin is our own authorization data, independent of any identity provider.'
 }
 
 Table tournaments {
-  id int [pk, increment]
-  name varchar
-  start_date date
-  end_date date
-  format TournamentFormat
+  id           int [pk, increment]
+  name         varchar [unique, not null]
+  format       tournament_format [not null]
+  status       tournament_status [not null]
+  start_date   date [not null]
+  end_date     date
+  capacity     int [not null]
+  roster_size  int [not null]
+  credit_grant int [not null]
+
+  Note: 'No `season` column anywhere -- the tournament is the unit of scoping.'
 }
 
+// The hero pool for one tournament, with its price. Cost is per tournament, not
+// per hero, and nothing snapshots it -- an unlocked roster re-prices live.
 Table tournament_heroes {
-  tournament_id int
-  hero_id int
+  tournament_id int [not null]
+  hero_id       int [not null]
+  cost          int [not null]
 
   indexes {
     (tournament_id, hero_id) [pk]
   }
 }
 
+// The legal board pool for one tournament. match_games carries a composite FK
+// onto this primary key, constraining a recorded game to a board the tournament
+// actually pooled.
 Table tournament_maps {
-  tournament_id int
-  map_id int
+  tournament_id int [not null]
+  map_id        int [not null]
 
   indexes {
     (tournament_id, map_id) [pk]
   }
 }
 
-Table scoring_rule_sets {
-  id int [pk, increment]
-  tournament_id int
-  name varchar
-}
-
-Table scoring_coefficients {
-  id int [pk, increment]
-  ruleset_id int
-  metric varchar
-  coefficient decimal
-}
-
-Table players {
-  id int [pk, increment]
-  name varchar
-}
-
-Table matches {
-  id int [pk, increment]
-  tournament_id int
-  round int
-  played_at datetime
-}
-
-Table match_participants {
-  id int [pk, increment]
-  match_id int
-  player_id int
-  hero_id int
-  health_remaining int
-  is_winner boolean
-  was_banned boolean
-}
-
-Table tournament_registrations {
-  id int [pk, increment]
-  tournament_id int
-  user_id int
-  registered_at datetime
-  fantasy_points decimal
-}
-
-Table registration_heroes {
-  registration_id int
-  hero_id int
+// The aggregate root a manager owns per tournament; entry_slots hang off it.
+// credit_grant is snapshotted from the tournament at registration time.
+Table tournament_entries {
+  id            int [pk, increment]
+  tournament_id int [not null]
+  manager_id    int [not null]
+  status        tournament_entry_status [not null]
+  credit_grant  int [not null]
+  registered_at timestamp [not null]
+  locked_at     timestamp
 
   indexes {
-    (registration_id, hero_id) [pk]
+    (tournament_id, manager_id) [unique]
+  }
+}
+
+// Child of the tournament_entries aggregate: entry_id is the back-reference,
+// slot_index the list position (Spring Data JDBC @MappedCollection). No
+// acquisition_cost column -- roster cost is joined live from tournament_heroes.
+Table entry_slots {
+  entry_id   int [not null]
+  slot_index int [not null]
+  hero_id    int [not null]
+
+  indexes {
+    (entry_id, slot_index) [pk]
+    (entry_id, hero_id) [unique]
+  }
+}
+
+// The scoring configuration for one tournament. Multiple rule sets may exist;
+// exactly one may be active at a time (partial unique index on tournament_id
+// where is_active).
+Table scoring_rule_sets {
+  id            int [pk, increment]
+  tournament_id int [not null]
+  name          varchar [not null]
+  is_active     boolean [not null, default: false]
+
+  indexes {
+    (tournament_id, name) [unique]
+  }
+}
+
+// One weighted metric. `metric` is free-form text (CHECK ^[A-Z][A-Z0-9_]*$ as a
+// typo guard, not a whitelist) -- an admin adds a row, no migration needed. An
+// unknown key scores zero rather than erroring.
+Table scoring_coefficients {
+  id          int [pk, increment]
+  rule_set_id int [not null]
+  metric      varchar [not null]
+  coefficient decimal [not null]
+  sort_order  int [not null, default: 0]
+
+  indexes {
+    (rule_set_id, metric) [unique]
+  }
+}
+
+// One recorded match -- a series of one or more games between the same two
+// humans. external_link is required and unique per tournament: it's what stops
+// the same match being imported twice.
+Table tournament_matches {
+  id            int [pk, increment]
+  tournament_id int [not null]
+  round         int [not null]
+  played_at     timestamp [not null]
+  external_link varchar [not null]
+
+  indexes {
+    (id, tournament_id) [unique] // lets match_games carry a composite FK back here
+    (tournament_id, external_link) [unique]
+  }
+}
+
+// One side of the series -- who played it, for the whole series. Hero, map,
+// health and winner all live on match_games / match_game_participants instead,
+// since a side may pilot a different hero per game.
+Table match_participants {
+  match_id     int [not null]
+  side         int [not null] // 0 or 1
+  player_label varchar
+
+  indexes {
+    (match_id, side) [pk]
+  }
+
+  Note: 'player_label is free text, no FK, no player table -- every point is scored per hero, never per human.'
+}
+
+// One game within a series. tournament_id is denormalized from
+// tournament_matches purely to carry the composite "map is in this
+// tournament's pool" FK.
+Table match_games {
+  id            int [pk, increment]
+  match_id      int [not null]
+  tournament_id int [not null]
+  game_number   int [not null]
+  map_id        int [not null]
+
+  indexes {
+    (match_id, game_number) [unique]
+  }
+}
+
+// One side's result in one game: the hero it brought and how it ended. Exactly
+// one side of a game carries is_winner (partial unique index enforces "at most
+// one"; MatchResultPolicy.NOT_EXACTLY_ONE_WINNER enforces "at least one"). A
+// losing hero finishes on 0 or less health.
+Table match_game_participants {
+  game_id          int [not null]
+  side             int [not null] // 0 or 1
+  hero_id          int [not null]
+  health_remaining int [not null]
+  is_winner        boolean [not null, default: false]
+
+  indexes {
+    (game_id, side) [pk]
+    (game_id, hero_id) [unique]
+  }
+}
+
+// A hero banned out of the series (once, before it starts -- not per game).
+// `side` is whose draft the hero was struck out of, not who struck it --
+// nullable, and stays that way: a ban typed with nothing to attribute it to is
+// still a legal ban.
+Table hero_bans {
+  match_id int [not null]
+  hero_id  int [not null]
+  ban_type hero_ban_type [not null]
+  side     int // 0, 1, or null (required null for PRE_BAN)
+
+  indexes {
+    (match_id, hero_id) [pk]
+  }
+}
+
+// The picks half of the draft (hero_bans is the bans half). A hero drafted and
+// never fielded still scores APPEARANCE -- that's the whole point of recording
+// it. Deliberately no unique (match_id, hero_id): games in a series are
+// independent, so a hero may go to one side in game 1 and the other in game 2.
+Table match_hero_picks {
+  match_id int [not null]
+  side     int [not null] // 0 or 1
+  hero_id  int [not null]
+
+  indexes {
+    (match_id, side, hero_id) [pk]
   }
 }
 
@@ -102,19 +244,32 @@ Ref: tournament_heroes.tournament_id > tournaments.id
 Ref: tournament_heroes.hero_id > heroes.id
 
 Ref: tournament_maps.tournament_id > tournaments.id
-Ref: tournament_maps.map_id > maps.id
+Ref: tournament_maps.map_id > game_maps.id
+
+Ref: tournament_entries.tournament_id > tournaments.id
+Ref: tournament_entries.manager_id > managers.id
+
+Ref: entry_slots.entry_id > tournament_entries.id
+Ref: entry_slots.hero_id > heroes.id
 
 Ref: scoring_rule_sets.tournament_id > tournaments.id
-Ref: scoring_coefficients.ruleset_id > scoring_rule_sets.id
+Ref: scoring_coefficients.rule_set_id > scoring_rule_sets.id
 
-Ref: matches.tournament_id > tournaments.id
+Ref: tournament_matches.tournament_id > tournaments.id
 
-Ref: match_participants.match_id > matches.id
-Ref: match_participants.player_id > players.id
-Ref: match_participants.hero_id > heroes.id
+Ref: match_participants.match_id > tournament_matches.id
 
-Ref: tournament_registrations.user_id > users.id
-Ref: tournament_registrations.tournament_id > tournaments.id
+Ref: match_games.match_id > tournament_matches.id
+Ref: match_games.map_id > game_maps.id
+// Composite FKs (match_id, tournament_id) -> tournament_matches(id, tournament_id)
+// and (tournament_id, map_id) -> tournament_maps(tournament_id, map_id) aren't
+// representable as single-column refs here; see V1__core_schema.sql.
 
-Ref: registration_heroes.registration_id > tournament_registrations.id
-Ref: registration_heroes.hero_id > heroes.id
+Ref: match_game_participants.game_id > match_games.id
+Ref: match_game_participants.hero_id > heroes.id
+
+Ref: hero_bans.match_id > tournament_matches.id
+Ref: hero_bans.hero_id > heroes.id
+
+Ref: match_hero_picks.match_id > tournament_matches.id
+Ref: match_hero_picks.hero_id > heroes.id

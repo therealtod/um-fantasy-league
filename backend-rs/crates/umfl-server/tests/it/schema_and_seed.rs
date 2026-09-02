@@ -573,9 +573,15 @@ async fn match_ids_ascend_with_played_at_which_is_what_makes_the_id_a_safe_polli
 /// than the seed.
 ///
 /// Flyway orders by version **across** locations. This pins the interleaving
-/// that produces, because getting it wrong is not a subtle failure of these
-/// counts -- it is `V3__demo_fixtures.sql` inserting into a table
-/// `V5__match_hero_pick.sql` has not created yet.
+/// that produces. Migrations are periodically squashed back to a `V1`
+/// baseline (see `AGENTS.md`), so this currently has nothing to interleave --
+/// `db/migration` is just `V1__core_schema.sql` and `V2__reference_data.sql`,
+/// and `db/seed` is a single `V3__demo_fixtures.sql` sitting after both. The
+/// assertion still earns its place: a *future* seed addition that depends on
+/// a migration added after the current baseline (the way `V6__demo_draft_picks.sql`
+/// and `V8__demo_ban_sides.sql` once did) gets its own version rather than an
+/// edit to `V3`, and this is what would catch that version landing on the
+/// wrong side of the schema it depends on.
 #[test]
 fn the_two_flyway_locations_interleave_by_version() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -586,23 +592,19 @@ fn the_two_flyway_locations_interleave_by_version() {
     let plan = crate::harness::migrate::plan(&root.join("migration"), Some(&root.join("seed")));
 
     let versions: Vec<u32> = plan.iter().map(|m| m.version).collect();
-    assert_eq!(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10], versions);
+    assert_eq!(vec![1, 2, 3], versions);
 
     let seeded: Vec<u32> = plan
         .iter()
         .filter(|m| m.path.parent().is_some_and(|p| p.ends_with("seed")))
         .map(|m| m.version)
         .collect();
-    assert_eq!(
-        vec![3, 6, 8],
-        seeded,
-        "the seed's versions sit *between* the schema's"
-    );
+    assert_eq!(vec![3], seeded, "the seed's version sits after the schema's");
 
     // The `prod` shape: same schema and reference data, no league data at all.
     let without_seed = crate::harness::migrate::plan(&root.join("migration"), None);
     assert_eq!(
-        vec![1, 2, 4, 5, 7, 9, 10],
+        vec![1, 2],
         without_seed.iter().map(|m| m.version).collect::<Vec<_>>()
     );
 }

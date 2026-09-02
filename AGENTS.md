@@ -28,19 +28,25 @@ cd frontend && npm install && npm run dev
 ```
 
 Migrations are periodically squashed back into a single `V1__core_schema.sql` baseline (schema +
-admin authorization, no data), so an older local database fails Flyway checksum validation. There is
-no production data: `docker compose down -v && docker compose up -d db`. Data past that baseline
-splits by *kind*, not by environment: `db/migration/V2__reference_data.sql` carries the canonical
-hero and board catalogue — facts about Unmatched, not about a league, and the thing an admin prices
-into a pool — so it migrates in **every** profile, while demo/dev fixtures — three tournaments,
-seeded managers, a full recorded result set — live in a second Flyway location,
-`db/seed/` (`V3__demo_fixtures.sql`, plus `V6__demo_draft_picks.sql` and `V8__demo_ban_sides.sql` —
-separate files only because Flyway orders every location by version, and the columns they fill do not
-exist until V5 and V7 respectively; a seed addition that depends on a later migration always gets its
-own version rather than an edit to V3), that only
-`dev` and `test` add to `spring.flyway.locations` (see
-Profiles below). A default start or the `prod` profile therefore comes up with every hero and board
-and no mock league data at all.
+admin authorization, no data — and, as of the most recent squash, every table renamed to a plural
+noun: `hero` → `heroes`, `tournament_hero` → `tournament_heroes`, `tournament_match` →
+`tournament_matches`, and so on throughout), so an older local database fails Flyway checksum
+validation. There is no production data: `docker compose down -v && docker compose up -d db`. `db/`
+also moved to the **repository root** in that same squash — it is no longer under
+`backend/src/main/resources` — because `backend-rs/` migrates the same directory, so the SQL is
+shared rather than copied into one build's resources; Flyway reads it off the filesystem
+(`filesystem:${DB_MIGRATIONS_DIR:../db}/...`, relative to Gradle's `backend/` working directory) with
+`DB_MIGRATIONS_DIR` as the escape hatch for any other launcher, same category as `DB_URL`. Data past
+that baseline splits by *kind*, not by environment: `db/migration/V2__reference_data.sql` carries the
+canonical hero and board catalogue — facts about Unmatched, not about a league, and the thing an admin
+prices into a pool — so it migrates in **every** profile, while demo/dev fixtures — three tournaments,
+seeded managers, a full recorded result set, draft picks and ban sides all included from the start —
+live in a second Flyway location, `db/seed/V3__demo_fixtures.sql`, that only `dev` and `test` add to
+`spring.flyway.locations` (see Profiles below). There is no longer a `V6__demo_draft_picks.sql` or
+`V8__demo_ban_sides.sql` — those existed only because the columns they filled postdated the seed's own
+migration; the squash folded them back into `V3` now that everything they depended on is already in
+`V1`. A default start or the `prod` profile therefore comes up with every hero and board and no mock
+league data at all.
 
 The admin match import needs the scraper sidecar. It is a plain Node process — Docker is only how it
 reaches the VPS — so a dev session runs it directly, and the backend's default `scraper.base-url`
@@ -95,7 +101,7 @@ the rollback into the next class through the shared context. So an invalidating 
 `AFTER_COMPLETION` — `MatchResultCache` is the only one, and it also pairs that with a plain
 `@EventListener` so a write is visible to its own transaction. The base class additionally clears
 that cache in a `@BeforeEach`, which is a belt-and-braces against tests that mutate match tables by
-raw SQL and so publish nothing (`SchemaAndSeedTest` inserts into `match_game` directly), not the
+raw SQL and so publish nothing (`SchemaAndSeedTest` inserts into `match_games` directly), not the
 mechanism itself. Relatedly, the suite must stay sequential: there is no `junit-platform.properties`
 and turning on parallel execution would let two concurrently rolled-back transactions see each
 other's uncommitted rows through that shared cache.
@@ -120,7 +126,7 @@ Spring Boot is pinned to 4.1.0, which manages Testcontainers 2.0.5 — verified 
 |---|---|---|
 | `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` once at the filter level, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `DevManagerProvider` just reads the result back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
 | `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection`; same `db/seed` addition, since every integration test asserts against the fixtures |
-| `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `manager.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through the Worker proxy) |
+| `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `managers.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through the Worker proxy) |
 
 The application makes exactly one outbound HTTP call, and only from the admin match import:
 `ScraperClient` → the scraper sidecar (see Match import below). Nothing else in the codebase talks to
@@ -169,7 +175,7 @@ that ever touches `/api/`. Tuning (`capacity`, `refillPeriod`, `maxTrackedIps`, 
 below for why this is the one `@ConfigurationProperties` block in the app despite that rule.
 
 Admin routes (`/api/admin/**`) therefore require `hasRole("ADMIN")` in both profiles — the role comes
-from `manager.is_admin`, our own data, resolved once per request by
+from `managers.is_admin`, our own data, resolved once per request by
 `SupabaseAuthenticationConverter`/`DevManagerAuthenticationFilter` via the shared, provider-agnostic
 `ManagerAuthorities` — never from an identity-provider claim, so swapping auth providers later never
 touches the role logic. `DevSecurityConfig` (`!prod`) is also what stops Spring Security's
@@ -200,7 +206,7 @@ because its key has a complete invalidation signal (see the standings section). 
 that same argument made explicitly, not a precedent.
 
 `TournamentEntry` is the manager-facing aggregate root — it owns `EntrySlot`s via `@MappedCollection`
-(list index → `entry_slot.slot_index`) and is saved as one unit. `manager` is written on
+(list index → `entry_slots.slot_index`) and is saved as one unit. `managers` is written on
 JIT-provisioning in `prod`. Everything else is written only through the Admin API, whose own
 aggregates (`TournamentMatch`, `ScoringRuleSet`, `Hero`, `GameMap`) are described under Admin API
 below; nothing outside that surface writes reference data or results.
@@ -208,10 +214,10 @@ below; nothing outside that surface writes reference data or results.
 ### Invariants
 
 - **No `season`, anywhere.** The tournament is the unit of scoping. Hero cost is
-  `tournament_hero.cost`; queries take a `tournamentId`.
-- **No cost snapshot.** `entry_slot` stores only the hero; cost is joined live, so re-pricing a hero
+  `tournament_heroes.cost`; queries take a `tournamentId`.
+- **No cost snapshot.** `entry_slots` stores only the hero; cost is joined live, so re-pricing a hero
   re-prices an *unlocked* roster. That is intended. What *is* snapshotted is
-  `tournament_entry.credit_grant`, copied off the tournament at registration —
+  `tournament_entries.credit_grant`, copied off the tournament at registration —
   `RosterPolicy.validateLock` takes the budget from the entry, never the tournament.
 - **Nothing writes points.** Match results are written by the Admin API (see below), but every
   point total is still derived at read time in `StandingsService`; `totalCost` is derived from
@@ -222,7 +228,7 @@ below; nothing outside that surface writes reference data or results.
   the rules, rosters and prices behind a board stay read live on every request, and only a
   *match* can ever be a write behind.
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
-  `scoring_coefficient`, the budget is `tournament.credit_grant` — both retuned with an UPDATE. Don't
+  `scoring_coefficients`, the budget is `tournaments.credit_grant` — both retuned with an UPDATE. Don't
   reintroduce a tunables block in `application.yml`. There are exactly two exceptions, and both are
   *infrastructure* rather than domain data — the same category as `DB_URL`, and unreadable from a
   database the app hasn't reached yet: `rate-limit.api.*` (`RateLimitProperties`, see Profiles above),
@@ -233,48 +239,52 @@ below; nothing outside that surface writes reference data or results.
   object for exactly that reason, as is `StandingsSseHub`'s: how many match lists a JVM holds is
   neither domain data nor deployment topology.
 - **A match names where it is recorded elsewhere, and that link is its identity.**
-  `tournament_match.external_link` is `not null` with a unique index per tournament
-  (`uq_tournament_match_external_link`, added by `V9__external_link_required.sql`). It is what stops
-  an admin importing the same match twice — a duplicate would silently double every point the match
-  scores, and nothing would surface it until someone doubted the standings. So it is required even
-  for a match typed by hand: a game with no page anywhere carries an identifier of the admin's own,
-  and rows predating the migration were backfilled with a synthetic `urn:umfl:match:<id>`. The
-  uniqueness is scoped to the tournament rather than global, matching the importer's own
-  per-tournament check, so the preview never reports "no duplicate" and then fails the save.
-  Correcting a match reuses its link freely — `correct` updates the row in place.
-- **A match is a series, and every game in it has a winner.** `tournament_match` is a best-of-N
-  between two humans; each `match_game` carries its own map and its own two
-  `match_game_participant` rows, so a side can pilot a different hero per game. Exactly one of those
+  `tournament_matches.external_link` is `not null` with a unique index per tournament
+  (`uq_tournament_match_external_link`) — folded into the `V1` baseline by the most recent squash;
+  historically it arrived as a dedicated `V9__external_link_required.sql` migration, which no longer
+  exists as a separate file for the same reason `V6__demo_draft_picks.sql` and
+  `V8__demo_ban_sides.sql` don't (see Commands above). It is what stops an admin importing the same
+  match twice — a duplicate would silently double every point the match scores, and nothing would
+  surface it until someone doubted the standings. So it is required even for a match typed by hand: a
+  game with no page anywhere carries an identifier of the admin's own, and rows predating the original
+  migration were backfilled with a synthetic `urn:umfl:match:<id>`. The uniqueness is scoped to the
+  tournament rather than global, matching the importer's own per-tournament check, so the preview
+  never reports "no duplicate" and then fails the save. Correcting a match reuses its link freely —
+  `correct` updates the row in place.
+- **A match is a series, and every game in it has a winner.** `tournament_matches` is a best-of-N
+  between two humans; each `match_games` row carries its own map and its own two
+  `match_game_participants` rows, so a side can pilot a different hero per game. Exactly one of those
   two rows is flagged `is_winner` — a partial unique index stops two, and
   `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw**, and the loser never
   survives: `MatchResultPolicy.LOSER_HAS_POSITIVE_HEALTH` requires the losing side to finish on 0 or
   less (an overkill hit lands it below zero), and every recorded game in `V3__demo_fixtures.sql`
   respects that. Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side,
   like every other derived number here.
-- **The draft is recorded in full, as picks *and* bans, and both name a side.** `hero_ban
+- **The draft is recorded in full, as picks *and* bans, and both name a side.** `hero_bans
   (match_id, hero_id, ban_type, side)` holds the heroes struck out of a series;
-  `match_hero_pick (match_id, side, hero_id)` holds the heroes each side took. Both are per series,
+  `match_hero_picks (match_id, side, hero_id)` holds the heroes each side took. Both are per series,
   never per game. A recorded draft is *complete* — `MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED`
   rejects a game whose hero is missing from that side's picks — which is what lets `APPEARANCE` be
   "was drafted and not banned" rather than "played". `BANNED_HERO_DRAFTED` keeps the two halves
   disjoint. There is deliberately no `unique (match_id, hero_id)` on the picks: games are
   independent, so a hero may legitimately go to one side in game 1 and the other in game 2, and
-  `MatchResult.draftedHeroIds` de-duplicates instead. `hero_ban` *does* keep that key, so a hero is
+  `MatchResult.draftedHeroIds` de-duplicates instead. `hero_bans` *does* keep that key, so a hero is
   struck at most once per series however many sides wanted it — which is what `DUPLICATE_BAN` means.
 - **A ban's `side` is the draft it came out of, not who struck it.** `ban_type` already says that:
   `SELF_BAN` is a side striking one of its own, `OPPONENT_BAN` the other side striking it, and a
   `PRE_BAN` precedes side assignment and so carries no side at all (`BAN_SIDE_INVALID` rejects one
-  that does). The column is **nullable and stays that way**: every row written before
-  `V7__hero_ban_side.sql` has no side and cannot be given one after the fact, so a typed ban without
-  one is legal rather than making an already-recorded match uncorrectable — `BAN_SIDE_INVALID`
-  polices an *impossible* side, never a missing one. Tightening that to "every typed ban names a
-  side" needs a migration that can first attribute the rows already in the table; it cannot be done
-  by editing the baseline, which fails Flyway validation and stops the app booting (see Commands).
-  Scoring never reads the column: `MatchMetrics.banOfType` prices a ban by category alone, because
-  points are per hero and never per player.
+  that does). The column is **nullable and stays that way**: rows written before it existed have no
+  side and cannot be given one after the fact, so a typed ban without one is legal rather than making
+  an already-recorded match uncorrectable — `BAN_SIDE_INVALID` polices an *impossible* side, never a
+  missing one. The column arrived as a dedicated `V7__hero_ban_side.sql` migration, since folded into
+  the `V1` baseline like `V9__external_link_required.sql` above; tightening the invariant to "every
+  typed ban names a side" still needs a migration that can first attribute the rows already in the
+  table, and cannot be done by editing the baseline, which fails Flyway validation and stops the app
+  booting (see Commands). Scoring never reads the column: `MatchMetrics.banOfType` prices a ban by
+  category alone, because points are per hero and never per player.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
-  `match_participant.player_label` — one row per side for the whole series, nullable free text with
+  `match_participants.player_label` — one row per side for the whole series, nullable free text with
   no table, no FK, no repository and deliberately no admin API. An admin records a new competitor by typing their name. It is display
   text for the ticker and the admin match list, nothing more, and `MatchResultPolicy` never validates
   it (a blank label normalises to null in `AdminMatchService`). Promote it to a real table only if
@@ -289,7 +299,7 @@ scratchpad, the meter just runs past 100%); `validateLock` adds the budget and r
 Both return *all* violations at once so the UI can highlight every problem in one pass. The rule
 codes are the `RosterRule` enum, documented constant by constant.
 
-`MatchMetrics` is a registry keyed by the free-form `scoring_coefficient.metric` string. It
+`MatchMetrics` is a registry keyed by the free-form `scoring_coefficients.metric` string. It
 implements `APPEARANCE`, `SELF_BAN`, `OPPONENT_BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`,
 `HEALTH_DIFFERENTIAL`, `HEALTH_DIFFERENTIAL_TWO_WAY`, `SHUTOUT`, and **silently ignores everything
 else** — unknown keys score
@@ -300,7 +310,7 @@ and a `DRAW` column would price something that cannot be recorded. Extractors ta
 (the hero's role in one match — `Played`, which is scoped to *one game* of it, or the per-series
 `Drafted`/`Banned`), not a bare participant row, because
 `HEALTH_DIFFERENTIAL` needs the opponent and `APPEARANCE`/`SELF_BAN`/`OPPONENT_BAN` have no
-participant row at all — they price the draft, reading `hero_ban.ban_type` off the match or the role
+participant row at all — they price the draft, reading `hero_bans.ban_type` off the match or the role
 itself, so a hero banned `PRE_BAN` (struck before sides are known) scores neither ban metric.
 `HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not win
 the game scores 0.0 rather than a negative differential, since there is no losing side of that
@@ -321,7 +331,7 @@ the ticker's per-game points still sum to what the board gained, and names the n
 separately as `draftedUnplayedHeroNames`.
 
 `StandingsService` returns a `StandingsBoard` that carries its own `metrics` column definitions —
-the backend cannot know the columns until it reads `scoring_coefficient`. Ranking is standard
+the backend cannot know the columns until it reads `scoring_coefficients`. Ranking is standard
 competition ranking (1, 2, 2, 4). The ticker's polling key is **`sinceMatchId`** (monotonic
 `bigserial`), never `playedAt`: parallel tables in a round share a timestamp.
 
@@ -385,12 +395,12 @@ real dispatch — a direct unit call cannot see resolver ordering, which is the 
 `HeroSort` holds ORDER BY fragments as an enum whitelist because sort keys can't be parameterised —
 keep new sorts inside that enum.
 
-Migrations are `backend/src/main/resources/db/migration/V*__*.sql`, forward-only, squashed to a
-single `V1__core_schema.sql` baseline (see Commands above for why, and for the seed's separate Flyway
-location). Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a
-unique natural key because Spring Data JDBC can't map composite primary keys; the pure link tables
-(`tournament_hero`, `tournament_map`, `entry_slot`, `hero_ban`, `match_hero_pick`,
-`match_game_participant`) keep natural composite keys. The
+Migrations are `db/migration/V*__*.sql` at the **repository root** (see Commands above for why it
+moved there), forward-only, squashed to a single `V1__core_schema.sql` baseline (see Commands above
+for why, and for the seed's separate Flyway location). Tables the app loads or writes as aggregates
+carry a surrogate `bigserial` id next to a unique natural key because Spring Data JDBC can't map
+composite primary keys; the pure link tables (`tournament_heroes`, `tournament_maps`, `entry_slots`,
+`hero_bans`, `match_hero_picks`, `match_game_participants`) keep natural composite keys. The
 integration tests assert on the seed's numbers exactly — changing a seeded price or result means
 updating `V3__demo_fixtures.sql` and the tests together. New *league* data past that fixed baseline
 goes through the Admin API (see below), not another migration. The one thing that legitimately
@@ -479,16 +489,16 @@ plus optional `VITE_DEV_MANAGER_ID` to skip Supabase Auth against a dev backend.
 
 ## Admin API
 
-`/api/admin/**`, `hasRole("ADMIN")`-gated, backed by `manager.is_admin` (our own data, independent of
+`/api/admin/**`, `hasRole("ADMIN")`-gated, backed by `managers.is_admin` (our own data, independent of
 any identity provider). Covers create/update for tournaments, heroes, maps, per-tournament hero
-pool/pricing (`tournament_hero`), per-tournament board pool (`tournament_map`), and scoring rule
+pool/pricing (`tournament_heroes`), per-tournament board pool (`tournament_maps`), and scoring rule
 sets/coefficients, plus create/update/delete for match results. Both pools also support removal, and
-the two removals are deliberately asymmetric: dropping a hero from `tournament_hero` is always
+the two removals are deliberately asymmetric: dropping a hero from `tournament_heroes` is always
 allowed and simply re-prices any roster still holding it to 0 (the "no cost snapshot" invariant
-above, applied to a removal rather than a re-price), while dropping a map from `tournament_map` is
+above, applied to a removal rather than a re-price), while dropping a map from `tournament_maps` is
 rejected with a `ConflictException` when the tournament has a recorded game on it, since
-`match_game` carries a composite FK onto that row. That FK is `DEFERRABLE INITIALLY DEFERRED` so a
-tournament delete (which cascades to `tournament_map` and, one level deeper, to `match_game`) is not
+`match_games` carries a composite FK onto that row. That FK is `DEFERRABLE INITIALLY DEFERRED` so a
+tournament delete (which cascades to `tournament_maps` and, one level deeper, to `match_games`) is not
 tripped by cascade ordering — which is why `AdminMapService.removeFromPool` calls
 `MapPoolAdminRepository.checkMapInPoolNow()` (`set constraints … immediate`) after its DELETE: the
 violation has to surface inside the method that can still name the map, not at commit.
@@ -498,12 +508,12 @@ The reference and result tables have a Spring Data JDBC write side: `Hero`, `Gam
 `picks` as `Set`-mapped children — no `keyColumn` there,
 since none carries a list-position column; each `MatchGame` in turn owns its own participants)
 and `ScoringRuleSet` (owning `coefficients`). `picks` hangs off the match root rather than off
-`MatchParticipant`, where it would read more naturally: `match_participant` is composite-keyed and
+`MatchParticipant`, where it would read more naturally: `match_participants` is composite-keyed and
 Spring Data JDBC cannot map a child of an entity keyed that way. The *API* still hangs the draft off
 the side that owns it — `MatchParticipantRequest.draftedHeroIds` in, `MatchParticipantResult.draftedHeroes`
 out, with `side` the list position as it already is for `player_label` — and `AdminMatchService.toPicks`
 does the transposition, which is also why an out-of-range side is unrepresentable and no rule polices
-one. `tournament_hero` and `tournament_map` stay
+one. `tournament_heroes` and `tournament_maps` stay
 composite-keyed link tables with no Kotlin entity — `HeroPoolAdminRepository`/`MapPoolAdminRepository`
 write them via `JdbcClient`, the same read/write split the rest of the app already uses.
 
@@ -560,9 +570,9 @@ timestamp would be a bad trade; the wizard's date picker already defaults to now
 
 **A ban's side is scraped, not inferred.** The source groups its "Self ban"/"Opp. ban" chips under
 the side that owned the hero (`ScrapedSide.bans`), and `scraped.preBans` belongs to neither — so
-`MatchImportService` emits each typed ban's side straight through to `hero_ban.side`. It used to
+`MatchImportService` emits each typed ban's side straight through to `hero_bans.side`. It used to
 flatten both sides into one list and throw the attribution away, because the table had nowhere to put
-it. The flattening remains, since `hero_ban` is keyed `(match_id, hero_id)` and the same hero cannot
+it. The flattening remains, since `hero_bans` is keyed `(match_id, hero_id)` and the same hero cannot
 be struck twice in one series; only the discarding is gone.
 
 **Name resolution is exact-after-normalisation, with no fuzzy fallback** (`NameResolver`, pure).
@@ -574,7 +584,7 @@ catalogue question.
 
 Anything unresolved comes back in `unresolved[]` with the source's own spelling and never blocks the
 *import* — only the recording. `MAP_NOT_IN_POOL` is the one that fires in practice, because
-`match_game` carries a composite FK onto `tournament_map`; heroes reference `heroes(id)` directly and
+`match_games` carries a composite FK onto `tournament_maps`; heroes reference `heroes(id)` directly and
 have no equivalent constraint. `external_link` stores the source URL, which is also the duplicate
 check — and since `V9__external_link_required.sql` it is a rule rather than a warning: the column is
 `not null` with a unique index per tournament, `MatchImportService` reports the clash as
@@ -644,7 +654,7 @@ which `matchForm.spec.ts` guards by running a saved match and a preview through 
 named it, since a select holding an id no longer in its option list renders blank while still
 submitting.
 
-A ban read back with **no side** (anything recorded before `hero_ban.side` existed) lands in
+A ban read back with **no side** (anything recorded before `hero_bans.side` existed) lands in
 `unassignedBans` and blocks the save until the admin places it on a side. It is neither dropped nor
 guessed: the ban already scored points, so losing it would silently move the standings.
 
