@@ -13,13 +13,41 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  # Applies db/migration -- and only db/migration: this stack runs the `prod`
+  # profile, so unlike docker-compose.yml's `flyway` service it must never add
+  # db/seed, which is demo/dev fixture data, not something that belongs in the
+  # real league's database. One-shot, run to completion before `backend`
+  # starts; see db/Dockerfile for why this exists instead of the backend
+  # migrating itself the way the Kotlin jar used to.
+  #
+  # `${DB_URL}`/`${DB_USER}`/`${DB_PASSWORD}` are substituted from the same
+  # `.env` this directory's `docker compose` already reads for
+  # `${CLOUDFLARE_TUNNEL_TOKEN}` below -- the VPS's hand-managed `.env`
+  # already carries them for `backend`'s own `env_file`, and `DB_URL` is
+  # JDBC-shaped, which is exactly the URL form Flyway wants.
+  flyway:
+    image: ghcr.io/therealtod/umfl-migrator:latest
+    container_name: umfl-flyway
+    restart: "no"
+    logging: *default-logging
+    mem_limit: 256m
+    environment:
+      FLYWAY_URL: ${DB_URL}
+      FLYWAY_USER: ${DB_USER}
+      FLYWAY_PASSWORD: ${DB_PASSWORD}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql/migration
+      FLYWAY_CONNECT_RETRIES: "10"
+
   backend:
-    image: ghcr.io/therealtod/umfl-backend:latest
+    image: ghcr.io/therealtod/umfl-backend-rs:latest
     container_name: umfl-backend
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 768m
     stop_grace_period: 35s
+    depends_on:
+      flyway:
+        condition: service_completed_successfully
     env_file:
       - .env
     environment:

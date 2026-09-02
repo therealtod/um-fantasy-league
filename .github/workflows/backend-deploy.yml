@@ -1,3 +1,9 @@
+# The Kotlin backend is no longer what's deployed -- see backend-rs-deploy.yml,
+# which now owns the VPS's `backend` and `flyway` services (AGENTS.md's
+# "default version is the rust port"). `build-and-push` still runs on every
+# push here, purely so a tagged Kotlin image keeps existing for a manual
+# rollback (`docker compose pull backend@<sha>` on the box); `deploy` below
+# only rolls `scraper`, which has no other workflow that builds or deploys it.
 name: backend-deploy
 
 on:
@@ -95,6 +101,6 @@ jobs:
           script: |
             set -e
             cd /opt/umfl
-            docker compose pull backend scraper
-            docker compose up -d backend scraper
+            docker compose pull scraper
+            docker compose up -d scraper
             docker image prune -f

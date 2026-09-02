@@ -16,12 +16,37 @@ services:
       timeout: 5s
       retries: 10
 
+  # Applies db/migration and, since this stack runs the `dev` profile,
+  # db/seed -- the same two locations `spring.flyway.locations` adds for
+  # `dev`/`test` (see AGENTS.md). The Rust backend below doesn't carry a
+  # migration runner of its own (see db/Dockerfile), so this one-shot
+  # container is what makes a bare `docker compose up` produce a migrated,
+  # seeded database the way it always has.
+  flyway:
+    build:
+      context: db
+      dockerfile: Dockerfile
+    container_name: umfl-flyway
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/umfl
+      FLYWAY_USER: umfl
+      FLYWAY_PASSWORD: umfl
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql/migration,filesystem:/flyway/sql/seed
+      FLYWAY_CONNECT_RETRIES: "10"
+
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: backend-rs/Dockerfile
     container_name: umfl-backend
     depends_on:
       db:
         condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
     environment:
       SPRING_PROFILES_ACTIVE: dev
       DB_URL: jdbc:postgresql://db:5432/umfl

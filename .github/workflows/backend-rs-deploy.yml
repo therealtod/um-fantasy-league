@@ -1,6 +1,11 @@
-# Builds and publishes the Rust backend image. Deliberately does not
-# SSH-deploy anywhere on its own -- add that job once a box is a permanent
-# fixture, mirroring backend-deploy.yml's `deploy` job.
+# Builds and publishes the Rust backend image, plus the migrator image that
+# applies db/migration ahead of it (see db/Dockerfile), and deploys both to
+# the VPS. AGENTS.md's "default version is the rust port": this workflow is
+# what makes that true in prod, the same way backend-rs/Dockerfile and
+# deploy/docker-compose.prod.yml's `backend` service make it true in the
+# image and the compose file. backend-deploy.yml no longer deploys `backend`
+# (Kotlin) for the same reason -- two workflows deploying the same compose
+# service would race.
 name: backend-rs-deploy
 
 on:
@@ -19,6 +24,7 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-backend-rs
+  MIGRATOR_IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-migrator
 
 jobs:
   test:
@@ -68,3 +74,41 @@ jobs:
             ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Built here rather than its own workflow so `docker compose pull` on
+      # the VPS always finds both images in step -- they deploy together
+      # below, the same reasoning backend-deploy.yml gives for building the
+      # scraper image alongside the backend it doesn't otherwise depend on.
+      - name: Build and push the migrator image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./db
+          file: ./db/Dockerfile
+          push: true
+          tags: |
+            ${{ env.MIGRATOR_IMAGE }}:${{ github.sha }}
+            ${{ env.MIGRATOR_IMAGE }}:latest
+          cache-from: type=gha,scope=migrator
+          cache-to: type=gha,mode=max,scope=migrator
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_SSH_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/umfl
+            docker compose pull backend flyway
+            # `flyway` before `backend`: compose's own `depends_on:
+            # condition: service_completed_successfully` already orders
+            # them, but naming it first here means a freshly pulled image
+            # is what actually runs the migration, not whatever happened to
+            # be sitting there from a previous deploy.
+            docker compose up -d flyway backend
+            docker image prune -f

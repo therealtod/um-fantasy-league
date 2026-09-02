@@ -689,24 +689,51 @@ A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched sta
 
 ## CI/CD
 
-GitHub Actions. `.github/workflows/backend-ci.yml` runs `:backend:ktlintCheck` then `:backend:test` (Testcontainers
-included — GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master`
-branches, as the merge gate. `.github/workflows/backend-deploy.yml` re-runs the same tests, then on a green push to
-`master` builds the root `Dockerfile`, pushes `ghcr.io/<owner>/umfl-backend:{sha,latest}` *and*
-`ghcr.io/<owner>/umfl-scraper:{sha,latest}` (the Playwright sidecar, built from
-`tools/tabletopleague-scraper/`, which is also on the workflow's path filter), and SSHes
-into the VPS to `docker compose pull && up -d` against `deploy/docker-compose.prod.yml` (which the
-VPS keeps a copy of at `/opt/umfl`, alongside a `.env` — modeled on `deploy/.env.example` — that is
-managed by hand on the box, never passed through CI). The `prod` profile there talks to Supabase
-Postgres, so there is no `db` service in that compose file, unlike the root `docker-compose.yml`.
-That compose file also runs `cloudflared` as a service (`tunnel run`, authenticated by
-`CLOUDFLARE_TUNNEL_TOKEN` in `.env`), publishing `backend` to the internet as a named Cloudflare
-Tunnel rather than an ad-hoc `cloudflared tunnel --url ...` quick tunnel run by hand on the box. A
-named tunnel's hostname is stable across restarts and redeploys — it comes from the tunnel's own
-identity, configured once in the Cloudflare Zero Trust dashboard, not minted fresh each time the
-process starts — which is what lets `BACKEND_HOST` below be a plain committed value instead of a
-dashboard-only secret. `backend` itself only `expose`s :8080 on the compose network rather than
-publishing it to the host, since `cloudflared` is the only thing that needs to reach it now.
+**The Rust port is the default backend now**, in every environment: the root `docker-compose.yml`'s
+`backend` service builds `backend-rs/Dockerfile`, and `deploy/docker-compose.prod.yml`'s `backend`
+pulls `ghcr.io/<owner>/umfl-backend-rs:latest`. Neither compose file's `backend` service is Kotlin any
+more. Since the Rust server deliberately carries no migration runner of its own (see
+`backend-rs/crates/umfl-server/src/config.rs` — Flyway is still "the migration mechanism", just no
+longer embedded in the server process), both compose files gained a `flyway` service: a tiny image
+built from `db/Dockerfile` that bakes `db/migration` and `db/seed` into the stock Flyway CLI image and
+runs `migrate` once, gated by `depends_on: condition: service_completed_successfully` ahead of
+`backend`. The root compose file's `flyway` uses both locations (it runs the `dev` profile, same as
+`spring.flyway.locations` would); the prod one uses `db/migration` only — `db/seed` is demo/dev
+fixture data and must never touch the real league's database. The Kotlin backend (`backend/`, root
+`Dockerfile`) still exists and still migrates itself the old way (`spring-boot-starter-flyway`
+embedded in the jar) — it just isn't what either compose file's `backend` service runs by default any
+more. Reach it explicitly with `docker build .` / `docker run` if you need it.
+
+GitHub Actions, and there are two backend pipelines because of that same cutover.
+`.github/workflows/backend-ci.yml` runs `:backend:ktlintCheck` then `:backend:test` (Testcontainers
+included — GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master` branches,
+as the Kotlin merge gate; `.github/workflows/backend-rs-ci.yml` is its Rust equivalent (`cargo test
+--workspace` against the committed `.sqlx/` metadata), running alongside it rather than replacing it,
+since the Kotlin backend still exists as (for now) the behavioural oracle the Rust port was built
+against. `.github/workflows/backend-deploy.yml` re-runs the Kotlin tests, then on a green push to
+`master` still builds the root `Dockerfile` and pushes `ghcr.io/<owner>/umfl-backend:{sha,latest}` —
+purely so a tagged Kotlin image keeps existing for a manual rollback — but its `deploy` job no longer
+touches the VPS's `backend` service, only `scraper` (`ghcr.io/<owner>/umfl-scraper:{sha,latest}`, the
+Playwright sidecar built from `tools/tabletopleague-scraper/`, which is also on its path filter and has
+no other workflow that builds or deploys it). `.github/workflows/backend-rs-deploy.yml` is what now owns
+`backend` (and `flyway`) on the VPS: it runs the Rust test suite, pushes
+`ghcr.io/<owner>/umfl-backend-rs:{sha,latest}` from `backend-rs/Dockerfile` *and*
+`ghcr.io/<owner>/umfl-migrator:{sha,latest}` from `db/Dockerfile`, then SSHes into the VPS to pull and
+`up -d` `flyway` and `backend` (in that order, so a freshly pulled migrator image is what actually
+runs) against `deploy/docker-compose.prod.yml` — which the VPS keeps a copy of at `/opt/umfl`, alongside
+a `.env` — modeled on `deploy/.env.example` — that is managed by hand on the box, never passed through
+CI. The `prod` profile there talks to Supabase Postgres directly (over the internet, not a compose
+network), so there is no `db` service in that compose file, unlike the root `docker-compose.yml` —
+`flyway`'s `${DB_URL}`/`${DB_USER}`/`${DB_PASSWORD}` come from that same `.env` via compose variable
+substitution, reusing the JDBC-shaped `DB_URL` `backend`'s own `env_file` already reads. That compose
+file also runs `cloudflared` as a service (`tunnel run`, authenticated by `CLOUDFLARE_TUNNEL_TOKEN` in
+`.env`), publishing `backend` to the internet as a named Cloudflare Tunnel rather than an ad-hoc
+`cloudflared tunnel --url ...` quick tunnel run by hand on the box. A named tunnel's hostname is stable
+across restarts and redeploys — it comes from the tunnel's own identity, configured once in the
+Cloudflare Zero Trust dashboard, not minted fresh each time the process starts — which is what lets
+`BACKEND_HOST` below be a plain committed value instead of a dashboard-only secret. `backend` itself
+only `expose`s :8080 on the compose network rather than publishing it to the host, since `cloudflared`
+is the only thing that needs to reach it now.
 `.github/workflows/frontend-ci.yml` runs on `frontend/**` changes — `npm ci`, `npm run lint`,
 `npm run type-check`, `npm test` (vitest) — as that side's merge gate; it does not build or deploy anything. Deployment of
 the frontend stays separate: Cloudflare Pages is connected directly to the GitHub repo and builds

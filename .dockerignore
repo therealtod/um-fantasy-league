@@ -5,6 +5,7 @@
 .vscode
 build
 backend/build
+backend-rs/target
 frontend
 gradle/wrapper/gradle-wrapper.jar.sha256
 *.log
