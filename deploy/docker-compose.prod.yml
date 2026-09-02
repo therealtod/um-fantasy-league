@@ -1,8 +1,23 @@
+# Docker's default `json-file` driver keeps every line either container has
+# ever written, forever, and nothing on this box prunes it -- so on a free-tier
+# VPS the logs grow until the boot volume is full and *both* services fail for
+# a reason that looks nothing like a log problem. 10m x 3 caps each service at
+# 30 MB.
+#
+# An anchor rather than two copies: a cap that drifts between the services is a
+# cap someone has to re-derive to trust.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   backend:
     image: ghcr.io/therealtod/umfl-backend:latest
     container_name: umfl-backend
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: 768m
     stop_grace_period: 35s
     env_file:
@@ -36,6 +51,7 @@ services:
     image: ghcr.io/therealtod/umfl-scraper:latest
     container_name: umfl-scraper
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: 640m
     environment:
       SCRAPER_HOST: 0.0.0.0

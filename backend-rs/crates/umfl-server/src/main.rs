@@ -44,17 +44,49 @@ async fn main() -> anyhow::Result<()> {
 /// `logging.level.com.umfl` -- DEBUG under `dev`, INFO everywhere else.
 /// `RUST_LOG` overrides, which is the same escape hatch `LOGGING_LEVEL_COM_UMFL`
 /// was.
+///
+/// The *format* splits the same way the level does, and for the same reason:
+/// `dev` is read by a human in a terminal, `prod` is read by whatever tails the
+/// container. So `prod` emits one JSON object per line -- the shape a log
+/// collector can query by field (`level`, `target`, and whatever the event
+/// itself carries) instead of regexing a rendered line -- and everything else
+/// keeps the human-readable renderer.
+///
+/// `LOG_FORMAT=json|text` overrides that, and is read straight off the
+/// environment rather than through [`Config`] for the same reason `RUST_LOG`
+/// is: it configures the subscriber, which has to exist before anything can be
+/// logged about reading configuration. Any other value falls through to the
+/// profile default, since there is no subscriber yet to warn on.
 fn init_tracing(config: &Config) {
     let default = if config.profiles.iter().any(|p| p == "dev") {
         "umfl_server=debug,tower_http=debug,info"
     } else {
         "umfl_server=info,info"
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default)),
-        )
-        .init();
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default));
+
+    let json = match std::env::var("LOG_FORMAT").as_deref().map(str::trim) {
+        Ok("json") => true,
+        Ok("text") => false,
+        _ => config.is_prod(),
+    };
+
+    let builder = tracing_subscriber::fmt().with_env_filter(filter);
+    if json {
+        // `flatten_event` lifts the event's own fields to the top level, so a
+        // collector indexes `addr` rather than `fields.addr`. `with_span_list`
+        // stays off: the current span's fields are the useful half, and the
+        // full ancestry would repeat them on every line for a process whose
+        // spans are one request deep.
+        builder
+            .json()
+            .flatten_event(true)
+            .with_current_span(true)
+            .with_span_list(false)
+            .init();
+    } else {
+        builder.init();
+    }
 }
 
 async fn shutdown_signal() {
