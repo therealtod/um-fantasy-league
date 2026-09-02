@@ -25,8 +25,12 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SCRAPER_BASE_URL: http://scraper:3000
-    ports:
-      - "8080:8080"
+    # Not published to the host: only `cloudflared` (over the compose
+    # network) and anything SSHed in reach it now that the tunnel runs in
+    # this file too. Publishing :8080 would give the internet a second,
+    # un-tunneled way onto a box that otherwise has no public listener.
+    expose:
+      - "8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 10s
@@ -63,3 +67,27 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  # Publishes `backend` to the internet as api.umfantasyleague.com. A named
+  # tunnel, not the ad-hoc `cloudflared tunnel --url ...` quick tunnel this
+  # replaces: it authenticates with a long-lived token instead of minting a
+  # random trycloudflare.com hostname that rotates on every restart, so the
+  # public hostname is now stable across reboots and deploys -- which is what
+  # let BACKEND_HOST in frontend/wrangler.toml move from a dashboard-only
+  # Worker variable into a committed [vars] entry (see AGENTS.md's CI/CD
+  # section).
+  #
+  # The public hostname -> `http://backend:8080` mapping lives on the
+  # Cloudflare side (Zero Trust dashboard: Networks -> Tunnels -> the
+  # umfl-backend tunnel -> Public Hostname), not here -- this container only
+  # needs the token to dial home. CLOUDFLARE_TUNNEL_TOKEN comes from that
+  # same tunnel's "Install connector" step and lives in .env like every other
+  # secret on this box, never in the repo.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: umfl-tunnel
+    restart: unless-stopped
+    logging: *default-logging
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}

@@ -2,25 +2,22 @@ name = "um-fantasy-league"
 main = "src/worker.ts"
 compatibility_date = "2026-08-03"
 
-# `wrangler deploy` treats [vars] below as the *complete* set of plain-text
-# variables and wipes anything set only in the dashboard on every deploy --
-# including the Git-connected build that runs on every push to master --
-# unless this is on. Without it, BACKEND_HOST (see below) silently
-# disappears the moment CI redeploys the Worker.
+# Belt-and-braces against a dashboard-only var (there is none right now --
+# BACKEND_HOST moved into [vars] below once its hostname became stable, see
+# that entry's comment) getting silently wiped by a future deploy. Harmless
+# to leave on even with nothing dashboard-only left to protect.
 keep_vars = true
 
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 
-# BACKEND_HOST (the backend's base URL — see env.BACKEND_HOST in
-# src/worker.ts) is deliberately NOT declared here. It's currently a
-# Cloudflare quick-tunnel hostname that rotates on every restart, and a
-# [vars] entry here would put that tunnel's address in a public repo.
-# It's set directly on the Worker instead (dashboard: Workers & Pages ->
-# um-fantasy-league -> Settings -> Variables and Secrets). `keep_vars = true`
-# above is what makes that survive a deploy; without it Wrangler resets vars
-# to this file's [vars] (empty) on every push. Swap it for a real, stable
-# backend host the same way, once one exists (see BACKEND_HOST in AGENTS.md's
-# CI/CD section) — a stable host is no longer a secret and could move back
-# into [vars] at that point.
+[vars]
+# The backend's base URL (see env.BACKEND_HOST in src/worker.ts). Safe to
+# commit: it's a named Cloudflare Tunnel hostname (docker-compose.prod.yml's
+# `cloudflared` service, see AGENTS.md's CI/CD section), not the old ad-hoc
+# quick tunnel whose trycloudflare.com address rotated on every restart and
+# so had to live only in the Worker dashboard. Keep this in step with
+# VITE_API_PROXY_TARGET / the `server.proxy` target in vite.config.ts (see
+# AGENTS.md's Commands section) so dev and prod hit the same API.
+BACKEND_HOST = "https://api.umfantasyleague.com"

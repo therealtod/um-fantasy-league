@@ -689,6 +689,14 @@ into the VPS to `docker compose pull && up -d` against `deploy/docker-compose.pr
 VPS keeps a copy of at `/opt/umfl`, alongside a `.env` — modeled on `deploy/.env.example` — that is
 managed by hand on the box, never passed through CI). The `prod` profile there talks to Supabase
 Postgres, so there is no `db` service in that compose file, unlike the root `docker-compose.yml`.
+That compose file also runs `cloudflared` as a service (`tunnel run`, authenticated by
+`CLOUDFLARE_TUNNEL_TOKEN` in `.env`), publishing `backend` to the internet as a named Cloudflare
+Tunnel rather than an ad-hoc `cloudflared tunnel --url ...` quick tunnel run by hand on the box. A
+named tunnel's hostname is stable across restarts and redeploys — it comes from the tunnel's own
+identity, configured once in the Cloudflare Zero Trust dashboard, not minted fresh each time the
+process starts — which is what lets `BACKEND_HOST` below be a plain committed value instead of a
+dashboard-only secret. `backend` itself only `expose`s :8080 on the compose network rather than
+publishing it to the host, since `cloudflared` is the only thing that needs to reach it now.
 `.github/workflows/frontend-ci.yml` runs on `frontend/**` changes — `npm ci`, `npm run lint`,
 `npm run type-check`, `npm test` (vitest) — as that side's merge gate; it does not build or deploy anything. Deployment of
 the frontend stays separate: Cloudflare Pages is connected directly to the GitHub repo and builds
@@ -702,15 +710,16 @@ a **Cloudflare Worker with static assets** (`frontend/wrangler.toml`), not a Pag
 and serves everything else from the `ASSETS` binding, falling back to `index.html` so Vue Router's
 history mode survives a deep link. The effect is the same same-origin proxy: the frontend's relative
 `/api/...` calls (`client.ts`, `sseClient.ts`) reach the VPS with no cross-origin request involved,
-which is why `FRONTEND_ORIGIN` stays unset in `prod`. `BACKEND_HOST` is *not* declared in
-`wrangler.toml`'s `[vars]` — while the backend only exists behind a Cloudflare quick tunnel (a
-hostname that rotates on every restart), committing it would publish that address in a public repo,
-so it's set directly on the Worker instead (Cloudflare dashboard: Workers & Pages → the Worker →
-Settings → Variables and Secrets). `wrangler.toml` sets `keep_vars = true` for exactly this reason:
-without it, `wrangler deploy` treats `[vars]` as the complete set of plain-text variables and wipes
-anything dashboard-only — including `BACKEND_HOST` — on the very next deploy, which on this repo means
-the next push to `master` (Cloudflare's Git-connected build runs `wrangler deploy`). Point it at the
-real backend hostname there, and keep
-`VITE_API_PROXY_TARGET`/the `server.proxy` target in `frontend/vite.config.ts` (see Commands above)
-in step so dev and prod hit the same API. Once a stable, non-tunnel backend host exists, it stops
-being sensitive and `BACKEND_HOST` can move back into `[vars]` as a plain, committed entry.
+which is why `FRONTEND_ORIGIN` stays unset in `prod`. `BACKEND_HOST` is declared in `wrangler.toml`'s
+`[vars]` as `https://api.umfantasyleague.com` — safe to commit because it names a named Cloudflare
+Tunnel (see the `cloudflared` service above), not the old ad-hoc quick tunnel whose rotating
+`trycloudflare.com` address had to live dashboard-only (Workers & Pages → the Worker → Settings →
+Variables and Secrets) to avoid publishing a hostname that would go stale on the next restart.
+`wrangler.toml` still sets `keep_vars = true`, now just belt-and-braces against a *future*
+dashboard-only var being wiped — `wrangler deploy` treats `[vars]` as the complete set of plain-text
+variables and resets anything dashboard-only to what's in the file on every deploy, which on this
+repo means every push to `master` (Cloudflare's Git-connected build runs `wrangler deploy`). Keep
+`BACKEND_HOST` in step with `VITE_API_PROXY_TARGET`/the `server.proxy` target in
+`frontend/vite.config.ts` (see Commands above) so dev and prod hit the same API — dev's default stays
+`http://localhost:8080` since a dev session runs its own backend rather than going through the
+tunnel.
