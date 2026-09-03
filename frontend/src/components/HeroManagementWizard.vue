@@ -43,9 +43,9 @@ function emptyForm(): CreateHeroRequest {
     </template>
 
     <template #item="{ item }">
-      <div class="flex flex-col gap-1">
+      <div class="flex min-w-0 flex-col gap-1">
         <span class="headline text-base text-ink">{{ item.name }}</span>
-        <span v-if="item.imageUrl" class="font-mono text-xs text-ink-dim">{{ item.imageUrl }}</span>
+        <span v-if="item.imageUrl" class="break-all font-mono text-xs text-ink-dim">{{ item.imageUrl }}</span>
         <span v-else class="font-mono text-xs text-ink-dim italic">No image</span>
       </div>
     </template>
