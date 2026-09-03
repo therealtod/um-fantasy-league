@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Tactical Analytics mark: obsidian tile, 1px technical edge, neon cyan
+       wordmark. Square by design — the design system has zero corner radius. -->
+  <rect width="32" height="32" fill="#0e0e0e"/>
+  <rect x="0.5" y="0.5" width="31" height="31" fill="none" stroke="#2d2d2d"/>
+  <text x="16" y="23" text-anchor="middle" fill="#00f2ff"
+        font-family="Anybody, 'Arial Black', Helvetica, sans-serif"
+        font-size="17" font-weight="800" letter-spacing="-0.5">UM</text>
+</svg>

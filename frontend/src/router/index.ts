@@ -53,7 +53,7 @@ const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: () => import('@/views/AdminDashboardView.vue'),
-      meta: { title: 'Admin Command Center', requiresAdmin: true },
+      meta: { title: 'Admin', requiresAdmin: true },
       beforeEnter: async () => {
         const managerStore = useManagerStore()
         if (!managerStore.manager) {

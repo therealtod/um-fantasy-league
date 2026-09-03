@@ -21,7 +21,7 @@ function signIn() {
 }
 
 const manager = computed(() => managerStore.manager)
-const title = computed(() => (route.meta.title as string | undefined) ?? 'Mission Control')
+const title = computed(() => (route.meta.title as string | undefined) ?? 'UM Fantasy League')
 
 const nav = computed(() => {
   const baseNav = [
@@ -68,7 +68,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
     >
       <div class="border-b border-edge px-5 py-6">
         <h1 class="headline text-lg leading-tight uppercase">UM Fantasy<br />League</h1>
-        <p class="label-caps mt-2">Work in progress</p>
       </div>
 
       <nav class="flex-1 py-4">
