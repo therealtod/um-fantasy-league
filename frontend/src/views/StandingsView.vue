@@ -16,7 +16,7 @@ const options = computed(() =>
 )
 
 function defaultTournamentId() {
-  return (tournaments.live[0] ?? options.value[0] ?? tournaments.tournaments[0])?.id ?? null
+  return (tournaments.live[0] ?? options.value[0])?.id ?? null
 }
 
 function start(id: number | null) {
@@ -122,6 +122,7 @@ const currentTournament = computed(() =>
           :value="standings.tournamentId ?? ''"
           @change="onTournamentChange"
         >
+          <option v-if="options.length === 0" value="" disabled>No live tournaments yet</option>
           <option v-for="tournament in options" :key="tournament.id" :value="tournament.id">
             {{ tournament.name }}
           </option>
@@ -137,7 +138,7 @@ const currentTournament = computed(() =>
     <ErrorBanner v-if="standings.error" class="mt-4" compact :message="standings.error" />
 
     <!-- Leaderboard -->
-    <div class="panel mt-4 overflow-x-auto">
+    <div v-if="standings.tournamentId !== null" class="panel mt-4 overflow-x-auto">
       <table class="w-max min-w-full border-collapse">
         <thead>
           <tr class="border-b border-edge bg-surface-lowest text-left">
@@ -237,8 +238,13 @@ const currentTournament = computed(() =>
         </tbody>
       </table>
     </div>
+    <div v-else class="panel mt-4 px-4 py-6 font-mono text-sm text-ink-dim">
+      No live or completed tournaments yet — standings appear once a tournament goes live.
+    </div>
 
     <!-- The 6px scrollbar barely registers, so name the gesture. -->
-    <p class="label-caps mt-2 md:hidden">Scroll → for the full breakdown</p>
+    <p v-if="standings.tournamentId !== null" class="label-caps mt-2 md:hidden">
+      Scroll → for the full breakdown
+    </p>
   </div>
 </template>
