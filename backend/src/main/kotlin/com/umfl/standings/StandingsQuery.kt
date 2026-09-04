@@ -37,11 +37,25 @@ data class EntryRoster(
 class StandingsQuery(private val jdbcClient: JdbcClient) {
 
     /**
-     * Every entry in the tournament with its roster, ordered by entry then slot.
+     * Every **locked** entry in the tournament with its roster, ordered by
+     * entry then slot.
      *
-     * Note the **left join** onto `entry_slots`: an entry with no picks yet is
-     * still an entry and still belongs on the board. An inner join silently
-     * drops it.
+     * `where e.status = 'LOCKED'` is deliberate, not incidental: an entry that
+     * never locked in a roster can never score a point once its tournament
+     * goes live (see [com.umfl.tournament.RosterPolicy.validateLock]'s
+     * `TOURNAMENT_CLOSED` rule), so it has nothing to show on the board.
+     * [com.umfl.tournament.AdminTournamentService.update] already deletes
+     * these entries the moment a tournament is saved as LIVE
+     * (`TournamentService.purgeUnlockedEntries`); this filter is the second
+     * line of defense that invariant describes, in case that purge is ever
+     * skipped or fails — not the only guard against an unlocked entry
+     * appearing here.
+     *
+     * The **left join** onto `entry_slots` stays regardless: a locked entry
+     * is guaranteed a full roster by `RosterRule.INCOMPLETE_ROSTER`, but an
+     * inner join would silently drop any entry that reaches this query
+     * without one — exactly the case the filter above exists to guard
+     * against — so this query never depends on that guarantee holding.
      */
     fun rosters(tournamentId: Long): List<EntryRoster> {
         val rows = jdbcClient
@@ -109,7 +123,7 @@ class StandingsQuery(private val jdbcClient: JdbcClient) {
                 left join heroes h on h.id = es.hero_id
                 left join tournament_heroes th
                     on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id
-            where e.tournament_id = :tournamentId
+            where e.tournament_id = :tournamentId and e.status = 'LOCKED'
             order by e.id, es.slot_index
         """
     }

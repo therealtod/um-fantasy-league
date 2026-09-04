@@ -11,6 +11,7 @@ import com.umfl.tournament.EntryStatus
 import com.umfl.tournament.TournamentEntry
 import com.umfl.tournament.TournamentEntryRepository
 import com.umfl.tournament.TournamentRepository
+import com.umfl.tournament.TournamentService
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.simple.JdbcClient
@@ -38,6 +39,7 @@ class StandingsIntegrationTest @Autowired constructor(
     private val entryRepository: TournamentEntryRepository,
     private val managerRepository: ManagerRepository,
     private val adminMatchService: AdminMatchService,
+    private val tournamentService: TournamentService,
     private val jdbcClient: JdbcClient,
 ) : PostgresIntegrationTest() {
 
@@ -46,6 +48,9 @@ class StandingsIntegrationTest @Autowired constructor(
 
     private fun winterId(): Long =
         requireNotNull(assertNotNull(tournamentRepository.findByName("Winter of Champions")).id)
+
+    private fun heroId(name: String): Long =
+        jdbcClient.sql("select id from heroes where name = :name").param("name", name).query(Long::class.java).single()
 
     private fun board() = standingsService.board(summerId())
 
@@ -206,7 +211,7 @@ class StandingsIntegrationTest @Autowired constructor(
     }
 
     @Test
-    fun `an entry with no picks still appears, and ties share a rank`() {
+    fun `an entry that never locked a roster does not appear on the board`() {
         val summer = summerId()
         listOf("EmptyDrafterA", "EmptyDrafterB").forEach { handle ->
             val manager = managerRepository.save(
@@ -227,26 +232,21 @@ class StandingsIntegrationTest @Autowired constructor(
 
         val board = standingsService.board(summer)
 
-        assertEquals(6, board.rows.size, "a left join keeps the pickless entries on the board")
-        val empties = board.rows.filter { it.handle.startsWith("EmptyDrafter") }
-        assertEquals(2, empties.size)
-        assertTrue(empties.all { it.roster.isEmpty() && it.spent == 0 && it.totalPoints == 0.0 })
-        // Standard competition ranking: 1, 2, 3, 4, 5, 5 — not 1..6.
-        assertEquals(listOf(1, 2, 3, 4, 5, 5), board.rows.map { it.rank })
+        assertEquals(
+            4,
+            board.rows.size,
+            "an entry that never locked in a roster can never score, so it stays off the board entirely",
+        )
+        assertTrue(board.rows.none { it.handle.startsWith("EmptyDrafter") })
     }
 
     @Test
     fun `a tournament with entries but no matches scores everyone zero`() {
         val winter = winterId()
         val manager = assertNotNull(managerRepository.findByHandle("NeonStrategist"))
-        entryRepository.save(
-            TournamentEntry(
-                tournamentId = winter,
-                managerId = requireNotNull(manager.id),
-                status = EntryStatus.DRAFT,
-                creditGrant = 10_000,
-            )
-        )
+        tournamentService.register(winter, manager)
+        tournamentService.setSlots(winter, manager, listOf(heroId("Alice"), heroId("Robin Hood"), heroId("Bigfoot")))
+        tournamentService.lockRoster(winter, manager)
 
         val board = standingsService.board(winter)
 

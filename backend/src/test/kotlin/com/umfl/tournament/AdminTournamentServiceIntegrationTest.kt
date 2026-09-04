@@ -1,6 +1,7 @@
 package com.umfl.tournament
 
 import com.umfl.common.ConflictException
+import com.umfl.manager.ManagerRepository
 import com.umfl.support.PostgresIntegrationTest
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -15,9 +16,15 @@ import kotlin.test.assertTrue
 
 class AdminTournamentServiceIntegrationTest @Autowired constructor(
     private val adminTournamentService: AdminTournamentService,
+    private val tournamentService: TournamentService,
     private val tournamentRepository: TournamentRepository,
+    private val entryRepository: TournamentEntryRepository,
+    private val managerRepository: ManagerRepository,
     private val jdbcClient: JdbcClient,
 ) : PostgresIntegrationTest() {
+
+    private fun heroId(name: String): Long =
+        jdbcClient.sql("select id from heroes where name = :name").param("name", name).query(Long::class.java).single()
 
     @Test
     fun `creates a new tournament`() {
@@ -158,5 +165,89 @@ class AdminTournamentServiceIntegrationTest @Autowired constructor(
         assertEquals(0, heroPoolAfter, "Hero pool should be cascade deleted")
         assertEquals(0, mapPoolAfter, "Map pool should be cascade deleted")
         assertEquals(0, ruleSetsAfter, "Scoring rule sets should be cascade deleted")
+    }
+
+    @Test
+    fun `moving a tournament to LIVE purges every entry that never locked a roster`() {
+        val spring = requireNotNull(tournamentRepository.findByName("Spring of Myths"))
+        val springId = requireNotNull(spring.id)
+
+        adminTournamentService.update(
+            tournamentId = springId,
+            name = spring.name,
+            format = spring.format,
+            status = TournamentStatus.REGISTRATION_OPEN,
+            startDate = spring.startDate,
+            endDate = spring.endDate,
+            capacity = spring.capacity,
+            rosterSize = spring.rosterSize,
+            creditGrant = spring.creditGrant,
+        )
+
+        val lockedManager = requireNotNull(managerRepository.findByHandle("NeonStrategist"))
+        val neverLockedManager = requireNotNull(managerRepository.findByHandle("SherlockMain"))
+
+        tournamentService.register(springId, lockedManager)
+        tournamentService.setSlots(
+            springId,
+            lockedManager,
+            listOf(heroId("Sherlock Holmes"), heroId("Beowulf"), heroId("Sinbad")),
+        )
+        tournamentService.lockRoster(springId, lockedManager)
+
+        tournamentService.register(springId, neverLockedManager)
+        tournamentService.setSlots(springId, neverLockedManager, listOf(heroId("Alice")))
+        // Deliberately never locked.
+
+        adminTournamentService.update(
+            tournamentId = springId,
+            name = spring.name,
+            format = spring.format,
+            status = TournamentStatus.LIVE,
+            startDate = spring.startDate,
+            endDate = spring.endDate,
+            capacity = spring.capacity,
+            rosterSize = spring.rosterSize,
+            creditGrant = spring.creditGrant,
+        )
+
+        val remaining = entryRepository.findByTournamentId(springId)
+        assertEquals(1, remaining.size, "the never-locked entry was purged when the tournament went live")
+        assertEquals(lockedManager.id, remaining.single().managerId)
+        assertTrue(remaining.single().isLocked)
+    }
+
+    @Test
+    fun `re-entering LIVE purges an entry registered while registration was briefly reopened`() {
+        val spring = requireNotNull(tournamentRepository.findByName("Spring of Myths"))
+        val springId = requireNotNull(spring.id)
+
+        fun moveTo(status: TournamentStatus) = adminTournamentService.update(
+            tournamentId = springId,
+            name = spring.name,
+            format = spring.format,
+            status = status,
+            startDate = spring.startDate,
+            endDate = spring.endDate,
+            capacity = spring.capacity,
+            rosterSize = spring.rosterSize,
+            creditGrant = spring.creditGrant,
+        )
+
+        moveTo(TournamentStatus.REGISTRATION_OPEN)
+        moveTo(TournamentStatus.LIVE)
+
+        // Registration is reopened after the tournament already went live once.
+        moveTo(TournamentStatus.REGISTRATION_OPEN)
+        val lateRegistrant = requireNotNull(managerRepository.findByHandle("MythicMind"))
+        tournamentService.register(springId, lateRegistrant)
+        // Never locked before the tournament goes live again.
+
+        moveTo(TournamentStatus.LIVE)
+
+        assertTrue(
+            entryRepository.findByTournamentId(springId).isEmpty(),
+            "the late, never-locked registration is purged the second time the tournament goes live too",
+        )
     }
 }

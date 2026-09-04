@@ -45,6 +45,15 @@ class AdminTournamentService(
      * Full replace, including [status] — there is no status-transition state
      * machine: an admin is trusted to move a tournament through its lifecycle
      * sensibly.
+     *
+     * Saving [TournamentStatus.LIVE] additionally purges every entry that
+     * never locked a roster (see [TournamentService.purgeUnlockedEntries]) —
+     * an unlocked entry can never score once rosters are frozen, so leaving
+     * it registered would only leave a dead zero row on the standings board.
+     * This runs whenever the *saved* status is LIVE, not only the first time
+     * a tournament transitions into it: an admin can reopen registration
+     * (moving back to `REGISTRATION_OPEN`) and re-enter LIVE later, and any
+     * entry registered in that window needs the same purge.
      */
     @Transactional
     fun update(
@@ -64,7 +73,7 @@ class AdminTournamentService(
             throw ConflictException("A tournament named '$name' already exists.")
         }
 
-        return tournamentRepository.save(
+        val saved = tournamentRepository.save(
             existing.copy(
                 name = name,
                 format = format,
@@ -76,6 +85,12 @@ class AdminTournamentService(
                 creditGrant = creditGrant,
             )
         )
+
+        if (status == TournamentStatus.LIVE) {
+            tournamentService.purgeUnlockedEntries(tournamentId)
+        }
+
+        return saved
     }
 
     /**

@@ -159,6 +159,31 @@ class TournamentService(
     }
 
     /**
+     * Drop every entry that never locked in a roster.
+     *
+     * Called by [AdminTournamentService.update] whenever a tournament's status
+     * is saved as [TournamentStatus.LIVE]. Once live,
+     * `Tournament.acceptsRosterChanges` is `false`, which makes
+     * [RosterPolicy.validateLock]'s `TOURNAMENT_CLOSED` rule reject locking
+     * forever after — so an entry still in [EntryStatus.DRAFT] at that point
+     * can never score a single point. Leaving it registered would only leave a
+     * dead zero row on the standings board, which is why this runs as part of
+     * the LIVE transition rather than being left to an admin to notice.
+     * [com.umfl.standings.StandingsQuery.rosters] also only reads locked
+     * entries, as a second line of defense for the case this purge is ever
+     * skipped or fails.
+     *
+     * `ON DELETE CASCADE` on `entry_slots` takes care of any picks the entry
+     * held but never locked in.
+     */
+    @Transactional
+    fun purgeUnlockedEntries(tournamentId: Long): Int {
+        val unlocked = entryRepository.findByTournamentId(tournamentId).filterNot { it.isLocked }
+        entryRepository.deleteAll(unlocked)
+        return unlocked.size
+    }
+
+    /**
      * Turn requested hero ids into priced picks, preserving the caller's ordering
      * so slot positions are stable.
      *
