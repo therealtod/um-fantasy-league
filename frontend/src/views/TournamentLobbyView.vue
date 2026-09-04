@@ -149,7 +149,7 @@ function openStandings() {
                 class="btn-ghost w-full"
                 @click="tournament.status === 'LIVE' ? openStandings() : openRoster(tournament)"
               >
-                {{ tournament.status === 'LIVE' ? 'Enter Spectator' : 'Roster Locked' }}
+                {{ tournament.status === 'LIVE' ? 'Enter Spectator' : 'View Locked Roster' }}
               </button>
 
               <button v-else class="btn-ghost w-full" disabled>
