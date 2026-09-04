@@ -1,8 +1,5 @@
 //! Board catalogue writes.
 //!
-//! Oracle: `GameMapRepository.save` (Spring Data JDBC's `CrudRepository`),
-//! which inserts when the `@Id` is null and updates when it is not.
-//!
 //! `game_maps` owns no child collection, so there is none of the
 //! delete-and-reinsert cascade `scoring::writer` and `tournament::writer` have
 //! to reproduce -- a board is two columns and one of them is the key.

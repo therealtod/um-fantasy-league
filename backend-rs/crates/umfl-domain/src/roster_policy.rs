@@ -1,7 +1,5 @@
 //! The league's roster rules, as pure functions.
 //!
-//! A direct port of `tournament/RosterPolicy.kt`.
-//!
 //! `frontend/src/domain/rosterPolicy.ts` deliberately mirrors [`budget_status`]
 //! so the Roster Builder's meter reacts on click, but this side is
 //! authoritative. **If you change the arithmetic here, change it there too** --
@@ -108,10 +106,8 @@ pub struct RosterPick {
 
 /// # Panics
 ///
-/// On a non-positive `credit_grant`, mirroring the Kotlin's
-/// `require(creditGrant > 0)`. That `IllegalArgumentException` has no entry in
-/// `GlobalExceptionHandler`, so it reaches the catch-all as a 500; a panic here
-/// reaches `CatchPanicLayer` as the same 500.
+/// On a non-positive `credit_grant` -- there is no dedicated error variant for
+/// it, so it reaches `CatchPanicLayer` (see `http::panic_response`) as a 500.
 pub fn budget_status(picks: &[RosterPick], credit_grant: i32) -> BudgetStatus {
     assert!(credit_grant > 0, "Credit grant must be positive");
     let spent: i32 = picks.iter().map(|p| p.cost).sum();
@@ -149,9 +145,8 @@ pub fn validate_draft(
         ));
     }
 
-    // `groupingBy { it.heroId }.eachCount().filterValues { it > 1 }.keys`, then
-    // `.sorted()`. IndexMap keeps encounter order (PORTING.md §4.2), but the
-    // sort is what actually fixes the message, exactly as in the Kotlin.
+    // `IndexMap` keeps encounter order, but the sort below is what actually
+    // fixes the message.
     let mut counts: IndexMap<i64, usize> = IndexMap::new();
     for pick in picks {
         *counts.entry(pick.hero_id).or_default() += 1;
@@ -238,7 +233,7 @@ fn mutability_violations(
     violations
 }
 
-/// The roster rules, exercised directly -- a near-1:1 port of `RosterPolicyTest`.
+/// The roster rules, exercised directly.
 ///
 /// Cost literals are the seeded `tournament_heroes` prices for Winter of
 /// Champions, so a change to the seed that breaks the "one premium plus two
@@ -292,7 +287,7 @@ mod tests {
         entry_with(EntryStatus::Draft, 10_000)
     }
 
-    /// The Kotlin's `picks(vararg costs)`: hero ids are 1-based positions, so
+    /// Builds a pick list from bare costs: hero ids are 1-based positions, so
     /// every pick is distinct unless a test builds the list by hand.
     fn picks(costs: &[i32]) -> Vec<RosterPick> {
         costs
@@ -359,7 +354,6 @@ mod tests {
             assert_eq!(budget.utilisation, 1.0);
         }
 
-        /// The Kotlin's `require(creditGrant > 0)`. Both runtimes answer 500.
         #[test]
         #[should_panic(expected = "Credit grant must be positive")]
         fn a_non_positive_grant_is_a_programming_error() {

@@ -1,11 +1,6 @@
 //! The snapshot the leaderboard is read under, and the three inputs the fold
 //! takes.
 //!
-//! Oracle: `standings/StandingsService.kt` -- but only its *plumbing*. The
-//! arithmetic is [`umfl_domain::standings`], where it is testable without
-//! Postgres (PORTING.md §3a). What is left here is what the Kotlin's
-//! `@Transactional(readOnly = true, isolation = REPEATABLE_READ)` did.
-//!
 //! Points are computed on every read and never stored. Coefficients and hero
 //! costs are mutable reference data retuned with a bare UPDATE, so a stored
 //! *total* would be a cache with nothing to invalidate it; at tournament scale
@@ -75,7 +70,7 @@ use super::query;
 /// spare connection available" -- by `tests/it/standings.rs`'s
 /// `the_board_and_ticker_do_not_hold_a_connection_while_the_cache_loads`.
 ///
-/// This ordering is also a prerequisite for PORTING.md §3b's open item --
+/// This ordering is also a prerequisite for a possible future change --
 /// giving `load` its own `repeatable read read only` transaction so a miss is
 /// itself a coherent snapshot. Doing that while the call is still nested here
 /// would make the nesting strictly worse: two transactions open on two
@@ -126,7 +121,7 @@ pub async fn ticker(
 /// `BEGIN`, then the isolation level as the **very next statement**.
 ///
 /// Anywhere later and Postgres silently leaves the transaction at READ
-/// COMMITTED (PORTING.md §7) -- it is not an error to try, which is exactly why
+/// COMMITTED -- it is not an error to try, which is exactly why
 /// this is a named helper both entry points call rather than a line each of
 /// them could drift on.
 ///

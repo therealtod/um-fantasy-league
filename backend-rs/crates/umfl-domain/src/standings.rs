@@ -1,11 +1,9 @@
 //! The leaderboard fold: recorded matches plus rosters plus rules, in;
 //! a ranked board and a ticker, out.
 //!
-//! A port of `standings/StandingsService.kt` -- but of its *arithmetic* only.
-//! The Kotlin reaches this logic through a `@Transactional(REPEATABLE_READ)`
-//! service holding three collaborators, so the ranking, the dense/sparse split,
-//! the drafted-context banking and the rounding are only testable through
-//! Testcontainers. Here they are plain functions over plain data: the server's
+//! Only the *arithmetic* lives here, as plain functions over plain data: the
+//! ranking, the dense/sparse split, the drafted-context banking and the
+//! rounding are all testable this way with no Postgres involved. The server's
 //! `standings::service` opens the snapshot, reads the rules, the cached matches
 //! and the rosters, and calls [`board`] / [`ticker`].
 //!
@@ -53,8 +51,8 @@ pub struct EntryRoster {
 }
 
 impl EntryRoster {
-    /// Kotlin exposes this as a computed `val`; it is derived from the slots
-    /// rather than materialised, exactly like every other number here.
+    /// Derived from the slots rather than materialised, exactly like every
+    /// other number here.
     pub fn spent(&self) -> i32 {
         self.heroes.iter().map(|h| h.cost).sum()
     }
@@ -160,7 +158,7 @@ pub fn board(
 ) -> StandingsBoard {
     let current_round = matches.iter().map(|m| m.round).max().unwrap_or(0);
 
-    // Kotlin's `groupBy`, which is a LinkedHashMap: first-encounter order.
+    // An `IndexMap` preserves first-encounter order.
     let mut appearances_by_hero: IndexMap<i64, Vec<ScoredAppearance>> = IndexMap::new();
     for match_result in matches {
         for context in match_result.hero_contexts() {
@@ -249,17 +247,15 @@ pub fn board(
 /// `index + 1` would lie.
 ///
 /// The comparison is exact `!=` on `f64` with **no epsilon**: every total has
-/// already been through [`round2`], and an epsilon would manufacture ties the
-/// Kotlin does not have. The sort is stable for the same reason the ticker's
-/// is (PORTING.md §8).
+/// already been through [`round2`], and an epsilon would manufacture ties
+/// that don't actually exist. The sort is stable for the same reason the
+/// ticker's is.
 fn rank(mut rows: Vec<StandingsRow>) -> Vec<StandingsRow> {
     rows.sort_by(|a, b| {
         b.total_points
             .partial_cmp(&a.total_points)
             .expect("totals are finite: every one has been through round2")
-            // Kotlin compares `handle` with String's natural ordering, which is
-            // by UTF-16 code unit where this is by UTF-8 byte. The two differ
-            // only above the BMP, which a manager handle does not reach.
+            // Byte-order comparison on the handle as a deterministic tiebreak.
             .then_with(|| a.handle.cmp(&b.handle))
     });
 
@@ -297,7 +293,7 @@ fn ticker_entry(match_result: &MatchResult, rules: &ScoringRules) -> TickerEntry
     let mut contexts_by_game_and_hero = IndexMap::new();
     for context in &contexts {
         if let HeroRole::Played { game, .. } = context.role {
-            // Kotlin's `associateBy`: a later duplicate overwrites.
+            // A later duplicate overwrites.
             contexts_by_game_and_hero.insert((game.game_id, context.hero_id), context);
         }
     }
@@ -312,7 +308,7 @@ fn ticker_entry(match_result: &MatchResult, rules: &ScoringRules) -> TickerEntry
     let mut first_game_id_by_hero: IndexMap<i64, i64> = IndexMap::new();
     for game in &games_by_number {
         for participant in &game.participants {
-            // Kotlin's `putIfAbsent`: the earliest game wins.
+            // The earliest game wins.
             first_game_id_by_hero
                 .entry(participant.hero_id)
                 .or_insert(game.game_id);
@@ -351,8 +347,6 @@ fn ticker_entry(match_result: &MatchResult, rules: &ScoringRules) -> TickerEntry
                         let key = (game.game_id, participant.hero_id);
                         // Each context is scored (and so rounded) on its own,
                         // then the pair is summed and rounded again -- the
-                        // Kotlin's `listOfNotNull(..).sumOf { score(it) }`
-                        // inside a `round2`. See PORTING.md §9 on why the
                         // double rounding is not a simplification to remove.
                         let points: f64 = contexts_by_game_and_hero
                             .get(&key)
@@ -375,8 +369,8 @@ fn ticker_entry(match_result: &MatchResult, rules: &ScoringRules) -> TickerEntry
         })
         .collect();
 
-    // `IndexSet` is Kotlin's `distinctBy { it.heroId }`: first name wins, and
-    // the order is the order the drafts were read in.
+    // `IndexSet` de-duplicates by hero id: first name wins, and the order is
+    // the order the drafts were read in.
     let mut unplayed: IndexSet<i64> = IndexSet::new();
     let mut drafted_unplayed_hero_names = Vec::new();
     for participant in &match_result.participants {
@@ -404,12 +398,10 @@ fn ticker_entry(match_result: &MatchResult, rules: &ScoringRules) -> TickerEntry
 
 /// The fold, tested as data.
 ///
-/// These cases have no counterpart in the Kotlin: `StandingsService` is a
-/// `@Service` behind a transaction, so the only coverage it has is
-/// `StandingsIntegrationTest`, which needs Testcontainers and asserts the whole
-/// board at once. Extracting the arithmetic is what makes the ranking, the
-/// dense breakdown, the round attribution and the ticker's banking assertable
-/// on their own.
+/// Extracting the arithmetic out of the transactional service is what makes
+/// the ranking, the dense breakdown, the round attribution and the ticker's
+/// banking assertable on their own, rather than only through a full
+/// database-backed integration test.
 #[cfg(test)]
 mod tests {
     use super::*;

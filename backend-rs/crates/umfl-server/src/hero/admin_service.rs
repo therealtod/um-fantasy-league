@@ -1,8 +1,5 @@
 //! Create and rename heroes, and manage a tournament's hero pool and
 //! pricing.
-//!
-//! Oracle: `hero/AdminHeroService.kt`. Every `@Transactional` method there is
-//! a `pool.begin()` here and nothing else is (PORTING.md §7).
 
 use indexmap::{IndexMap, IndexSet};
 use sqlx::PgConnection;
@@ -18,9 +15,10 @@ pub async fn list(state: &AppState) -> ApiResult<Vec<Hero>> {
     Ok(query::find_all(&state.pool).await?)
 }
 
-/// A tournament's hero pool, priced -- see `AdminHeroController.listPool`'s
-/// doc for why this is its own endpoint. Not transactional in the Kotlin
-/// either: two reads, and nothing depends on their being one snapshot.
+/// A tournament's hero pool, priced. Its own endpoint rather than a filter on
+/// [`list`], since the admin pool view needs the per-tournament cost, not the
+/// catalogue-wide hero list. Not transactional: two reads, and nothing
+/// depends on their being one snapshot.
 pub async fn pool(state: &AppState, tournament_id: i64) -> ApiResult<Vec<HeroView>> {
     require_tournament(&state.pool, tournament_id).await?;
     Ok(query::find_by_tournament(&state.pool, tournament_id, &HeroFilter::default()).await?)
@@ -136,9 +134,7 @@ pub async fn set_pool_cost(
 /// stage several picks before submitting once. A `hero_id` repeated within
 /// [`entries`] behaves like calling [`set_pool_cost`] for it twice: last
 /// cost wins -- `IndexMap::insert` on an already-present key keeps the key's
-/// first-seen position and replaces its value, exactly as Kotlin's
-/// `entries.associateBy { it.heroId }.values.toList()` (a `LinkedHashMap`)
-/// does.
+/// first-seen position and replaces its value.
 pub async fn add_batch_to_pool(
     state: &AppState,
     tournament_id: i64,

@@ -12,7 +12,9 @@
 # real Supabase credentials -- .env.prod is git-ignored, never commit it).
 services:
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: backend-rs/Dockerfile
     container_name: umfl-backend
     env_file:
       - .env.prod

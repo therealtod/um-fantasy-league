@@ -1,8 +1,6 @@
 //! The read side of the Live Standings screen: who entered, and what they
 //! drafted.
 //!
-//! Oracle: `standings/StandingsQuery.kt`.
-//!
 //! Scoring is deliberately *not* in this query. Points are folded in
 //! [`umfl_domain::standings`] because the coefficients live in
 //! `scoring_coefficients` and each (hero, match) pair is then priced exactly
@@ -36,9 +34,8 @@ use umfl_domain::standings::{EntryRoster, RosterHero};
 ///
 /// `th.cost` is left-joined for the same reason it is not snapshotted onto
 /// `entry_slots`: the price is this tournament's, live. A hero that has since
-/// left the pool has no `tournament_heroes` row at all, which is a 0 here rather
-/// than a crash -- the Kotlin gets that from `ResultSet.getInt` returning 0 for
-/// SQL NULL, and `unwrap_or(0)` below is that behaviour written out.
+/// left the pool has no `tournament_heroes` row at all, so the joined cost is
+/// SQL NULL; `unwrap_or(0)` below reads that as 0 rather than crashing.
 pub async fn rosters(
     db: impl PgExecutor<'_>,
     tournament_id: i64,
@@ -68,8 +65,8 @@ pub async fn rosters(
     .fetch_all(db)
     .await?;
 
-    // Kotlin's `groupBy`, which is a LinkedHashMap: first-encounter order, and
-    // the query has already ordered that by entry id (PORTING.md §4.2).
+    // An `IndexMap` preserves first-encounter order, and the query has
+    // already ordered that by entry id.
     let mut by_entry: IndexMap<i64, EntryRoster> = IndexMap::new();
     for row in rows {
         let entry = by_entry.entry(row.entry_id).or_insert_with(|| EntryRoster {
@@ -80,9 +77,8 @@ pub async fn rosters(
             credit_grant: row.credit_grant,
             heroes: Vec::new(),
         });
-        // The hero id is the presence check, exactly as in the Kotlin: it is
-        // null for an entry with no slots, and the slot's own columns are then
-        // null with it.
+        // The hero id is the presence check: it is null for an entry with no
+        // slots, and the slot's own columns are then null with it.
         if let (Some(hero_id), Some(name)) = (row.hero_id, row.hero_name) {
             entry.heroes.push(RosterHero {
                 slot_index: row.slot_index.unwrap_or(0),

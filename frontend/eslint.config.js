@@ -1,9 +1,9 @@
 import pluginVue from 'eslint-plugin-vue'
 import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescript'
 
-// Flat config, matching the discipline ktlintCheck applies on the backend: this is the
-// merge gate for frontend-ci.yml, not a style reformatter — see AGENTS.md's note on the
-// backend's .editorconfig for why a lint step here should catch mistakes, not opinions.
+// Flat config, matching the discipline `cargo fmt --check`/`cargo clippy` apply on the
+// backend: this is the merge gate for frontend-ci.yml, not a style reformatter — a lint
+// step here should catch mistakes, not opinions.
 export default defineConfigWithVueTs(
   {
     name: 'app/files-to-lint',
@@ -15,9 +15,8 @@ export default defineConfigWithVueTs(
   },
   // `essential` only, not `recommended` — the latter folds in the `strongly-recommended`
   // formatting tier (attribute line-wrapping, self-closing tags, ...), which would fight
-  // this codebase's existing style the same way `ktlint_official` would on the backend.
-  // AGENTS.md's ktlint section is explicit that the linter here preserves formatting and
-  // catches mechanical slips; `vue/attributes-order` below is added deliberately on top.
+  // this codebase's existing style: the linter here preserves formatting and catches
+  // mechanical slips; `vue/attributes-order` below is added deliberately on top.
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
   {

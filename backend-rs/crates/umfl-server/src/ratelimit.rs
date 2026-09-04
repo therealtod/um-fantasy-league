@@ -1,7 +1,5 @@
 //! IP-keyed token bucket in front of every `/api` route.
 //!
-//! Oracle: `ratelimit/RateLimitFilter.kt`, `ratelimit/RateLimitProperties.kt`.
-//!
 //! Installed ahead of the authentication layer in every profile, which is the
 //! point of `addFilterBefore(rateLimitFilter, BearerTokenAuthenticationFilter)`:
 //! a flood should pay neither a JWT verification nor the dev manager lookup.
@@ -44,10 +42,10 @@ const X_FORWARDED_FOR: &str = "X-Forwarded-For";
 
 /// The key charged when the peer address is unavailable.
 ///
-/// A servlet request always had a `remoteAddr`; an axum one only has a peer if
-/// the server was built with `into_make_service_with_connect_info`, which
-/// `main` does and an in-process test does not. Sharing one bucket is the safe
-/// direction to fail -- it throttles rather than exempts.
+/// An axum request only has a peer address if the server was built with
+/// `into_make_service_with_connect_info`, which `main` does and an in-process
+/// test does not. Sharing one bucket is the safe direction to fail -- it
+/// throttles rather than exempts.
 const UNKNOWN_PEER: &str = "unknown";
 
 /// The `Retry-After` a zero-refill-rate bucket reports instead of panicking.
@@ -196,8 +194,8 @@ impl RateLimiter {
 }
 
 /// An IPv4-mapped IPv6 peer (`::ffff:127.0.0.1`, which a dual-stack listener
-/// reports) is the IPv4 address a servlet container would have given, and has
-/// to be so that the IPv4 trusted ranges match it.
+/// reports) is canonicalised down to its IPv4 form, so that the IPv4 trusted
+/// ranges match it.
 fn canonical_ip(ip: IpAddr) -> IpAddr {
     match ip {
         IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
@@ -227,8 +225,7 @@ pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next)
         Some("Rate limit exceeded. Try again later.".to_owned()),
         "rate-limit-exceeded",
     );
-    // Written straight to the response like the Kotlin filter's
-    // `jsonMapper.writeValue`, so it carries no `instance`.
+    // Written straight to the response, so it carries no `instance`.
     let mut response = problem.into_response_without_instance();
     response.headers_mut().insert(
         header::RETRY_AFTER,

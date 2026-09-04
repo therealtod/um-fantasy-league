@@ -19,8 +19,8 @@ export default async function globalSetup() {
 
   throw new Error(
     `Backend not reachable at ${BACKEND_URL} after ${attempts}s. Start it first:\n` +
-      '  docker compose up -d db\n' +
-      "  ./gradlew :backend:bootRun --args='--spring.profiles.active=dev'\n" +
+      '  docker compose up -d db flyway\n' +
+      "  cd backend-rs && SPRING_PROFILES_ACTIVE=dev cargo run -p umfl-server\n" +
       'or: docker compose up -d',
   )
 }

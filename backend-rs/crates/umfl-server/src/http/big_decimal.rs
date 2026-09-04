@@ -1,21 +1,19 @@
 //! `BigDecimal` on the wire, with its scale intact.
 //!
-//! Oracle: Jackson's `NumberSerializers`/`BigDecimalDeserializer`, as
-//! `ScoringCoefficientDto.coefficient` exercises them.
-//!
 //! Three things have to line up at once, and no off-the-shelf combination does
 //! all three:
 //!
 //! * **It is a JSON *number*, not a string.** `rust_decimal`'s own `Serialize`
-//!   emits `"12.0000"` by default; Jackson emits `12.0000`, and
-//!   `types.ts` declares `coefficient: number`.
+//!   emits `"12.0000"` by default, but `types.ts` declares
+//!   `coefficient: number`.
 //! * **Trailing zeros survive.** `numeric(10,4)` decodes as scale 4, and
-//!   `BigDecimal.toString()` prints every one of those digits. Going through
-//!   `f64` would print `12.0`, which is a different byte sequence for the same
-//!   value.
-//! * **The scale the client *sent* survives too.** `AdminScoringService.create`
+//!   Java's `BigDecimal.toString()` -- a well-specified reference for "every
+//!   digit of the decimal's scale, no more, no less" -- prints every one of
+//!   those digits. Going through `f64` would print `12.0`, which is a
+//!   different byte sequence for the same value.
+//! * **The scale the client *sent* survives too.** `scoring::admin_service::create`
 //!   echoes back the aggregate it saved, whose coefficients are the submitted
-//!   `BigDecimal`s rather than anything re-read from the database — so a posted
+//!   `Decimal`s rather than anything re-read from the database — so a posted
 //!   `12.0` comes back `12.0`, not `12` and not `12.0000`. Parsing through
 //!   `f64` loses that as well.
 //!
@@ -50,10 +48,9 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Decimal
 
 /// The literal JSON token, as a decimal.
 ///
-/// A quoted token is accepted because Jackson's `BigDecimal` deserializer
-/// accepts one: `{"coefficient": "1.5"}` is a legal body against the Kotlin and
-/// has to stay one here. Nothing in the frontend sends that shape, but a
-/// rejection would be a wire change all the same.
+/// A quoted token is accepted alongside a bare number:
+/// `{"coefficient": "1.5"}` is a legal body. Nothing in the frontend sends
+/// that shape, but rejecting it would still be a wire change.
 fn parse(token: &str) -> Option<Decimal> {
     let unquoted = token
         .strip_prefix('"')
@@ -62,23 +59,23 @@ fn parse(token: &str) -> Option<Decimal> {
     Decimal::from_str(unquoted).ok()
 }
 
-/// The same, for an `Option` field — a request DTO whose `@NotNull` is enforced
-/// by `garde` rather than by the type, so the absent case has to survive
-/// deserialization to be reported as a validation failure.
+/// The same, for an `Option` field — a request DTO whose required-ness is
+/// enforced by `garde` rather than by the type, so the absent case has to
+/// survive deserialization to be reported as a validation failure.
 ///
 /// Two things are allowed to become `None` here, and only two: the field is
 /// absent (never reaches this function at all — see `ScoringCoefficientRequest`'s
 /// `#[serde(default, ...)]`) and an explicit JSON `null`. Both are the
-/// validator's business: `garde`'s `@NotNull`-equivalent turns either into the
+/// validator's business: garde's required-field rule turns either into the
 /// "coefficient is required" message on a 400 `validation-failed`. A token
 /// that is *present* and is not `null` but is also not a number — `"abc"`,
 /// `true`, `[]` — is not a missing value, it is a malformed one, and that is
 /// the parser's business: it has to fail deserialization so the request comes
-/// back as Jackson's own `HttpMessageNotReadableException` would render it, a
-/// 400 `bad-request` with detail `"Failed to read request"`. Folding that case
-/// into `None` (as `super::parse(...).unwrap_or(None)` would) makes a garbled
-/// body indistinguishable from an absent one on the wire — a different problem
-/// type and a different sentence than Jackson produces for the same input.
+/// back as a 400 `bad-request` with detail `"Failed to read request"`. Folding
+/// that case into `None` (as `super::parse(...).unwrap_or(None)` would) makes
+/// a garbled body indistinguishable from an absent one on the wire — a
+/// different problem type and a different sentence than a malformed body
+/// produces for the same input.
 pub mod option {
     use serde::de::Error as _;
 
@@ -88,8 +85,9 @@ pub mod option {
         deserializer: D,
     ) -> Result<Option<Decimal>, D::Error> {
         // `Option<&RawValue>` rather than `#[serde(default)]` plus the scalar
-        // form: an explicit `null` has to land as `None` (the `@NotNull`
-        // message), not as a deserialization error (`Failed to read request`).
+        // form: an explicit `null` has to land as `None` (the
+        // "coefficient is required" message), not as a deserialization error
+        // (`Failed to read request`).
         let Some(raw) = Option::<&RawValue>::deserialize(deserializer)? else {
             return Ok(None);
         };
@@ -164,10 +162,8 @@ mod tests {
         assert_eq!(holder.coefficient, Decimal::from_str("-1.5").unwrap());
     }
 
-    /// Jackson's `BigDecimal` deserializer accepts a quoted number, so this
-    /// one does too.
     #[test]
-    fn a_quoted_number_is_accepted_as_jackson_accepts_one() {
+    fn a_quoted_number_is_accepted_alongside_a_bare_one() {
         let holder: Holder = serde_json::from_str(r#"{"coefficient":"1.5"}"#).unwrap();
         assert_eq!(holder.coefficient, Decimal::from_str("1.5").unwrap());
     }
@@ -178,7 +174,7 @@ mod tests {
     }
 
     /// An omitted or null coefficient must reach `garde` as `None` so the
-    /// `@NotNull` message is what the client sees.
+    /// "coefficient is required" message is what the client sees.
     #[test]
     fn an_explicit_null_is_none_rather_than_an_error() {
         let holder: OptHolder = serde_json::from_str(r#"{"coefficient":null}"#).unwrap();
@@ -194,19 +190,19 @@ mod tests {
         assert_eq!(holder.coefficient, None);
     }
 
-    /// The quoted-number carve-out (Jackson accepts one) has to survive on the
-    /// `Option` form too, not just the scalar one above.
+    /// The quoted-number carve-out has to survive on the `Option` form too,
+    /// not just the scalar one above.
     #[test]
     fn a_present_value_still_parses_through_the_option_form() {
         let holder: OptHolder = serde_json::from_str(r#"{"coefficient":"1.5"}"#).unwrap();
         assert_eq!(holder.coefficient, Some(Decimal::from_str("1.5").unwrap()));
     }
 
-    /// The bug this module was fixed for: a token that is not a number at all
-    /// used to fall through `parse`'s `None` and come out indistinguishable
-    /// from an absent field, so `{"coefficient":"abc"}` reported `@NotNull`
-    /// ("coefficient is required") instead of the malformed-body error Jackson
-    /// actually raises. `garde`'s job is "is it there"; the parser's job is
+    /// The bug this module guards against: a token that is not a number at
+    /// all falling through `parse`'s `None` and coming out indistinguishable
+    /// from an absent field, so `{"coefficient":"abc"}` would report
+    /// "coefficient is required" instead of the malformed-body error it
+    /// actually is. `garde`'s job is "is it there"; the parser's job is
     /// "is it a number" -- and those are different problem types on the wire
     /// (`validation-failed` vs. `bad-request`), so collapsing them here would
     /// smuggle the wrong one through.

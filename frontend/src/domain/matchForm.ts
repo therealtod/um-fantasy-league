@@ -231,7 +231,8 @@ export function toPayload(form: MatchForm): RecordMatchRequest {
 
 /* -------------------------------------------------------------------------
  * Option lists. Each answers "what may this dropdown offer?", and together they
- * are why most of `MatchResultPolicy` is unreachable from the form at all.
+ * are why most of `match_policy`'s `MatchRule` violations are unreachable from
+ * the form at all.
  * ------------------------------------------------------------------------- */
 
 /** The heroes a side fielded, read off the form — a side is the participant's list position. */

@@ -33,25 +33,22 @@ use crate::state::AppState;
 
 /// Assembles the whole application.
 ///
-/// **Layer order is the Spring filter chain, and is load-bearing.** Outermost
-/// first:
+/// **Layer order here is load-bearing.** Outermost first:
 ///
 /// 1. `TraceLayer` -- so a request is logged whatever happens to it.
 /// 2. `fill_problem_instance` -- outside `CatchPanicLayer`, so even the 500 a
-///    panic produces carries the `instance` the servlet layer used to add.
-/// 3. `rate_limit` -- **first of the security layers**, so a flood pays neither
-///    a JWT verification nor a manager lookup. `addFilterBefore` put it ahead
-///    of `BearerTokenAuthenticationFilter` for exactly this.
+///    panic produces carries an `instance`.
+/// 3. `rate_limit` -- **first of the security layers**, so a flood pays
+///    neither a JWT verification nor a manager lookup.
 /// 4. `CorsLayer` -- ahead of authorization, so a preflight `OPTIONS` is
-///    answered rather than denied. That is defect (c) fixed: `DevSecurityConfig`
-///    had no `.cors()`, so a dev-profile preflight 401'd.
-/// 5. `CatchPanicLayer` -- the `handleUnexpected` catch-all.
+///    answered rather than denied.
+/// 5. `CatchPanicLayer` -- the panic catch-all.
 /// 6. `authenticate` -- resolves a credential **only if one is offered** and
 ///    never rejects for absence, carrying zero route knowledge.
 /// 7. `authorize` -- walks the ordered rule table. One middleware over the raw
-///    path rather than per-route layers, because `anyRequest().denyAll()` has to
-///    answer for paths matching *no* route, where a per-route layer never runs
-///    and axum would 404 where Spring answers 401/403.
+///    path rather than per-route layers, because a path matching *no* route
+///    still has to answer with the right status, where a per-route layer
+///    never runs and axum would 404 there instead.
 pub fn build_router(state: AppState) -> Router {
     let cors = cors_layer(&state.config);
 
@@ -77,8 +74,8 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// `CorsConfig.kt`: nothing at all unless `FRONTEND_ORIGIN` is set, and then
-/// exactly one origin, five methods, any header, **no credentials**.
+/// Nothing at all unless `FRONTEND_ORIGIN` is set, and then exactly one
+/// origin, five methods, any header, **no credentials**.
 ///
 /// It stays unset in the deployed setup, where the Cloudflare Worker proxies
 /// `/api/*` to the backend and the frontend's calls are same-origin.
@@ -160,14 +157,13 @@ mod tests {
         (status, content_type, body)
     }
 
-    /// An unrouted path is **401, not 404** -- `anyRequest().denyAll()` denies
-    /// it in the filter chain, long before Spring MVC could raise
-    /// `NoResourceFoundException`.
+    /// An unrouted path is **401, not 404** -- `authorize` denies it before
+    /// the request ever reaches the router.
     ///
-    /// This was originally asserted as a 404 on the reasonable-looking grounds
-    /// that `/nope` matches no route. Probing the running Kotlin backend says
-    /// otherwise, and the difference is the whole reason authorization is one
-    /// middleware over the raw path rather than a per-route layer:
+    /// A 404 is the reasonable-looking answer on the grounds that `/nope`
+    /// matches no route, and it is the wrong one: this is the whole reason
+    /// authorization is one middleware over the raw path rather than a
+    /// per-route layer:
     ///
     /// ```text
     /// GET /nope                      -> 401
@@ -188,21 +184,21 @@ mod tests {
         assert_eq!(body["status"], 401);
     }
 
-    /// A rejection raised inside the filter chain carries **no** `instance`.
-    ///
-    /// `instance` is filled in by `RequestResponseBodyMethodProcessor`, which
-    /// is Spring MVC and never sees a response the security filters wrote. So
-    /// the 401 above has no `instance` while a handler's 404 does -- an added
-    /// field would be as much a wire change as a dropped one.
+    /// A rejection raised by middleware ahead of the router carries **no**
+    /// `instance`: it is built with `ProblemDetail::into_response_without_instance`,
+    /// which leaves nothing in the response extensions for
+    /// [`http::fill_problem_instance`] to fill. So the 401 above has no
+    /// `instance` while a handler's 404 does -- an added field would be as
+    /// much a wire change as a dropped one.
     #[tokio::test]
     async fn a_filter_level_rejection_carries_no_instance() {
         let (_, _, body) = get("/nope").await;
         assert!(body.get("instance").is_none(), "{body}");
     }
 
-    /// Spring filled `instance` from `HttpServletRequest.getRequestURI()` on
-    /// its way out of `RequestResponseBodyMethodProcessor`. Losing it would be
-    /// a wire change, and it is easy to lose: nothing else in axum supplies it.
+    /// [`http::fill_problem_instance`] is what supplies `instance` on a
+    /// handler's error response; nothing else in axum does, and losing it
+    /// would be a wire change.
     #[tokio::test]
     async fn every_problem_body_names_the_request_path() {
         // A publicly readable path, so the rule table lets it through to the
@@ -259,13 +255,11 @@ mod tests {
         }
     }
 
-    /// `default-property-inclusion: non_null` as a blanket assertion, walked
-    /// structurally rather than matched as a substring of the rendered body --
-    /// a substring match fires on any legitimate **string value** containing
-    /// the letters "null" and says nothing about *where* an offending null
-    /// is. `find_json_null` is the same shape as the differential rig's own
-    /// walk, which runs over every parity response body and fails on any
-    /// JSON `null` anywhere in it.
+    /// A blanket assertion that no response ever emits a JSON `null` (a
+    /// nullable field is omitted instead), walked structurally rather than
+    /// matched as a substring of the rendered body -- a substring match fires
+    /// on any legitimate **string value** containing the letters "null" and
+    /// says nothing about *where* an offending null is.
     #[tokio::test]
     async fn no_response_body_contains_a_json_null() {
         for uri in ["/nope", "/actuator/info"] {

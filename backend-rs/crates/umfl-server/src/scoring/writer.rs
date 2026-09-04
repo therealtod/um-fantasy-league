@@ -1,33 +1,21 @@
 //! Scoring rule-set writes.
 //!
-//! Oracle: `scoring/ScoringRuleSet.kt`'s `@MappedCollection` (via
-//! `ScoringRuleSetRepository.save`) and `scoring/ScoringRuleSetAdminRepository.kt`.
+//! [`insert_rule_set`] and [`update_rule_set`] insert a rule set's
+//! coefficients wholesale rather than diffing them against what's already
+//! there, for the same reason `tournament::writer` does: an in-place child
+//! update would have to reconcile `unique (rule_set_id, metric)` mid-statement,
+//! where a wholesale replace never meets it.
 //!
-//! Spring Data JDBC's `save` on a root owning a child collection inserts the
-//! root then its children, or updates the root and **deletes and reinserts**
-//! every child -- it does not diff. [`insert_rule_set`] and
-//! [`update_rule_set`] reproduce exactly that, for the same reason
-//! `tournament::writer` does: an in-place child update would have to reconcile
-//! `unique (rule_set_id, metric)` mid-statement, where a wholesale replace
-//! never meets it.
+//! # Why activation is not part of that write
 //!
-//! # Why the two `is_active` statements are not an aggregate save
-//!
-//! The Kotlin keeps [`deactivate_others`] and [`activate`] in a separate
-//! `@Repository` (`ScoringRuleSetAdminRepository`) precisely so activation
-//! cannot go through `save`: flipping one boolean through the aggregate would
-//! churn the whole coefficient table -- on *both* the outgoing and the incoming
-//! rule set -- and burn a sequence value per row.
-//!
-//! Here they are ordinary functions in the file the naming convention reserves
-//! for writes, and the hazard they were separated to avoid does not exist:
-//! [`update_rule_set`] is hand-written, so nothing cascades by accident. The
-//! reason they stay separate *functions* is unchanged and still load-bearing --
-//! `AdminScoringServiceIntegrationTest` asserts that activating leaves both
-//! rule sets' coefficient ids untouched.
+//! [`deactivate_others`] and [`activate`] stay separate functions rather than
+//! folding into [`update_rule_set`]'s wholesale replace: activating a rule set
+//! must leave both rule sets' coefficient ids untouched, which a
+//! delete-and-reinsert of the coefficient table -- on *either* rule set --
+//! would not.
 //!
 //! Every function takes the connection: each is more than one statement, and
-//! all of them belong to somebody's transaction (PORTING.md §7).
+//! all of them belong to somebody's transaction.
 
 use sqlx::PgConnection;
 
@@ -57,8 +45,8 @@ pub async fn insert_rule_set(
 /// # Panics
 ///
 /// On a rule set with no id. Unreachable -- the only caller loaded it from
-/// [`super::query::find_by_id`] -- and it is the `requireNotNull` the Kotlin
-/// service makes at the same point.
+/// [`super::query::find_by_id`] -- and asserted here as a defensive invariant
+/// at the same point.
 pub async fn update_rule_set(
     conn: &mut PgConnection,
     rule_set: &ScoringRuleSet,

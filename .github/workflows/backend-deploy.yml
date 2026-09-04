@@ -1,49 +1,48 @@
-# The Kotlin backend is no longer what's deployed -- see backend-rs-deploy.yml,
-# which now owns the VPS's `backend` and `flyway` services (AGENTS.md's
-# "default version is the rust port"). `build-and-push` still runs on every
-# push here, purely so a tagged Kotlin image keeps existing for a manual
-# rollback (`docker compose pull backend@<sha>` on the box); `deploy` below
-# only rolls `scraper`, which has no other workflow that builds or deploys it.
+# Builds and publishes the backend image, plus the migrator image that
+# applies db/migration ahead of it (see db/Dockerfile), and deploys both to
+# the VPS. This file used to be backend-rs-deploy.yml; it dropped the `-rs`
+# suffix once it became the only backend deploy pipeline this repo has. The
+# published image itself keeps the `umfl-backend-rs` name, since
+# `deploy/docker-compose.prod.yml` and the VPS already pull it under that tag.
 name: backend-deploy
 
 on:
-  # Manual re-deploy. The path filter below means an unrelated commit to master
-  # ships nothing, so a VPS rebuild (or a first deploy against a freshly
-  # provisioned box) needs a way to run the pipeline without touching backend
-  # sources.
+  # Manual re-deploy / first-image build. The path filter below means an
+  # unrelated commit to master ships nothing, so building against a freshly
+  # provisioned box (or re-publishing with no source change) needs a way to
+  # run the pipeline without touching backend-rs sources.
   workflow_dispatch:
   push:
     branches:
       - master
     paths:
-      - "backend/**"
+      - "backend-rs/**"
       - "db/**"
-      - "Dockerfile"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle/**"
-      - "tools/tabletopleague-scraper/**"
       - ".github/workflows/backend-deploy.yml"
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-backend
-  SCRAPER_IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-scraper
+  IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-backend-rs
+  MIGRATOR_IMAGE: ghcr.io/${{ github.repository_owner }}/umfl-migrator
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend-rs
+    env:
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          distribution: temurin
-          java-version: "21"
+          workspaces: backend-rs
 
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Run backend test suite
-        run: ./gradlew :backend:test
+      - name: Run backend-rs test suite
+        run: cargo test --workspace
 
   build-and-push:
     needs: test
@@ -62,10 +61,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the backend image
+      - name: Build and push the Rust backend image
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./backend-rs/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
@@ -73,20 +73,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The headless-browser sidecar the admin match import calls. Built here
-      # rather than in its own workflow so `docker compose pull` on the VPS
-      # always finds the two images in step -- they are deployed together and
-      # share the compose file, even though only this one carries a browser.
-      - name: Build and push the scraper image
+      # Built here rather than its own workflow so `docker compose pull` on
+      # the VPS always finds both images in step -- they deploy together
+      # below.
+      - name: Build and push the migrator image
         uses: docker/build-push-action@v6
         with:
-          context: ./tools/tabletopleague-scraper
+          context: ./db
+          file: ./db/Dockerfile
           push: true
           tags: |
-            ${{ env.SCRAPER_IMAGE }}:${{ github.sha }}
-            ${{ env.SCRAPER_IMAGE }}:latest
-          cache-from: type=gha,scope=scraper
-          cache-to: type=gha,mode=max,scope=scraper
+            ${{ env.MIGRATOR_IMAGE }}:${{ github.sha }}
+            ${{ env.MIGRATOR_IMAGE }}:latest
+          cache-from: type=gha,scope=migrator
+          cache-to: type=gha,mode=max,scope=migrator
 
   deploy:
     needs: build-and-push
@@ -101,9 +101,17 @@ jobs:
           script: |
             set -e
             cd /opt/umfl
-            # `-f` is load-bearing, not stylistic -- see backend-rs-deploy.yml's
-            # deploy job for why bare `docker compose` cannot be trusted to
-            # find this file on its own.
-            docker compose -f docker-compose.prod.yml pull scraper
-            docker compose -f docker-compose.prod.yml up -d scraper
+            # `-f` is load-bearing, not stylistic: bare `docker compose` only
+            # auto-discovers a file literally named `compose.yaml`/`compose.yml`/
+            # `docker-compose.yaml`/`docker-compose.yml` -- never
+            # `docker-compose.prod.yml`. Omitting it risks silently targeting
+            # a stale same-directory `docker-compose.yml` instead (which is
+            # exactly what happened once already on this box).
+            docker compose -f docker-compose.prod.yml pull backend flyway
+            # `flyway` before `backend`: compose's own `depends_on:
+            # condition: service_completed_successfully` already orders
+            # them, but naming it first here means a freshly pulled image
+            # is what actually runs the migration, not whatever happened to
+            # be sitting there from a previous deploy.
+            docker compose -f docker-compose.prod.yml up -d flyway backend
             docker image prune -f

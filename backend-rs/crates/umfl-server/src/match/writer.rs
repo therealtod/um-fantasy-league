@@ -1,23 +1,18 @@
 //! Writes a recorded match as a whole aggregate.
 //!
-//! Oracle: `match/TournamentMatch.kt`'s `@MappedCollection`s, saved through
-//! `TournamentMatchRepository`.
-//!
-//! Spring Data JDBC's `save` on a root owning child collections inserts the
-//! root then its children, or updates the root and **deletes and reinserts**
-//! every child -- it does not diff. [`insert`] and [`update`] reproduce exactly
-//! that, for the same reason `scoring::writer` and `tournament::writer` do: an
-//! in-place child update would have to reconcile
-//! `match_game_participants`'s `unique (game_id, hero_id)` and `hero_bans`'s
-//! composite key mid-statement, where a wholesale replace never meets them.
+//! [`insert`] and [`update`] insert a match's child collections wholesale
+//! rather than diffing them against what's already there, for the same
+//! reason `scoring::writer` and `tournament::writer` do: an in-place child
+//! update would have to reconcile `match_game_participants`'s
+//! `unique (game_id, hero_id)` and `hero_bans`'s composite key mid-statement,
+//! where a wholesale replace never meets them.
 //!
 //! Deleting the children is one statement per table rather than a cascade from
 //! the root, because the root survives an [`update`]; `delete` *does* lean on
-//! the schema's `on delete cascade`, which is what the Kotlin's
-//! `repository.delete(root)` does too.
+//! the schema's `on delete cascade` instead.
 //!
 //! Every function takes the connection: each is more than one statement, and
-//! all of them belong to somebody's transaction (PORTING.md §7).
+//! all of them belong to somebody's transaction.
 
 use sqlx::PgConnection;
 
@@ -45,7 +40,7 @@ pub async fn insert(conn: &mut PgConnection, m: &TournamentMatchWrite) -> sqlx::
 /// # Panics
 ///
 /// On a match with no id. Unreachable -- the only caller loaded it first --
-/// and it is the `requireNotNull` the Kotlin service makes at the same point.
+/// and asserted here as a defensive invariant at the same point.
 pub async fn update(conn: &mut PgConnection, m: &TournamentMatchWrite) -> sqlx::Result<()> {
     let id = m.id.expect("a loaded match has an id");
 

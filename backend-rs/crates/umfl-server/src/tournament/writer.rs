@@ -1,22 +1,17 @@
-//! Entry writes — the aggregate half of `TournamentEntryRepository`.
+//! Entry writes: an entry and its `entry_slots` as one aggregate.
 //!
-//! Oracle: `tournament/TournamentEntry.kt`'s `@MappedCollection` and every
-//! `entryRepository.save(...)` in `TournamentService.kt`.
+//! Saving that aggregate does one of two things:
 //!
-//! Spring Data JDBC's `save` on an aggregate root with a `@MappedCollection`
-//! child does one of two things, and both are reproduced literally here:
-//!
-//! * **New root** (`@Id` null): insert the root, then insert each child with
+//! * **New entry** (no id yet): insert the root, then insert each slot with
 //!   the generated id and the list position as `slot_index`.
-//! * **Existing root**: update the root, **delete every child row**, then
-//!   re-insert them. It does not diff. Reproducing the delete-and-reinsert
-//!   matters because it is what makes reordering a roster work at all —
+//! * **Existing entry**: update the root, **delete every slot row**, then
+//!   re-insert them, rather than diffing them against what's there. That
+//!   delete-and-reinsert is what makes reordering a roster work at all —
 //!   `entry_slots` is keyed `(entry_id, slot_index)`, so an in-place update of
 //!   two swapped rows would collide with the unique key mid-statement.
 //!
 //! Every function takes the connection rather than an executor: each is more
 //! than one statement and all of them belong to somebody's transaction.
-//! See PORTING.md §7.
 
 use sqlx::{PgConnection, PgExecutor};
 use umfl_domain::tournament::{Tournament, TournamentEntry};
@@ -24,12 +19,10 @@ use umfl_domain::tournament::{Tournament, TournamentEntry};
 use super::query::{entry_status_to_db, format_to_db, status_to_db};
 
 // ---------------------------------------------------------------------------
-// The tournament root itself -- oracle: `TournamentRepository.save`
-// (Spring Data JDBC's `CrudRepository`), which inserts when the `@Id` is
-// null and updates when it is not. Unlike the entry above, `tournaments` owns
-// no `@MappedCollection` child, so there is no delete-and-reinsert cascade
-// here -- see `map::writer` and `hero::writer` for the same shape on a
-// childless root.
+// The tournament root itself -- inserts when the id is absent and updates
+// when it is not. Unlike the entry above, `tournaments` owns no child
+// collection, so there is no delete-and-reinsert cascade here -- see
+// `map::writer` and `hero::writer` for the same shape on a childless root.
 // ---------------------------------------------------------------------------
 
 /// Inserts a tournament, returning the generated id.
@@ -59,8 +52,8 @@ pub async fn insert_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
 /// # Panics
 ///
 /// On a tournament with no id. Unreachable -- every caller loaded it from
-/// [`super::query::find_by_id`] -- and it is the `requireNotNull` the Kotlin
-/// service makes at the same point.
+/// [`super::query::find_by_id`] -- and asserted here as a defensive invariant
+/// at the same point.
 pub async fn update_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx::Result<()> {
     let id = t.id.expect("a loaded tournament has an id");
     sqlx::query!(
@@ -98,8 +91,8 @@ pub async fn delete_tournament(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result
 /// Inserts a new entry and its slots, returning the generated id.
 ///
 /// `registered_at` is written explicitly rather than left to the column's
-/// `default now()`: the Kotlin builds the `Instant` in the service, and a
-/// default would be the *statement's* clock rather than the value the response
+/// `default now()`: the value is built in the service, and a column default
+/// would be the *statement's* clock rather than the value the response
 /// carries back.
 pub async fn insert_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> sqlx::Result<i64> {
     let id = sqlx::query_scalar!(
@@ -126,8 +119,8 @@ pub async fn insert_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> s
 /// # Panics
 ///
 /// On an entry with no id. Unreachable — every caller loaded the entry from
-/// [`super::query::find_entry`] — and it is the same `requireNotNull` the
-/// Kotlin service makes at each of these call sites.
+/// [`super::query::find_entry`] — and asserted here as a defensive invariant
+/// at each of these call sites.
 pub async fn update_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> sqlx::Result<()> {
     let id = entry.id.expect("a loaded entry has an id");
 
@@ -155,13 +148,6 @@ pub async fn update_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> s
 }
 
 /// Deletes every entry in the tournament that never locked in a roster.
-///
-/// Oracle: `TournamentService.purgeUnlockedEntries` — `entryRepository
-/// .findByTournamentId(tournamentId).filterNot { it.isLocked }` followed by
-/// `deleteAll`, folded here into one statement. `on delete cascade` on
-/// `entry_slots` (see `V1__core_schema.sql`) takes care of any picks the
-/// entry held but never locked in, exactly as Spring Data JDBC's cascading
-/// delete did.
 pub async fn delete_unlocked_entries(
     db: impl PgExecutor<'_>,
     tournament_id: i64,

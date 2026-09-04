@@ -1,10 +1,6 @@
 //! The admin match importer, with only the network boundary stubbed.
 //!
-//! Oracle: `matchimport/MatchImportServiceTest.kt` and
-//! `matchimport/MatchImportEndpointTest.kt`, both driven over HTTP here.
-//!
-//! `fixtures/sample-match.json` is a genuine capture of a live scrape, copied
-//! from the Kotlin suite's `resources/matchimport/sample-match.json` -- not a
+//! `fixtures/sample-match.json` is a genuine capture of a live scrape, not a
 //! hand-written sample. It is the actual shape the sidecar returns, including a
 //! negative health value and a ten-hero draft. If the source site's markup
 //! drifts, re-capturing it is what surfaces the change.
@@ -29,9 +25,8 @@ const SOURCE_URL: &str = "https://www.tabletopleague.com/o/umleague/summer-of-le
 
 /// The whole scraper, replaced by one canned answer.
 ///
-/// `MatchImportServiceTest` uses a `@MockitoBean` for the same reason: the
-/// alternative is a headless Chromium and a live source site inside the test
-/// suite, and neither is what these tests are about.
+/// The alternative is a headless Chromium and a live source site inside the
+/// test suite, and neither is what these tests are about.
 struct StubScraper {
     outcome: Result<ScrapedMatch, DomainError>,
 }

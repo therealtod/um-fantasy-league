@@ -1,7 +1,5 @@
 //! The rules a recorded match has to satisfy before anything is written.
 //!
-//! A direct port of `match/MatchResultPolicy.kt`.
-//!
 //! Pre-validates an admin's submission so a bad one comes back as a clear 422
 //! naming every broken rule, instead of a raw constraint violation from a
 //! partial unique index or a composite foreign key. Deliberately free of
@@ -180,10 +178,9 @@ pub struct MatchBanInput {
     pub side: Option<i32>,
 }
 
-/// Two sides to a series. Kotlin carries this as a defaulted parameter that no
-/// call site has ever overridden; [`validate_expecting`] is the parameterised
-/// form, kept so the default stays a default rather than becoming a constant
-/// baked into the arithmetic.
+/// Two sides to a series. No call site has ever overridden this;
+/// [`validate_expecting`] is the parameterised form, kept so the default stays
+/// a default rather than becoming a constant baked into the arithmetic.
 pub const EXPECTED_PARTICIPANT_COUNT: usize = 2;
 
 /// Validates a match submission, reporting **every** broken rule rather than
@@ -325,8 +322,7 @@ pub fn validate_expecting(
         ));
     }
 
-    // Per side, then unioned: the same hero doubled by both sides is one entry,
-    // matching Kotlin's `flatMap { ... }.toSortedSet()`.
+    // Per side, then unioned: the same hero doubled by both sides is one entry.
     let duplicate_picks: BTreeSet<i64> = participants
         .iter()
         .flat_map(|p| repeated(p.drafted_hero_ids.iter().copied()))
@@ -476,9 +472,8 @@ fn game_numbers(games: &[MatchGameInput], predicate: impl Fn(&MatchGameInput) ->
     numbers
 }
 
-/// The values appearing more than once, ascending. Kotlin reaches this through
-/// `groupingBy { it }.eachCount().filterValues { it > 1 }.keys`; the result is
-/// a set either way, and every caller sorts it.
+/// The values appearing more than once, in ascending order (a `BTreeSet`
+/// iterates sorted).
 fn repeated(values: impl Iterator<Item = i64>) -> BTreeSet<i64> {
     let mut counts: IndexMap<i64, usize> = IndexMap::new();
     for value in values {
@@ -491,9 +486,9 @@ fn repeated(values: impl Iterator<Item = i64>) -> BTreeSet<i64> {
         .collect()
 }
 
-/// Kotlin renders a `List<Int>` inside a string template as `[1, 2]`, brackets
-/// included, and the tests assert on those brackets. `joinToString()` -- used
-/// for the id lists -- does not add them.
+/// Renders a game-number list as `[1, 2]`, brackets included, and the tests
+/// assert on those brackets -- deliberately different from the plain
+/// comma-joined id lists used elsewhere in these messages.
 fn render_numbers(numbers: &[i32]) -> String {
     format!(
         "[{}]",
@@ -1057,12 +1052,11 @@ mod tests {
         );
     }
 
-    /// Kotlin renders a `List<Int>` into a string template with its brackets,
-    /// and the message the admin reads carries them. `joinToString()`, used for
-    /// the id lists, does not -- so the two renderings are deliberately
-    /// different and both are contract.
+    /// A game-number list renders with brackets (`[1, 2]`) in the message the
+    /// admin reads; a hero-id list renders plain comma-joined -- the two
+    /// renderings are deliberately different and both are contract.
     #[test]
-    fn multi_game_and_multi_hero_messages_keep_the_kotlin_rendering() {
+    fn multi_game_and_multi_hero_messages_keep_their_distinct_renderings() {
         let violations = check(
             &drafts(&[10, 11], &[10, 11]),
             &[

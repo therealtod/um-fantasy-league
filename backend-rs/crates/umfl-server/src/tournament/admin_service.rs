@@ -1,7 +1,4 @@
 //! Create, update and delete tournaments.
-//!
-//! Oracle: `tournament/AdminTournamentService.kt`. Every `@Transactional`
-//! method there is a `pool.begin()` here and nothing else is (PORTING.md §7).
 
 use chrono::NaiveDate;
 use umfl_domain::DomainError;
@@ -14,10 +11,9 @@ use super::query;
 use super::service::{purge_unlocked_entries, require_tournament};
 use super::writer;
 
-/// The fields an admin submits, once validation has run. Mirrors the
-/// `create`/`update` parameter lists in `AdminTournamentService.kt` exactly,
-/// which is why `end_date` is the one field that is genuinely optional
-/// rather than merely "not yet validated".
+/// The fields an admin submits, once validation has run. `end_date` is the
+/// one field that is genuinely optional, rather than merely "not yet
+/// validated".
 pub struct TournamentFields<'a> {
     pub name: &'a str,
     pub format: TournamentFormat,

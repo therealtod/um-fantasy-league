@@ -1,12 +1,7 @@
 .git
-.gradle
 .idea
-.kotlin
 .vscode
-build
-backend/build
 backend-rs/target
 frontend
-gradle/wrapper/gradle-wrapper.jar.sha256
 *.log
 *.md

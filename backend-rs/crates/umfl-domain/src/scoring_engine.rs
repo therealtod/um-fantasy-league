@@ -1,7 +1,5 @@
 //! Prices a hero's involvement in a match against a set of coefficients.
 //!
-//! A direct port of `scoring/ScoringEngine.kt`.
-//!
 //! Points are computed at read time and **never stored** -- coefficients are
 //! mutable reference data retuned with a bare `UPDATE`, so a stored total would
 //! be a cache with nothing to invalidate it. See AGENTS.md, "Nothing writes
@@ -18,8 +16,7 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 ///
 /// `coefficients` is insertion-ordered by `sort_order`, which is what fixes the
 /// leaderboard's left-to-right column order -- the backend cannot know it any
-/// other way, which is also why this must stay an [`IndexMap`] (PORTING.md
-/// §4.2).
+/// other way, which is also why this must stay an [`IndexMap`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScoringRules {
     pub rule_set_id: i64,
@@ -45,9 +42,9 @@ impl ScoringRules {
         name: impl Into<String>,
         coefficients: IndexMap<String, Decimal>,
     ) -> Self {
-        // Kotlin's `associate`, on a LinkedHashMap: a later key that normalises
-        // onto an earlier one overwrites the value and keeps the earlier
-        // position. `IndexMap::insert` has exactly that behaviour.
+        // A later key that normalises onto an earlier one overwrites the
+        // value and keeps the earlier position; `IndexMap::insert` has
+        // exactly that behaviour.
         let mut by_metric: IndexMap<String, Decimal> = IndexMap::with_capacity(coefficients.len());
         for (metric, coefficient) in &coefficients {
             by_metric.insert(match_metrics::normalise(metric), *coefficient);
@@ -73,8 +70,7 @@ impl ScoringRules {
 
     /// A tournament with no active rule set: everything scores zero.
     ///
-    /// Kotlin's `ScoringRules.NONE`. Not a `const`, because an empty `IndexMap`
-    /// is not constructible in one.
+    /// Not a `const`, because an empty `IndexMap` is not constructible in one.
     pub fn none() -> Self {
         Self::new(0, "", IndexMap::new())
     }
@@ -101,7 +97,7 @@ impl ScoringRules {
 /// weighted at zero) is absent rather than present as `0.0`. Each value is
 /// rounded to 2dp **before** it is summed, so a displayed total is exactly the
 /// sum of its displayed parts -- folding in `Decimal` end to end would produce
-/// *better* numbers and *different* ones (PORTING.md §9).
+/// *better* numbers and *different* ones.
 pub fn breakdown(context: &MetricContext<'_>, rules: &ScoringRules) -> IndexMap<String, f64> {
     let mut result = IndexMap::new();
     if rules.scored_metrics.is_empty() {
@@ -115,7 +111,6 @@ pub fn breakdown(context: &MetricContext<'_>, rules: &ScoringRules) -> IndexMap<
         if measured == 0.0 {
             continue;
         }
-        // `.to_f64()` before multiplying, exactly as the Kotlin's `.toDouble()`.
         let coefficient = rules
             .coefficient_of(metric)
             .to_f64()
@@ -133,8 +128,7 @@ pub fn score(context: &MetricContext<'_>, rules: &ScoringRules) -> f64 {
     round2(breakdown(context, rules).values().sum())
 }
 
-/// The fold from measured metrics to points -- a near-1:1 port of
-/// `ScoringEngineTest`.
+/// The fold from measured metrics to points, tested directly.
 ///
 /// The coefficients used here are the seeded "Season 2026 Standard" weights,
 /// including the deliberately unimplemented `CROWD_FAVOURITE` -- proving in a

@@ -1,21 +1,18 @@
 //! One SSE connection per browser tab watching a tournament's standings, and a
 //! bare "something changed" push after a match write **commits**.
 //!
-//! Oracle: `standings/StandingsSseHub.kt`.
-//!
 //! The payload is deliberately just the tournament id: the client already knows
 //! how to pull fresh data from `/standings` and `/matches`, so the stream is a
 //! "poll now" signal rather than a second copy of the board over the wire.
 //!
 //! This is the one place `AGENTS.md`'s "no background workers" has an
-//! exception, and it is smaller here than in Kotlin. The keep-alive is not a
-//! scheduled task at all: axum attaches it to each response stream, so there is
-//! no `standings-sse-keepalive` thread and no `standings-sse-dispatch` pool to
-//! park a slow client's write on -- a stalled client's send backs up in its own
-//! task and in its own broadcast receiver, which is what the four dispatch
-//! threads were buying. The remaining Kotlin constants stay constants, per the
-//! `umfl.*` invariant: how many tabs a JVM (or a Tokio runtime) holds open is
-//! neither domain data nor deployment topology.
+//! exception, and it is a narrow one. The keep-alive is not a scheduled task
+//! at all: axum attaches it to each response stream, so there is no dedicated
+//! keep-alive thread and no dispatch pool to park a slow client's write on --
+//! a stalled client's send backs up in its own task and in its own broadcast
+//! receiver. The subscriber caps below stay plain constants, per the `umfl.*`
+//! invariant: how many tabs a Tokio runtime holds open is neither domain data
+//! nor deployment topology.
 //!
 //! # The one behaviour to keep straight
 //!
@@ -39,8 +36,7 @@ use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use umfl_domain::DomainError;
 
-/// Held open through idle-timeout proxies and browsers. Kotlin's
-/// `KEEP_ALIVE_SECONDS`.
+/// Held open through idle-timeout proxies and browsers.
 pub const KEEP_ALIVE: Duration = Duration::from_secs(20);
 
 pub const MAX_SUBSCRIBERS_PER_TOURNAMENT: usize = 200;
@@ -52,7 +48,7 @@ pub const MAX_TOTAL_SUBSCRIBERS: usize = 500;
 pub const STREAM_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Rendered to the client verbatim; the frontend shows `ApiError` messages as
-/// they arrive, so this string is wire contract (PORTING.md §1).
+/// they arrive, so this string is wire contract.
 const AT_CAPACITY: &str = "The standings stream is at capacity; please retry in a moment.";
 
 /// Every message on this channel is the same bare signal, so a slow subscriber
@@ -72,9 +68,8 @@ pub struct StandingsSseHub {
 
 #[derive(Default)]
 struct Registry {
-    /// `IndexMap` over `HashMap` per PORTING.md §4.2. Nothing here is
-    /// serialised, but the grep in §14 is a blanket rule and iteration order
-    /// being stable makes a capacity test reproducible.
+    /// `IndexMap` over `HashMap`. Nothing here is serialised, but iteration
+    /// order being stable makes a capacity test reproducible.
     channels: IndexMap<i64, Channel>,
     total: usize,
 }
@@ -95,12 +90,11 @@ impl StandingsSseHub {
 
     /// A live stream for one tab, or a 503 when the caps are reached.
     ///
-    /// The subscription is released when the returned stream is dropped, which
-    /// covers all of the Kotlin's four release paths at once: axum drops the
-    /// body when the client disconnects, when the send fails, and when the
-    /// hour-long [`STREAM_TIMEOUT`] ends the stream. `Drop` runs once, so the
-    /// double-decrement `releaseEmitter`'s `remove` guards against cannot
-    /// happen here.
+    /// The subscription is released when the returned stream is dropped,
+    /// which covers every release path at once: axum drops the body when the
+    /// client disconnects, when the send fails, and when the hour-long
+    /// [`STREAM_TIMEOUT`] ends the stream. `Drop` runs once, so a
+    /// double-decrement cannot happen here.
     /// Returned as an already-rendered [`Response`] rather than as an
     /// `Sse<S>`: `keep_alive` wraps the stream in a type axum does not export,
     /// so the alternative is a signature naming a private type or a hub that
@@ -130,8 +124,8 @@ impl StandingsSseHub {
             },
         );
 
-        // `take_until` rather than a per-message timeout: the Kotlin caps the
-        // *emitter's* life, not the gap between events, and an idle stream is
+        // `take_until` rather than a per-message timeout: this caps the
+        // *stream's* life, not the gap between events, and an idle stream is
         // the normal state of this endpoint.
         let events = events.take_until(tokio::time::sleep(STREAM_TIMEOUT));
 
@@ -177,9 +171,8 @@ impl StandingsSseHub {
         self.registry.lock().map(|r| r.total).unwrap_or(0)
     }
 
-    /// Checks both caps and takes the slot under **one** lock, which is what
-    /// Kotlin's `subscribeLock` is doing around its `computeIfAbsent`-then-add.
-    /// Split across two locks, two concurrent subscribes could both see room.
+    /// Checks both caps and takes the slot under **one** lock. Split across
+    /// two locks, two concurrent subscribes could both see room.
     fn register(
         &self,
         tournament_id: i64,
@@ -224,7 +217,7 @@ fn update_event(tournament_id: i64) -> Event {
         .data(tournament_id.to_string())
 }
 
-/// The single release path, as `releaseEmitter` is in the Kotlin.
+/// The single release path.
 ///
 /// It also prunes the tournament's entry once the last watcher leaves, so the
 /// key set does not grow monotonically with every tournament ever watched --
@@ -343,9 +336,8 @@ mod tests {
             .expect_err("the total cap is reached, well under this tournament's own");
     }
 
-    /// The Kotlin has no equivalent: `SseEmitter`'s release paths are only
-    /// reachable through Spring MVC, so its registry could never be observed
-    /// shrinking. Here the stream *is* the subscription.
+    /// The stream *is* the subscription, so dropping it is directly
+    /// observable here.
     #[tokio::test]
     async fn dropping_a_stream_releases_its_slot_and_prunes_the_tournament() {
         let hub = StandingsSseHub::new();

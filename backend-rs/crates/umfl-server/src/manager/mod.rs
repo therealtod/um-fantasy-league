@@ -1,7 +1,5 @@
 //! The one human this application models.
 //!
-//! Oracle: `manager/Manager.kt`, `manager/ManagerRepository.kt`.
-//!
 //! A manager is the person who drafts a roster, as distinct from the competitor
 //! who plays the real tournament (a free-text `match_participants.player_label`,
 //! not an entity) and the `hero` they bring to it.
@@ -23,10 +21,9 @@ use crate::state::AppState;
 
 /// A persisted `managers` row.
 ///
-/// Unlike the Kotlin, `id` is not an `Option`: Spring Data JDBC needs a null id
-/// to mean "not saved yet", but here the unsaved form is
-/// [`writer::insert`]'s argument list, so every `Manager` value in the program
-/// is one that came out of the database.
+/// `id` is not an `Option`: the unsaved form is [`writer::insert`]'s argument
+/// list, so every `Manager` value in the program is one that came out of the
+/// database.
 ///
 /// **Deliberately not `Serialize`.** This is the internal principal, not a
 /// response body: `auth_user_id` is an `Option` with no
@@ -48,11 +45,6 @@ pub struct Manager {
 }
 
 /// The signed-in manager, as the app's top bar reads it.
-///
-/// Oracle: `api/MeController.kt` and `ManagerDto` in `api/Dtos.kt`. It names
-/// the four fields it returns rather than serialising [`Manager`], which is why
-/// that type is deliberately not `Serialize`: `auth_user_id` has no business on
-/// the wire, and a null one would break `non_null`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagerDto {

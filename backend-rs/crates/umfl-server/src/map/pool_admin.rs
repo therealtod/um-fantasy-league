@@ -1,7 +1,5 @@
 //! `tournament_maps` writes -- the composite-keyed link table no aggregate maps.
 //!
-//! Oracle: the write half of `map/MapPoolAdminRepository.kt`.
-//!
 //! There is no non-key column here, so unlike the hero pool there is no
 //! "re-price" to also cover: the only write is an idempotent add, its removal,
 //! and the constraint re-check that removal needs.
@@ -27,9 +25,8 @@ pub async fn add_to_pool(
 
 /// The same idempotent add, batched into one statement.
 ///
-/// The Kotlin builds a `values (:tournamentId, :mapId0), ...` list by hand
-/// because `JdbcClient` has no array binding; `unnest` does the same job with a
-/// fixed statement, so nothing here grows with the batch size.
+/// `unnest` turns the batch into one fixed statement, so nothing here grows
+/// with the batch size.
 pub async fn add_to_pool_batch(
     db: impl PgExecutor<'_>,
     tournament_id: i64,
@@ -79,7 +76,7 @@ pub async fn remove_from_pool(
 ///
 /// The second statement never runs when the first fails, and does not need to:
 /// the transaction is aborted at that point and the caller is about to roll it
-/// back. That is the same shape as the Kotlin's `.also { }`.
+/// back.
 pub async fn check_map_in_pool_now(conn: &mut sqlx::PgConnection) -> sqlx::Result<()> {
     sqlx::query("set constraints match_game_map_in_pool immediate")
         .execute(&mut *conn)

@@ -1,9 +1,6 @@
 //! The Live Standings screen: the leaderboard, the ticker, and the push that
 //! tells a tab to refetch them.
 //!
-//! Oracle: `api/StandingsController.kt`, `standings/StandingsService.kt`,
-//! `standings/StandingsQuery.kt`, `standings/StandingsSseHub.kt`.
-//!
 //! All three routes are public -- nobody needs an account to watch a
 //! tournament, only to enter and draft one -- and all three open with
 //! `require_tournament`, so an unknown id is a 404 rather than an empty board.
@@ -47,8 +44,8 @@ async fn standings(
     Ok(Json(service::board(&state, id).await?))
 }
 
-/// `@RequestParam(required = false, defaultValue = "0") sinceMatchId` and
-/// `@RequestParam(required = false, defaultValue = "25") limit`.
+/// `sinceMatchId` and `limit` are both optional query parameters, defaulting
+/// to 0 and 25 respectively.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TickerQuery {
@@ -73,8 +70,8 @@ async fn matches(
     AppQuery(params): AppQuery<TickerQuery>,
 ) -> ApiResult<Json<Vec<TickerEntry>>> {
     crate::tournament::service::require_tournament(&state.pool, id).await?;
-    // `coerceIn(1, 200)`: a clamp rather than a rejection, so an out-of-range
-    // limit is served rather than 400'd, exactly as the Kotlin does.
+    // A clamp rather than a rejection, so an out-of-range limit is served
+    // rather than 400'd.
     let limit = params.limit.clamp(1, 200) as usize;
     let ticker = service::ticker(&state, id, params.since_match_id, limit).await?;
     Ok(Json(ticker))

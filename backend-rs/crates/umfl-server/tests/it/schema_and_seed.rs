@@ -1,24 +1,23 @@
-//! Port of `backend/src/test/kotlin/com/umfl/SchemaAndSeedTest.kt`.
-//!
 //! Migrates a real PostgreSQL through every file in `db/`, then asserts the
 //! shape of what came out. A green run here is the proof that the schema and
-//! the seed are valid, not merely well-formed -- and, in this port, that the
-//! runner in `harness::migrate` interleaved the two Flyway locations by version
-//! the way Flyway does. Run `db/migration` to exhaustion first and
-//! `V3__demo_fixtures.sql` fails on a table `V5` has not created yet.
+//! the seed are valid, not merely well-formed -- and that the runner in
+//! `harness::migrate` interleaved the two Flyway locations by version the way
+//! Flyway does: a migration and a seed file both add a table the other
+//! depends on, and getting the version ordering wrong across locations would
+//! surface here as a migration failure rather than a passing run against the
+//! wrong schema.
 //!
 //! **The counts are exact, and stay exact.** The seed is a fixture the scoring
-//! and standings tests assert against *by value*: the leaderboard parity check
-//! in PORTING.md §13 (ArthurianLegend 100.00, NeonStrategist 79.75, ...) is
-//! arithmetic over these rows. A row quietly appearing or disappearing has to
+//! and standings tests assert against *by value*: the leaderboard parity
+//! check in `tests/it/standings.rs` (ArthurianLegend 100.00, NeonStrategist
+//! 79.75, ...) is arithmetic over these rows. A row quietly appearing or disappearing has to
 //! fail here, by name, rather than three tests later as an unexplained
 //! arithmetic mismatch. Softening one of these into `>= 1` would delete the
 //! only thing that makes those numbers mean anything.
 //!
-//! The Kotlin reaches for `TournamentRepository`/`TournamentEntryRepository`
-//! for a few of these; this asks the database directly. The repositories are
-//! other tasks' code and are the thing under test elsewhere -- here they would
-//! only stand between the assertion and the rows it is about.
+//! These assertions ask the database directly rather than going through a
+//! read module: the read modules are other tests' subject matter, and here
+//! they would only stand between the assertion and the rows it is about.
 
 use sqlx::{PgPool, Row};
 
@@ -318,9 +317,8 @@ async fn roster_slots_keep_their_draft_order_and_never_repeat_a_hero() {
     .await;
     assert_eq!(0, repeats);
 
-    // `slot_index` is a Spring Data JDBC list position, so it has to be a dense
-    // 0..n-1 run: the aggregate root loads its slots *by* it, and a gap would
-    // silently reorder a locked roster.
+    // `slot_index` is a list position, so it has to be a dense 0..n-1 run: a
+    // gap would silently reorder a locked roster.
     let gaps = scalar(
         app.pool(),
         "select count(*) from (
@@ -569,8 +567,7 @@ async fn match_ids_ascend_with_played_at_which_is_what_makes_the_id_a_safe_polli
     );
 }
 
-/// Not in the Kotlin, and the one assertion that is about the *runner* rather
-/// than the seed.
+/// The one assertion here that is about the *runner* rather than the seed.
 ///
 /// Flyway orders by version **across** locations. This pins the interleaving
 /// that produces. Migrations are periodically squashed back to a `V1`

@@ -1,13 +1,10 @@
 //! `X-Manager-Id`: the dev/test credential.
 //!
-//! Oracle: `auth/DevManagerAuthenticationFilter.kt`.
-//!
 //! Resolving the header at this level rather than in a handler is the whole
-//! point of the class this ports: without it the non-prod chain has no
-//! principal at all, so an admin-only route could never be gated the same way
-//! it is in prod. The role check and the handler's `CurrentManager` then read
-//! the *same* resolved identity and can never disagree about who the request
-//! is.
+//! point: without it the non-prod path has no principal at all, so an
+//! admin-only route could never be gated the same way it is in prod. The role
+//! check and the handler's `CurrentManager` then read the *same* resolved
+//! identity and can never disagree about who the request is.
 //!
 //! Like its prod twin it knows nothing about which routes need an identity.
 
@@ -23,10 +20,9 @@ pub const MANAGER_ID_HEADER: &str = "X-Manager-Id";
 /// unusable.
 ///
 /// The three failures -- a header that is not a number, a number naming no
-/// manager, and a lookup that could not run -- are all one 401 on the wire, as
-/// they are in the Kotlin: the body is
-/// `ProblemDetailAuthenticationEntryPoint`'s fixed sentence whatever the cause,
-/// and the cause is logged rather than handed to the client.
+/// manager, and a lookup that could not run -- are all one 401 on the wire:
+/// the body is a fixed sentence whatever the cause, and the cause is logged
+/// rather than handed to the client.
 pub async fn resolve(state: &AppState, headers: &HeaderMap) -> Result<Option<Manager>, ApiError> {
     let Some(header) = headers.get(MANAGER_ID_HEADER) else {
         return Ok(None);

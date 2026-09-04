@@ -1,7 +1,5 @@
 //! Turns a Tabletop League match URL into a reviewable draft of a match result.
 //!
-//! Oracle: `matchimport/MatchImportService.kt`.
-//!
 //! **This writes nothing.** It scrapes, resolves names to ids, and hands back a
 //! [`MatchImportPreview`]; the admin reviews it in the match wizard and saves
 //! through the existing record endpoint. That keeps `match_policy`,
@@ -44,8 +42,7 @@ use super::{
 /// hung scraper plus ordinary traffic, would starve the pool for everyone else.
 /// The scrape happens first and the resolution reads after are independent
 /// lookups with no need of one snapshot, so nothing here wants a transaction at
-/// all. PORTING.md §7 states the same invariant from the other side: the single
-/// outbound HTTP call must not hold a database connection.
+/// all. The single outbound HTTP call must not hold a database connection.
 pub async fn preview(
     state: &AppState,
     tournament_id: i64,
@@ -78,7 +75,7 @@ pub async fn preview(
         // Collected as the resolution runs, then handed back in order: one hero
         // missing from the catalogue can appear as a pick, a game participant
         // and a ban, and the admin needs to be told about it once. `IndexSet`
-        // is Kotlin's `LinkedHashSet` (PORTING.md §4.2).
+        // de-duplicates while preserving insertion order.
         unresolved: IndexSet::new(),
     };
 
@@ -186,7 +183,7 @@ fn collect_bans(
         });
     }
 
-    // Kotlin's `distinctBy { it.heroId ?: it.heroName }`: the id when it
+    // De-duplicated by (resolved id, source spelling): the id when it
     // resolved, the source's spelling when it did not.
     let mut seen: IndexMap<(Option<i64>, Option<String>), ImportedBan> = IndexMap::new();
     for ban in bans {
@@ -226,9 +223,9 @@ fn distinct(ids: Vec<i64>) -> Vec<i64> {
 
 /// The two name lookups plus the running list of what they could not resolve.
 ///
-/// A struct rather than two closures because the Kotlin's `resolveHero` /
-/// `resolveMap` both *mutate* the shared `unresolved` set as they go, which two
-/// borrowing closures cannot do.
+/// A struct rather than two closures: hero and map resolution both *mutate*
+/// the shared `unresolved` set as they go, which two borrowing closures
+/// cannot do.
 struct Resolution {
     heroes: NameResolver,
     maps: NameResolver,

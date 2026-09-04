@@ -1,11 +1,6 @@
 //! The hero pool that feeds the Roster Builder grid, and its admin half:
 //! hero identities and per-tournament pricing.
 //!
-//! Oracle: `api/HeroController.kt`, `api/AdminHeroController.kt`, the hero
-//! block of `api/AdminDtos.kt`, `hero/HeroQueryRepository.kt`, `hero/Hero.kt`,
-//! `hero/HeroRepository.kt`, `hero/HeroPoolAdminRepository.kt` and
-//! `hero/AdminHeroService.kt`.
-//!
 //! The public route lives *under* the tournament because cost is
 //! tournament-scoped: a bare `/api/heroes` could not answer the Roster
 //! Builder's actual question, which is "what can I pick here, and what does
@@ -92,7 +87,7 @@ impl From<Hero> for HeroAdminDto {
     }
 }
 
-/// `@NotBlank(message = "name is required")`.
+/// `name` must be present and non-blank.
 ///
 /// A `custom` rule rather than garde's built-in, because the message is what
 /// the client renders and garde 0.23 cannot override a built-in rule's
@@ -107,14 +102,12 @@ pub struct CreateHeroRequest {
     pub image_url: Option<String>,
 }
 
-/// `typealias UpdateHeroRequest = CreateHeroRequest` -- same body, same rule.
+/// Same body, same rule as [`CreateHeroRequest`].
 pub type UpdateHeroRequest = CreateHeroRequest;
 
-/// `@Positive(message = "cost must be positive")`, with no `@NotNull` beside
-/// it in the Kotlin -- the same shape as `capacity`/`rosterSize`/`creditGrant`
-/// in `AdminTournamentController` (PORTING.md deviation (a)), and fixed the
-/// same way: an absent `cost` is a 400 naming the field rather than a 500 from
-/// the controller's `requireNotNull`.
+/// `cost` must be present and positive -- the same shape as
+/// `capacity`/`rosterSize`/`creditGrant` in `tournament::mod`, so an absent
+/// `cost` is a 400 naming the field rather than a 500 from an `.expect()`.
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct SetHeroCostRequest {
@@ -122,9 +115,8 @@ pub struct SetHeroCostRequest {
     pub cost: Option<i32>,
 }
 
-/// One entry of a batch pool add: `@NotNull(message = "heroId is required")`
-/// plus the same `@Positive`-without-`@NotNull` `cost` shape as
-/// [`SetHeroCostRequest`].
+/// One entry of a batch pool add: `heroId` must be present, plus the same
+/// present-and-positive `cost` shape as [`SetHeroCostRequest`].
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct HeroPoolEntryRequest {
@@ -134,10 +126,9 @@ pub struct HeroPoolEntryRequest {
     pub cost: Option<i32>,
 }
 
-/// `@Size(min = 1, max = 128, message = "heroes must contain between 1 and
-/// 128 entries")`. Bean Validation's `@Size` ignores a null and there is no
-/// `@NotNull` beside it, so an omitted `heroes` is valid and adds nothing --
-/// the controller reads it as `request.heroes.orEmpty()`.
+/// `heroes` must contain between 1 and 128 entries when present -- an
+/// omitted `heroes` is deliberately valid and adds nothing; only a *present
+/// but empty or oversized* array is rejected, by [`batch_size`] below.
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct AddHeroesToPoolRequest {
@@ -145,7 +136,7 @@ pub struct AddHeroesToPoolRequest {
     pub heroes: Option<Vec<HeroPoolEntryRequest>>,
 }
 
-/// `@NotNull`.
+/// Fails only on absent.
 fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Result {
     move |value, _| match value {
         Some(_) => Ok(()),
@@ -153,7 +144,7 @@ fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Resu
     }
 }
 
-/// `@NotBlank`: fails on absent *and* on whitespace-only.
+/// Fails on absent *and* on whitespace-only.
 fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),
@@ -161,8 +152,9 @@ fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> gard
     }
 }
 
-/// `@NotNull` and `@Positive` on one field. `@Positive` ignores a null, so
-/// exactly one of the two can fail -- see [`SetHeroCostRequest`]'s doc.
+/// Present-and-positive on one field: absence and non-positivity are checked
+/// separately, so exactly one of the two can fail -- see [`SetHeroCostRequest`]'s
+/// doc.
 fn required_positive(
     absent: &'static str,
     non_positive: &'static str,
@@ -174,7 +166,7 @@ fn required_positive(
     }
 }
 
-/// `@Size(min = 1, max = 128)`, ignoring a null as `@Size` does.
+/// Rejects an empty or oversized batch; passes an absent one through.
 fn batch_size(value: &Option<Vec<HeroPoolEntryRequest>>, _: &()) -> garde::Result {
     match value {
         Some(entries) if entries.is_empty() || entries.len() > 128 => Err(garde::Error::new(
@@ -206,8 +198,8 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-/// `@RequestParam(required = false) search` and
-/// `@RequestParam(required = false, defaultValue = "COST") sort`.
+/// `search` and `sort` are both optional query parameters; `sort` defaults to
+/// cost order (see `HeroSort`'s `Default`).
 #[derive(Debug, Default, Deserialize)]
 struct ListQuery {
     search: Option<String>,
@@ -231,10 +223,10 @@ async fn list(
     Ok(Json(heroes.into_iter().map(HeroDto::from).collect()))
 }
 
-// `hasRole('ADMIN')` is enforced by `auth::authorize` for every `/api/admin/**`
-// path -- the `@PreAuthorize` on the controller and the URL matcher in one
-// place. Each handler still takes the `CurrentManager` its Kotlin counterpart
-// declares, so the identity a route needs stays visible at the route.
+// `Access::Admin` is enforced by `auth::authorize` for every `/api/admin/**`
+// path -- the admission check and the URL matcher live in one place. Each
+// handler still takes `CurrentManager` for the identity, so who a route
+// needs stays visible at the route.
 
 async fn admin_list(
     State(state): State<AppState>,

@@ -1,7 +1,5 @@
 //! The hero pool of one tournament.
 //!
-//! Oracle: `hero/HeroQueryRepository.kt`.
-//!
 //! Everything here is keyed by `tournament_id` rather than by a season, because
 //! cost is per tournament: the same hero is a bargain at one event and a
 //! premium pick at the next. A hero absent from `tournament_heroes` is simply not
@@ -13,16 +11,15 @@ use sqlx::PgExecutor;
 
 /// Sort options for the Roster Builder grid.
 ///
-/// The Kotlin holds the ORDER BY fragments on the enum constants and splices
-/// the chosen one into the SQL, because a sort key cannot be parameterised. The
-/// whitelist survives as the enum; the splice does not, because `query_as!`
-/// checks a *literal* against the schema. So each arm carries its own checked
-/// query instead — strictly stronger than the Kotlin, where a fragment was only
-/// ever proofread.
+/// A sort key cannot be parameterised, so the ORDER BY fragment has to be
+/// chosen in Rust and spliced into the SQL. `query_as!` checks a *literal*
+/// against the schema, so splicing a fragment string in would lose that check
+/// -- each arm below carries its own checked query instead, which is
+/// stronger than a hand-proofread fragment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum HeroSort {
-    /// `@RequestParam(defaultValue = "COST")`.
+    /// The default when the query parameter is absent.
     #[default]
     Cost,
     Name,
@@ -139,7 +136,7 @@ pub async fn find_roster_heroes(
         // `heroes` is the preserved side, so `h.id`/`h.name` are as non-null
         // here as anywhere, but sqlx marks every column of a query carrying a
         // LEFT JOIN as nullable. `cost` genuinely can be null, and `coalesce`
-        // is what the Kotlin used to make it 0.
+        // is what makes it 0.
         r#"select h.id as "id!", h.name as "name!", h.image_url,
                   coalesce(th.cost, 0) as "cost!"
            from heroes h
@@ -154,13 +151,13 @@ pub async fn find_roster_heroes(
 }
 
 // ---------------------------------------------------------------------------
-// The catalogue -- oracle: `hero/HeroRepository.kt` (Spring Data JDBC's
-// `CrudRepository` derived queries), used by the admin half.
+// The catalogue, used by the admin half.
 // ---------------------------------------------------------------------------
 
-/// `findAll()`, ordered by id for the same reason `map::query::find_all` is:
-/// Spring Data JDBC's own order is merely insertion order until the first
-/// `UPDATE`, and this makes that the guarantee rather than the observation.
+/// Every hero, ordered by id for the same reason `map::query::find_all` is:
+/// an unordered `select` only happens to come back in insertion order until a
+/// row is updated, and an explicit `order by` makes that a guarantee rather
+/// than an observation.
 pub async fn find_all(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<super::Hero>> {
     let rows = sqlx::query!("select id, name, image_url from heroes order by id")
         .fetch_all(db)
@@ -249,9 +246,8 @@ mod tests {
         assert_eq!(escape_like(r"a\b"), r"a\\b");
     }
 
-    /// `@RequestParam(required = false, defaultValue = "COST")`.
     #[test]
-    fn sort_defaults_to_cost_and_reads_the_kotlin_constant_names() {
+    fn sort_defaults_to_cost_and_reads_the_wire_constant_names() {
         assert_eq!(HeroSort::default(), HeroSort::Cost);
         assert_eq!(
             serde_json::from_str::<HeroSort>(r#""NAME""#).unwrap(),

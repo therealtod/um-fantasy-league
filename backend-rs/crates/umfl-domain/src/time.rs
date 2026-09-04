@@ -1,16 +1,14 @@
-//! Wire-format timestamps, byte-compatible with Java's `Instant.toString()`.
-//!
-//! The Kotlin backend serializes every `Instant` through Jackson with
-//! `WRITE_DATES_AS_TIMESTAMPS` disabled, which calls `Instant.toString()` --
-//! i.e. `DateTimeFormatter.ISO_INSTANT`. That format has one property no
-//! chrono helper reproduces: **the fractional part is emitted in groups of
-//! three digits, using the fewest groups that represent the value exactly** --
-//! 0, 3, 6 or 9 digits -- and the zone is always the literal `Z`.
+//! Wire-format timestamps: the API's stable contract for `playedAt`,
+//! `registeredAt` and `lockedAt`, byte-compatible with `java.time.Instant`'s
+//! `toString()` (i.e. `DateTimeFormatter.ISO_INSTANT`). That format has one
+//! property no chrono helper reproduces: **the fractional part is emitted in
+//! groups of three digits, using the fewest groups that represent the value
+//! exactly** -- 0, 3, 6 or 9 digits -- and the zone is always the literal `Z`.
 //!
 //! `chrono`'s `to_rfc3339()` emits `+00:00` instead of `Z`; its
 //! `to_rfc3339_opts(SecondsFormat::Millis, true)` emits a *fixed* precision and
-//! so writes `.000` where Java writes nothing. Either would change the wire
-//! contract on every `playedAt`, `registeredAt` and `lockedAt`.
+//! so writes `.000` where this format writes nothing. Either would change the
+//! wire contract.
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Deserializer, Serializer};

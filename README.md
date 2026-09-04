@@ -17,39 +17,42 @@ neon accents reserved for live data.
 
 | Layer | Choice |
 |---|---|
-| Language / build | Kotlin 2.3, JVM 21, Gradle Kotlin DSL (wrapper 8.14.3) |
-| Backend | Spring Boot 4.1 — web, validation, actuator |
-| Persistence | PostgreSQL 17 + Spring Data JDBC + Flyway |
+| Language / build | Rust (edition 2024), Cargo workspace (`backend-rs/`: `umfl-domain` + `umfl-server`) |
+| Backend | axum + tokio |
+| Persistence | PostgreSQL 17 + `sqlx` (compile-time-checked queries) + Flyway (migration only, not embedded) |
 | Frontend | Vue 3.5 + TypeScript + Vite 7 + Pinia + Vue Router + Tailwind CSS v4 |
-| Tests | JUnit 5 (+ Testcontainers), Vitest |
+| Tests | `cargo test` (+ Testcontainers), Vitest |
 
-### Why Spring Data JDBC rather than JPA/Hibernate
+### Why `sqlx` rather than an ORM
 
-- Kotlin `data class` entities work natively — no `no-arg`/`all-open` compiler plugins, no open
-  classes, no mutable-field compromises.
 - No lazy-loading proxies or N+1 surprises on the aggregation-heavy Standings screen. Every query
-  is explicit.
+  is explicit, hand-written SQL.
 - Aggregate boundaries fit the domain: `TournamentEntry` genuinely owns its `EntrySlot`s and is
-  saved as one unit. Almost nothing else in the schema is written by the app at all.
-- `JdbcClient` is available for hand-written analytics SQL (leaderboards, ticker feeds) without
-  fighting an ORM.
+  saved as one unit, in one transaction. Almost nothing else in the schema is written by the app
+  at all.
+- `sqlx::query!`/`query_as!` are checked against a live schema at compile time (and against
+  committed `.sqlx/` metadata in CI and the image build), so a typo'd column name is a build
+  failure, not a runtime one — without needing an ORM's mapping layer in between.
+- There is no distinction between "can be mapped as an aggregate" and "must be hand-written SQL"
+  the way an ORM forces: every write is hand-written, and it composes freely with the read/write
+  split below.
 
-The codebase leans into that split: **Spring Data JDBC repositories for writes and aggregates,
-`JdbcClient` projections for reads** (`HeroQueryRepository`, `MatchResultQuery`,
-`ScoringRuleSetQuery`, `StandingsQuery`).
+The codebase leans into that split: **a `writer.rs` per feature for writes and aggregates, a
+`query.rs` for reads** (`hero::query`, `r#match::query`, `scoring::query`, `standings::query`).
 
 ---
 
 ## Running it
 
-Prerequisites: JDK 21, Node 20+, Docker.
+Prerequisites: Rust (stable — `backend-rs/rust-toolchain.toml` pins the exact version), Node 20+,
+Docker.
 
 ```bash
-# 1. Database
-docker compose up -d db
+# 1. Database + migrations (one-shot: applies db/migration + db/seed, then exits)
+docker compose up -d db flyway
 
-# 2. Backend — migrates and seeds on first start
-./gradlew :backend:bootRun --args='--spring.profiles.active=dev'
+# 2. Backend
+cd backend-rs && SPRING_PROFILES_ACTIVE=dev cargo run -p umfl-server
 
 # 3. Frontend (separate shell)
 cd frontend && npm install && npm run dev
@@ -64,20 +67,22 @@ Then open <http://localhost:5173>. The Vite dev server proxies `/api` to `localh
 > files. There is no production data to preserve — drop the volume and start over:
 >
 > ```bash
-> docker compose down -v && docker compose up -d db
+> docker compose down -v && docker compose up -d db flyway
 > ```
 
-`V1__core_schema.sql` is schema only — no data at all. `db/` lives at the repository root, not under
-`backend/src/main/resources`, since `backend-rs/` (the Rust port) migrates the same directory — Flyway
-reads it off the filesystem rather than the classpath. What follows the schema splits by kind rather
-than by environment. `db/migration/V2__reference_data.sql` holds the canonical catalogue: all 74
-heroes and 35 boards Unmatched has printed. That is not mock data — it is a fact about the game, and
-it is what an admin prices into a tournament pool — so it migrates in every profile, production
-included. The three demo tournaments, the seeded managers, and the recorded Summer of Legends result
-set are the part that *is* mock, and they live in `db/seed/V3__demo_fixtures.sql`, a second Flyway
-location that only the `dev` and `test` profiles add to `spring.flyway.locations`. A plain start with
-no profile, or `--spring.profiles.active=prod`, therefore boots with the full hero and board catalogue
-and a league nobody has played yet — nothing to delete before pointing this at a real tournament.
+`V1__core_schema.sql` is schema only — no data at all. `db/` lives at the repository root rather
+than under any one backend's own tree, since it is migrated by a standalone Flyway CLI image
+(`db/Dockerfile`) rather than embedded in the server process — the server itself carries no
+migration runner. What follows the schema splits by kind rather than by environment.
+`db/migration/V2__reference_data.sql` holds the canonical catalogue: all 74 heroes and 35 boards
+Unmatched has printed. That is not mock data — it is a fact about the game, and it is what an admin
+prices into a tournament pool — so every Flyway invocation applies it, production included. The
+three demo tournaments, the seeded managers, and the recorded Summer of Legends result set are the
+part that *is* mock, and they live in `db/seed/V3__demo_fixtures.sql`, a second Flyway location that
+only a dev-shaped invocation adds (`docker-compose.yml`'s `flyway` service; not
+`deploy/docker-compose.prod.yml`'s). A `migration`-only run — what production uses — therefore boots
+with the full hero and board catalogue and a league nobody has played yet — nothing to delete before
+pointing this at a real tournament.
 
 For the local workflow, set `VITE_DEV_MANAGER_ID=1` in `frontend/.env.local` (the supplied example
 does this). Vite development builds then skip Supabase Auth and send that manager ID to the dev
@@ -102,11 +107,12 @@ Discord in the Supabase dashboard, backed by a Discord Developer Portal applicat
 |---|---|
 | `DB_URL` | Supabase Postgres connection string — use the **direct connection** or **Session pooler** (not the Transaction-mode pooler on port 6543, which breaks JDBC prepared-statement caching); append `?sslmode=require`. Database name is `postgres`, not `umfl`. |
 | `DB_USER` / `DB_PASSWORD` | Supabase Postgres credentials |
-| `SUPABASE_JWKS_URI` | `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json` — only if your project uses modern JWKS signing keys (Project Settings → API → JWT Keys). Legacy HS256-secret projects need a `SUPABASE_JWT_SECRET`-driven `JwtDecoder` bean instead; see `SecurityConfig.kt`. |
+| `SUPABASE_JWKS_URI` | `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json` — only if your project uses modern JWKS signing keys (Project Settings → API → JWT Keys). |
 
 ```bash
-DB_URL=... DB_USER=... DB_PASSWORD=... SUPABASE_JWKS_URI=... \
-  ./gradlew :backend:bootRun --args='--spring.profiles.active=prod'
+cd backend-rs
+SPRING_PROFILES_ACTIVE=prod DB_URL=... DB_USER=... DB_PASSWORD=... SUPABASE_JWKS_URI=... \
+  cargo run -p umfl-server
 ```
 
 The frontend needs `frontend/.env.local` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (see
@@ -117,12 +123,10 @@ the Vite proxy points at.
 
 ```bash
 # Pure domain logic — no Docker required
-./gradlew :backend:test --tests '*RosterPolicyTest' \
-                        --tests '*ScoringEngineTest' \
-                        --tests '*MatchMetricsTest'
+cargo test -p umfl-domain
 
 # Everything, including Testcontainers integration tests (needs a running Docker daemon)
-./gradlew :backend:test
+cd backend-rs && cargo test --workspace
 
 # Frontend
 cd frontend && npm test && npm run type-check
@@ -206,7 +210,7 @@ result. Storing it as a participant forces `health_remaining = 0`, which is indi
 from "played and was defeated" and silently poisons every `HEALTH_REMAINING` sum and `SHUTOUT` check.
 
 The ban hangs off the match, not off a game: a hero is struck once for the whole series, so it must
-not be multiplied by the number of games played (`MatchResult.heroContexts` yields exactly one
+not be multiplied by the number of games played (`MatchResult::hero_contexts` yields exactly one
 `Banned` context per banned hero regardless of series length).
 
 Bans are per match, so they never touch `entry_slots`: a hero banned in one round can be played in
@@ -222,7 +226,7 @@ of a pick was whatever `match_game_participants` happened to contain.
 
 Separate from `hero_bans` rather than one draft table with a kind column, because the two carry
 different data: a pick has an owning `side` and no category, a ban has a category and no side — a
-pre-ban belongs to neither side. A hero cannot be both, which `MatchResultPolicy` enforces as
+pre-ban belongs to neither side. A hero cannot be both, which `umfl_domain::match_policy` enforces as
 `BANNED_HERO_DRAFTED`, and a side cannot field a hero it never drafted, which it enforces as
 `PLAYED_HERO_NOT_DRAFTED` — that second rule is what makes the draft a complete record rather than a
 list of afterthoughts.
@@ -235,24 +239,25 @@ by hero instead, so a hero drafted by both sides still scores once.
 
 - `game_maps` and `tournament_matches`, because MAP and MATCH are reserved words in the SQL standard
   and quoting them at every call site would be noise.
-- Tables the app loads or writes as aggregates carry a surrogate `bigserial` id, because Spring Data
-  JDBC cannot map a composite primary key. The pure link tables (`tournament_heroes`, `tournament_maps`,
-  `entry_slots`, `hero_bans`, `match_game_participants`) are read through `JdbcClient` or mapped as
-  `@MappedCollection` children, so they keep their natural composite key.
+- Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a unique
+  natural key. The pure link tables (`tournament_heroes`, `tournament_maps`, `entry_slots`,
+  `hero_bans`, `match_game_participants`) are read and written through hand-written SQL, so they
+  keep their natural composite key with no surrogate id at all.
 - A match is a **series**: the board moved from the match to `match_games.map_id` (not null — each
   game names its board), constrained by a composite FK onto `tournament_maps`, so a game can only be
   played on a board that tournament uses. `match_games` denormalizes `tournament_id` to carry that
   FK, and a second composite FK pins the copy to its parent match's tournament.
-- Exactly one side of a game carries `is_winner`. A partial unique index stops two; `MatchResultPolicy`
-  stops zero. **There is no draw** — a losing hero always finishes on 0 or less health, while a winner
-  may finish on any value, including a negative one.
+- Exactly one side of a game carries `is_winner`. A partial unique index stops two;
+  `umfl_domain::match_policy` stops zero. **There is no draw** — a losing hero always finishes on 0
+  or less health, while a winner may finish on any value, including a negative one.
 - Matches are seeded in chronological order, so `id` order and `played_at` order agree. That is what
   lets the ticker poll on `id > :sinceMatchId` — `played_at` is **not** unique, because parallel
   tables in a round share a start time.
 
-### Roster rules (`RosterPolicy`)
+### Roster rules (`roster_policy`)
 
-Pure functions, no Spring, no persistence — see `RosterPolicyTest`.
+Pure functions in `umfl-domain`, no `sqlx`, no I/O — see `roster_policy.rs`'s own `#[cfg(test)]`
+module.
 
 | Rule | Draft | Lock |
 |---|---|---|
@@ -263,8 +268,8 @@ Pure functions, no Spring, no persistence — see `RosterPolicyTest`.
 | Exactly `rosterSize` picks (`INCOMPLETE_ROSTER`) | — | ✅ |
 | Within the entry's credit grant (`BUDGET_EXCEEDED`) | — | ✅ |
 
-`UNKNOWN_HERO` is raised earlier, in `TournamentService.resolvePicks`: a pick is priced by joining
-`tournament_heroes`, so a hero outside this tournament's pool never reaches the policy at all.
+`UNKNOWN_HERO` is raised earlier, in `tournament::service::resolve_picks`: a pick is priced by
+joining `tournament_heroes`, so a hero outside this tournament's pool never reaches the policy at all.
 
 Going over budget is allowed **while drafting** — a draft is a scratchpad, and the builder shows a
 meter running past 100% rather than refusing the edit. The budget is enforced when locking, against
@@ -285,8 +290,7 @@ retunes the league with an `UPDATE`, not a redeploy.
 
 `scoring_coefficients.metric` is free-form text — not an enum, not a foreign key — so adding a
 weighted metric needs no migration. The `CHECK` on it is a typo guard (`SCREAMING_SNAKE` only), not a
-whitelist. `com.umfl.scoring.MatchMetrics` is the registry that prices the keys this build
-implements:
+whitelist. `umfl_domain::match_metrics` is the registry that prices the keys this build implements:
 
 | Metric | Measures |
 |---|---|
@@ -324,7 +328,7 @@ which are struck once for the whole match, because the draft happens once before
 
 `APPEARANCE` is deliberately not "the hero played". A match's draft is recorded in full: `hero_bans`
 holds the heroes struck out of it and `match_hero_picks` holds the heroes each side took, and a
-recorded draft has to cover every hero that side then fielded (`MatchResultPolicy`'s
+recorded draft has to cover every hero that side then fielded (`umfl_domain::match_policy`'s
 `PLAYED_HERO_NOT_DRAFTED`). So a hero drafted and left on the bench through a 2-0 sweep still scores
 its appearance, and a hero that plays all three games of a Bo3 scores exactly one.
 
@@ -338,9 +342,9 @@ invalidate it: the moment an admin retunes a weight, every persisted total is si
 is also no write path to maintain one — materialising points would push the formula into the seed
 SQL, duplicating it.
 
-The cost is negligible. `StandingsService` prices each `(hero, match)` pair exactly once and then
-folds it into every roster holding that hero, which is cheaper than the equivalent SQL join's
-fan-out, and at tournament scale (~50 matches) the whole fold is microseconds.
+The cost is negligible. `umfl_domain::standings::board` prices each `(hero, match)` pair exactly once
+and then folds it into every roster holding that hero, which is cheaper than the equivalent SQL
+join's fan-out, and at tournament scale (~50 matches) the whole fold is microseconds.
 
 Consequences worth knowing:
 
@@ -382,28 +386,28 @@ and everything under `/entries` require a verified token.
 
 ## Admin API
 
-`/api/admin/**`, gated by `hasRole("ADMIN")` (backed by `managers.is_admin`, our own data — never an
+`/api/admin/**`, gated by `Access::Admin` (backed by `managers.is_admin`, our own data — never an
 identity-provider claim). This is the write path for everything that used to be seed-only: tournaments,
 heroes, maps, a tournament's hero pool and pricing, its board pool, scoring rule sets and coefficients,
 and match results (create/update/delete). `/admin` in the frontend is the UI over it.
 
-`MatchResultPolicy` validates a match submission before save (each game's map in the tournament's
-pool, no duplicate or unknown hero, dense 1..N game numbers, two sides per game, and exactly one
-winner per game — zero is as invalid as two), returning `422` with every violation on failure, the
-same shape as a roster rule breach. Activating a scoring rule set deactivates any active sibling for
-that tournament in the same transaction — only one rule set may be active per tournament. Submitting
-an unimplemented metric (e.g. `CROWD_FAVOURITE`) is a non-blocking warning on the response, not a
-rejection.
+`umfl_domain::match_policy::validate` validates a match submission before save (each game's map in
+the tournament's pool, no duplicate or unknown hero, dense 1..N game numbers, two sides per game, and
+exactly one winner per game — zero is as invalid as two), returning `422` with every violation on
+failure, the same shape as a roster rule breach. Activating a scoring rule set deactivates any active
+sibling for that tournament in the same transaction — only one rule set may be active per
+tournament. Submitting an unimplemented metric (e.g. `CROWD_FAVOURITE`) is a non-blocking warning on
+the response, not a rejection.
 
 ---
 
 ## Authentication
 
-`CurrentManagerProvider` is the seam, with two implementations selected by Spring profile:
+`auth::authenticate` resolves the caller, with two credential paths selected by `SPRING_PROFILES_ACTIVE`:
 
-- **`dev` / `test` / no profile** — `DevManagerAuthenticationFilter` resolves an `X-Manager-Id`
-  header into the manager, and `DevManagerProvider` reads it back off the security context. NOT
-  SUITABLE FOR ANY DEPLOYED ENVIRONMENT.
+- **`dev` / `test` / no profile** — `auth::dev::resolve` resolves an `X-Manager-Id` header into the
+  manager, and puts it in the request extensions for `CurrentManager`/`MaybeManager` to read back.
+  NOT SUITABLE FOR ANY DEPLOYED ENVIRONMENT.
 
   A request with no header is simply anonymous — the same thing a request with no bearer token is
   under `prod` — so public routes serve it without touching the database and gated routes answer
@@ -420,15 +424,14 @@ rejection.
   curl -is localhost:8080/api/tournaments | head -1 # 200: public either way
   ```
 
-- **`prod`** — `SupabaseManagerProvider` verifies a Supabase-issued JWT (Spring Security's OAuth2
-  resource server) and resolves the manager by the token's `sub` claim against
-  `managers.auth_user_id`, just-in-time provisioning a new manager on first login.
-  Sign-in happens via Supabase Auth's Discord OAuth provider from the frontend
+- **`prod`** — `auth::supabase::resolve` verifies a Supabase-issued JWT and resolves the manager by
+  the token's `sub` claim against `managers.auth_user_id`, just-in-time provisioning a new manager
+  on first login. Sign-in happens via Supabase Auth's Discord OAuth provider from the frontend
   (`supabase.auth.signInWithOAuth({ provider: 'discord' })`) — Discord is just the upstream identity
   provider; the backend only ever verifies Supabase's own signed token.
 
-Controllers depend only on the `CurrentManagerProvider` interface, so the two implementations are a
-drop-in swap per profile — no other code changed.
+`auth::authenticate` is the one seam both paths go through, so which of the two runs is a single
+`if state.config.is_prod()` branch — no other code changes per profile.
 
 ---
 

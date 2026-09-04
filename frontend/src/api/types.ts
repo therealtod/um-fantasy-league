@@ -1,10 +1,11 @@
 /**
- * Mirrors the DTOs in `com.umfl.api`.
+ * Mirrors the DTOs defined across the backend's feature modules
+ * (`backend-rs/crates/umfl-server/src/*/mod.rs`).
  *
- * The backend runs Jackson with `default-property-inclusion: non_null`, so a
- * nullable field is *absent* from the payload rather than serialised as `null`.
- * Those are typed optional (`endDate?: string | null`) and every template that
- * shows one needs a `?? '—'` fallback.
+ * The backend serializes nullable fields with `skip_serializing_if =
+ * "Option::is_none"`, so a nullable field is *absent* from the payload rather
+ * than serialised as `null`. Those are typed optional (`endDate?: string |
+ * null`) and every template that shows one needs a `?? '—'` fallback.
  */
 
 export type TournamentStatus = 'SCHEDULED' | 'REGISTRATION_OPEN' | 'LIVE' | 'COMPLETED'

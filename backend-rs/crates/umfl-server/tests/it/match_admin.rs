@@ -1,9 +1,8 @@
 //! Recorded match results, through
 //! `/api/admin/tournaments/{id}/matches`.
 //!
-//! Oracle: `match/AdminMatchServiceIntegrationTest.kt`, driven over HTTP rather
-//! than against the service, so the DTO shape and the status codes are checked
-//! by the same test that checks the rule.
+//! Driven over HTTP rather than against the service, so the DTO shape and
+//! the status codes are checked by the same test that checks the rule.
 //!
 //! Everything here writes to **Winter of Champions**, which the seed
 //! deliberately leaves with zero recorded matches -- *Summer of Legends* is
@@ -166,11 +165,10 @@ async fn records_a_match_result_against_a_tournament_with_none_yet() {
     assert_eq!(stored.len(), 1);
 }
 
-/// PORTING.md deviation (b): `GameResult.winner` is a computed Kotlin property
-/// Jackson emits as an undeclared field, reproduced on the DTO so the port does
-/// not quietly change the wire. Nothing in the frontend reads it.
+/// `winner` is derived on the DTO rather than the domain type; nothing in the
+/// frontend reads it, but dropping it would still be a wire change.
 #[tokio::test]
-async fn a_game_carries_the_undeclared_winner_field_jackson_emitted() {
+async fn a_game_carries_the_derived_winner_field() {
     let app = TestApp::spawn().await;
     let winter = app.tournament_id("Winter of Champions").await;
 
@@ -1137,8 +1135,8 @@ async fn deleting_an_unknown_match_is_a_404() {
 // Request validation, as 400s
 // ---------------------------------------------------------------------------
 
-/// Every message here is the Hibernate one the client renders verbatim, and the
-/// field key is the path Spring's `FieldError.getField()` produced.
+/// Every message here is the fixed sentence the client renders verbatim, and
+/// the field key is the `a.b[0].c`-shaped path garde produces.
 #[tokio::test]
 async fn a_broken_request_body_is_a_400_naming_every_bad_field() {
     let app = TestApp::spawn().await;
@@ -1166,8 +1164,8 @@ async fn a_broken_request_body_is_a_400_naming_every_bad_field() {
         "exactly two participants are required"
     );
     // `games` itself is fine -- one game is a legal series -- so only the
-    // broken fields *inside* it are reported, each under the path Spring's
-    // `FieldError.getField()` produced.
+    // broken fields *inside* it are reported, each under its `a.b[0].c`-shaped
+    // path.
     assert!(fields.get("games").is_none(), "{fields}");
     assert_eq!(fields["games[0].mapId"], "mapId is required");
     assert_eq!(

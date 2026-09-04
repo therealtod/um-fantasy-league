@@ -19,9 +19,8 @@ async fn health_is_up_against_a_migrated_database() {
 
     assert_eq!(StatusCode::OK, response.status);
     assert_eq!(Some("application/json"), response.content_type.as_deref());
-    // `groups` is Boot's default group registry, which `HealthEndpoint`
-    // reports alongside the status. Verified against the running Kotlin
-    // backend: `{"groups":["liveness","readiness"],"status":"UP"}`.
+    // `groups` names the default health-check groups, reported alongside the
+    // status: `{"groups":["liveness","readiness"],"status":"UP"}`.
     assert_eq!(
         serde_json::json!({ "groups": ["liveness", "readiness"], "status": "UP" }),
         response.json()

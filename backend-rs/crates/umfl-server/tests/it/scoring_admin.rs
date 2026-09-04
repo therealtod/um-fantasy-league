@@ -1,8 +1,7 @@
 //! Scoring rule sets, through `/api/admin/tournaments/{id}/scoring-rule-sets`.
 //!
-//! Oracle: `scoring/AdminScoringServiceIntegrationTest.kt`, driven over HTTP
-//! rather than against the service, so the DTO shape and the status codes are
-//! checked by the same test that checks the rule.
+//! Driven over HTTP rather than against the service, so the DTO shape and
+//! the status codes are checked by the same test that checks the rule.
 //!
 //! The seed's numbers are asserted exactly, as `AGENTS.md` requires: Winter of
 //! Champions ships with one active rule set, *Season 2026 Standard*, whose
@@ -34,8 +33,7 @@ async fn create_rule_set(app: &TestApp, tournament_id: i64, body: &Value) -> Val
     response.json()
 }
 
-/// The active rule set's name, straight out of the table -- the assertion
-/// `ScoringRuleSetQuery.activeRules(...).name` makes in the Kotlin.
+/// The active rule set's name, straight out of the table.
 async fn active_rule_set_name(app: &TestApp, tournament_id: i64) -> String {
     sqlx::query_scalar!(
         "select name from scoring_rule_sets where tournament_id = $1 and is_active",
@@ -583,8 +581,8 @@ async fn a_rule_set_from_another_tournament_is_not_reachable_through_this_one() 
     );
 }
 
-/// `@NotBlank` and `@Size(min = 1)`, with the messages the client renders and
-/// the field paths `handleMethodArgumentNotValid` produced.
+/// Required-and-non-blank, and at-least-one-entry, with the messages the
+/// client renders and the `a.b[0].c`-shaped field paths garde produces.
 #[tokio::test]
 async fn a_broken_request_body_is_a_400_naming_every_bad_field() {
     let app = TestApp::spawn().await;
@@ -615,11 +613,10 @@ async fn a_broken_request_body_is_a_400_naming_every_bad_field() {
 
 /// A coefficient that is present but not a number at all -- neither absent
 /// nor an explicit `null` -- is not something `garde` should ever see: it
-/// never becomes "coefficient is required". Jackson can't parse a `BigDecimal`
-/// out of `"abc"` either, and answers the same way: a 400 naming the
-/// malformed-body problem type, not the validation one, with the same
-/// `"Failed to read request"` sentence `AppJson` copies from
-/// `HttpMessageNotReadableException`.
+/// never becomes "coefficient is required". It cannot be parsed as a decimal
+/// out of `"abc"` either, and gets a 400 naming the malformed-body problem
+/// type, not the validation one, with the fixed `"Failed to read request"`
+/// sentence `AppJson` uses.
 #[tokio::test]
 async fn a_non_numeric_coefficient_token_is_a_malformed_body_not_a_validation_failure() {
     let app = TestApp::spawn().await;
@@ -664,8 +661,8 @@ async fn an_empty_coefficient_list_is_rejected_but_an_absent_one_is_not() {
         "at least one coefficient is required"
     );
 
-    // `@Size` ignores a null and there is no `@NotNull` beside it, so an
-    // omitted list is legal and creates a rule set with no coefficients.
+    // An omitted list is deliberately legal and creates a rule set with no
+    // coefficients.
     let absent = app
         .send_as(
             "POST",

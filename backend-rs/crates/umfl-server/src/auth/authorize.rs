@@ -1,19 +1,15 @@
 //! Which routes need an identity. **The only place that decides it.**
 //!
-//! Oracle: the private `apiAuthorizationRules` in `config/SecurityConfig.kt`,
-//! passed to `authorizeHttpRequests` by *both* chains.
-//!
-//! `AGENTS.md` is emphatic that the two chains differ only in how a credential
-//! is verified and never in what it unlocks, and the Kotlin buys that by
-//! sharing one function between them. Here there is one function and no chains
-//! at all, so the property is structural: [`RULES`] is the table, and both
-//! profiles walk it.
+//! `AGENTS.md` is emphatic that the two credential paths (dev, Supabase) differ
+//! only in how a credential is verified and never in what it unlocks: there is
+//! one function and no per-profile chains at all, so the property is
+//! structural -- [`RULES`] is the table, and both profiles walk it.
 //!
 //! # Why one middleware over the raw path, and not per-route layers
 //!
-//! `anyRequest().denyAll()` has to answer for paths matching **no** route. A
-//! per-route layer never runs for those, so axum would 404 where Spring
-//! answers 401 or 403. Verified against the running Kotlin backend:
+//! A path matching **no** route still has to answer with the right status. A
+//! per-route layer never runs for those, so axum would 404 there instead of
+//! answering 401 or 403:
 //!
 //! ```text
 //! GET /nope                       -> 401   (anonymous)
@@ -26,10 +22,10 @@
 //! keeping in mind: a rule that *permits* hands the request on to the router,
 //! which may still 404. Authorization is not routing.
 //!
-//! # Ant patterns
+//! # Path patterns
 //!
-//! Spring's matchers are Ant paths, where `*` matches within one segment and
-//! `**` matches any number of them. `/api/tournaments/*` therefore matches
+//! Patterns are Ant-style: `*` matches within one segment and `**` matches
+//! any number of them. `/api/tournaments/*` therefore matches
 //! `/api/tournaments/1` and **not** `/api/tournaments/1/standings` -- which is
 //! exactly why the deeper public GETs are listed individually below.
 
@@ -58,8 +54,7 @@ pub enum Access {
 /// order here is as load-bearing as it is there -- `/api/admin/**` must precede
 /// `/api/**` or an admin route would only ever require an identity.
 pub struct Rule {
-    /// `None` matches any method, as Spring's method-less `requestMatchers`
-    /// does.
+    /// `None` matches any method.
     pub method: Option<Method>,
     pub pattern: &'static str,
     pub access: Access,
@@ -68,8 +63,7 @@ pub struct Rule {
 /// The table, transcribed rule for rule from `apiAuthorizationRules`.
 ///
 /// Keep it in step with `authorize_rules` in `tests/it/security.rs`, which
-/// asserts it from the outside, exactly as `SecurityConfigTest` and
-/// `DevSecurityConfigTest` do.
+/// asserts it from the outside.
 pub fn rules() -> &'static [Rule] {
     static RULES: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
     RULES.get_or_init(|| {
@@ -148,7 +142,7 @@ pub fn required_access(method: &Method, path: &str) -> Access {
         .map_or(Access::Deny, |rule| rule.access)
 }
 
-/// Spring's `AntPathMatcher`, restricted to what the table actually uses: a
+/// An Ant-style path matcher, restricted to what the table actually uses: a
 /// literal, a single-segment `*`, and a trailing `**`.
 ///
 /// Deliberately not a general Ant implementation. Every pattern above is one of
@@ -181,10 +175,10 @@ fn matches_ant(pattern: &str, path: &str) -> bool {
 ///
 /// **A denial's status depends on who is asking**, which is
 /// `ExceptionTranslationFilter`'s behaviour and not an embellishment: an
-/// anonymous request gets the authentication entry point's 401 ("you have not
-/// said who you are"), an authenticated one gets the access-denied handler's
-/// 403 ("you have, and it is not enough"). Both bodies are rendered without an
-/// `instance` field, because in Kotlin neither ever reaches Spring MVC.
+/// anonymous request gets a 401 ("you have not said who you are"), an
+/// authenticated one gets a 403 ("you have, and it is not enough"). Both
+/// bodies are rendered without an `instance` field: this middleware runs
+/// ahead of the router, so neither ever reaches a handler.
 pub async fn authorize(req: Request, next: Next) -> Response {
     let manager = req.extensions().get::<Manager>();
     let access = required_access(req.method(), req.uri().path());
@@ -259,8 +253,8 @@ mod tests {
     }
 
     /// The `permitAll` rules are GET-only, so a write to the same path falls
-    /// through to `/api/**`. Confirmed against the Kotlin: `POST
-    /// /api/tournaments` and `PUT /api/tournaments/1` both 401 anonymously.
+    /// through to `/api/**`: `POST /api/tournaments` and `PUT
+    /// /api/tournaments/1` both 401 anonymously.
     #[test]
     fn a_write_to_a_publicly_readable_path_still_needs_an_identity() {
         assert_eq!(

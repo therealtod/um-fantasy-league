@@ -10,33 +10,3 @@ indent_size = 4
 
 [*.{js,ts,vue,json,yml,yaml,css,html,md}]
 indent_size = 2
-
-# ktlint (`./gradlew :backend:ktlintCheck`, wired into `check`). The style baseline is
-# `intellij_idea` rather than the stricter `ktlint_official` because the existing Kotlin
-# is already consistently IntelliJ-formatted: the linter is here to *preserve* that style
-# and catch the mechanical slips (unused imports, stray whitespace, import order), not to
-# reformat every file into a different one.
-[*.{kt,kts}]
-ktlint_code_style = intellij_idea
-max_line_length = 120
-# Multi-line signatures with a trailing comma on the last parameter are this codebase's
-# house style throughout. These three rules disagree with each other about it — the
-# signature rules would collapse such a declaration onto one line, and with the
-# trailing-comma rules off the comma is left dangling before the `)`. Turning off all
-# three keeps the existing style intact.
-ktlint_standard_trailing-comma-on-call-site = disabled
-ktlint_standard_trailing-comma-on-declaration-site = disabled
-ktlint_standard_function-signature = disabled
-ktlint_standard_class-signature = disabled
-
-# `src/main` passes everything above as-is. Test sources don't, and shouldn't have to:
-# their fixtures are deliberately compact — one call per row, arguments lined up so a
-# table of cases reads as a table. Exploding those onto one argument per line would cost
-# more readability than the wrapping rules buy. Everything that catches a real mistake
-# still applies here.
-[backend/src/test/**.{kt,kts}]
-ktlint_standard_argument-list-wrapping = disabled
-ktlint_standard_binary-expression-wrapping = disabled
-ktlint_standard_function-literal = disabled
-ktlint_standard_wrapping = disabled
-max_line_length = off

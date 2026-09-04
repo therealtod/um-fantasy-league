@@ -240,12 +240,13 @@ left/right DOM-position fallback if a label ever fails to match either side exac
 
 ## The gap between this JSON and an admin request body
 
-`TournamentMatch` (`backend/src/main/kotlin/com/umfl/match/TournamentMatch.kt`) needs a
-`tournamentId`, a `round` (an `Int`, not this org's named pools), and hero and map **ids** — this
-scraper only ever has names. So the JSON above is source material, not a drop-in request body.
+The backend's match-record request (`backend-rs/crates/umfl-server/src/match/mod.rs`'s
+`RecordMatchRequest`) needs a `tournamentId`, a `round` (an integer, not this org's named pools), and
+hero and map **ids** — this scraper only ever has names. So the JSON above is source material, not a
+drop-in request body.
 
-Closing that gap is what the backend's `com.umfl.matchimport` package does, driven by `server.mjs`:
-it resolves hero and map names against this league's own `heroes`/`game_map` rows, flags anything it
+Closing that gap is what the backend's `matchimport` module does, driven by `server.mjs`: it
+resolves hero and map names against this league's own `heroes`/`game_map` rows, flags anything it
 cannot resolve rather than guessing, and hands the admin a prefilled match form to review. The two
 things it still cannot know — which tournament, and which numbered round — the admin supplies there.
 `playedAtRaw` is parsed best-effort; a timezone it can't read leaves the field for the admin instead

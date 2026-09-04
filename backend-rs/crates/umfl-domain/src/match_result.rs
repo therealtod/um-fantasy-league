@@ -1,11 +1,10 @@
 //! A recorded match as the read side assembles it, and the three shapes a hero
 //! can have inside one.
 //!
-//! A direct port of `match/MatchResult.kt`, plus the `MetricContext`/`HeroRole`
-//! pair `scoring/MatchMetrics.kt` declares alongside them -- they live here
-//! rather than with the metric registry because [`MatchResult::hero_contexts`]
-//! is the only thing that constructs one, and a context that outlives its match
-//! is not representable.
+//! Plus the `MetricContext`/`HeroRole` pair that would otherwise sit beside
+//! the metric registry in `match_metrics.rs` -- they live here instead
+//! because [`MatchResult::hero_contexts`] is the only thing that constructs
+//! one, and a context that outlives its match is not representable.
 //!
 //! These are deliberately plain records with no persistence attributes: reads
 //! never go through the write aggregate. Nothing here stores a point total --
@@ -17,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 /// Why a hero was struck out of a series.
 ///
-/// Serializes as the Kotlin constant name, which is what
+/// Serializes as the constant name below, which is what
 /// `frontend/src/api/types.ts` matches on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -32,9 +31,9 @@ pub enum BanType {
 }
 
 impl BanType {
-    /// The Kotlin constant name. `MatchResultPolicy`'s `BAN_SIDE_INVALID`
-    /// message renders the ban type into user-visible text, which is why this
-    /// spelling is contract rather than a debug convenience.
+    /// `match_policy::validate`'s `BAN_SIDE_INVALID` message renders the ban
+    /// type into user-visible text, which is why this spelling is contract
+    /// rather than a debug convenience.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::PreBan => "PRE_BAN",
@@ -105,10 +104,9 @@ impl GameResult {
     /// `MatchResultPolicy` rejects a submission whose game has anything other
     /// than exactly one winner, so there is no drawn game to represent.
     ///
-    /// The Kotlin exposes this as a computed property, which Jackson emits as
-    /// an undeclared `winner` field. That emission is PORTING.md deviation (b)
-    /// and is reproduced on the server's DTO, not here -- a domain type has no
-    /// business carrying a field only the wire wants.
+    /// The wire response also carries an undeclared `winner` field derived
+    /// from this; that's added on the server's DTO, not here -- a domain type
+    /// has no business carrying a field only the wire wants.
     pub fn winner(&self) -> Option<&GameParticipantResult> {
         self.participants.iter().find(|p| p.is_winner)
     }
@@ -167,7 +165,7 @@ impl MatchResult {
     /// `match_hero_picks` -- games are independent, so a hero may go to one side
     /// in game 1 and the other in game 2 -- so the de-duplication happens here.
     ///
-    /// First-encounter order, like Kotlin's `distinct()`.
+    /// First-encounter order.
     pub fn drafted_hero_ids(&self) -> Vec<i64> {
         let mut seen = Vec::new();
         for participant in &self.participants {
@@ -196,8 +194,9 @@ impl MatchResult {
     /// prices.
     ///
     /// A hero can be none of drafted, played or banned in the same match --
-    /// `MatchResultPolicy` rejects those submissions as `BANNED_HERO_DRAFTED`
-    /// and `BANNED_HERO_PLAYED` -- so the exclusions below are a backstop for
+    /// `match_policy::validate` rejects those submissions as
+    /// `BANNED_HERO_DRAFTED` and `BANNED_HERO_PLAYED` -- so the exclusions
+    /// below are a backstop for
     /// data that predates the checks, not supported input. Precedence is
     /// **Played > Banned > Drafted**: playing wins over a ban, because it has
     /// real health and a real result attached, and a hero that played is
@@ -223,8 +222,7 @@ impl MatchResult {
             .bans
             .iter()
             .filter(|ban| !played_hero_ids.contains(&ban.hero_id))
-            // Kotlin's `distinctBy { it.heroId }`: first ban wins, however many
-            // rows name the hero.
+            // First ban wins, however many rows name the hero.
             .filter(|ban| {
                 let fresh = !banned_hero_ids.contains(&ban.hero_id);
                 if fresh {
@@ -281,7 +279,8 @@ pub enum HeroRole<'a> {
 /// itself. `WIN` and `LOSS` are scoped per game rather than per series: a hero
 /// that takes game 1 and drops game 2 scores one of each.
 ///
-/// Kotlin names the first field `match`, which is a keyword here.
+/// The first field is named `match_result` rather than `match`, which is a
+/// reserved keyword in Rust.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MetricContext<'a> {
     pub match_result: &'a MatchResult,
@@ -472,9 +471,9 @@ mod tests {
         assert_eq!(roles_of(&m.hero_contexts(), 4), vec![HeroRole::Banned]);
     }
 
-    /// `hero_bans` is keyed `(match_id, hero_id)`, so this cannot arrive from the
-    /// database -- but `distinctBy` is in the Kotlin and dropping it would
-    /// double a ban's points if it ever did.
+    /// `hero_bans` is keyed `(match_id, hero_id)`, so this cannot arrive from
+    /// the database -- but dropping the de-duplication above would double a
+    /// ban's points if it ever did.
     #[test]
     fn a_hero_banned_twice_yields_one_banned_context() {
         let m = match_of(
@@ -569,9 +568,8 @@ mod tests {
         assert_eq!(m.player_label_for_side(7), None);
     }
 
-    /// `jackson.default-property-inclusion: non_null` means an unattributed
-    /// side and a sideless ban are *absent*, not `null`. The differential rig
-    /// fails on any JSON null anywhere.
+    /// An unattributed side and a sideless ban must serialize as *absent*
+    /// fields, never as a JSON `null`.
     #[test]
     fn absent_optionals_are_omitted_not_null() {
         let m = match_of(

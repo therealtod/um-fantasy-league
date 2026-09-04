@@ -1,15 +1,8 @@
 //! Recorded match results: the admin write path, and the reads everything
 //! downstream folds.
 //!
-//! Oracle: `api/AdminMatchController.kt`, the match block of
-//! `api/AdminDtos.kt`, `match/TournamentMatch.kt`,
-//! `match/TournamentMatchRepository.kt`, `match/MatchResultQuery.kt`,
-//! `match/MatchResultCache.kt` and `match/AdminMatchService.kt`.
-//!
-//! The module is `r#match` because `match` is a Rust keyword. The directory is
-//! `match/` and the Kotlin package is `com.umfl.match`, so the mapping the rest
-//! of this port keeps -- one module per Kotlin package -- is intact; only the
-//! `r#` at each use site is new.
+//! The module is `r#match` because `match` is a Rust keyword; the directory is
+//! `match/`, and the `r#` prefix is only needed at each use site.
 //!
 //! **Nothing here stores a point.** A match is the raw fact; standings, the
 //! ticker and every total are derived from these at read time
@@ -47,8 +40,8 @@ pub use cache::MatchResultCache;
 // The write aggregate
 // ---------------------------------------------------------------------------
 
-/// A recorded match as [`writer`] saves it -- the shape `TournamentMatch.kt`
-/// carries, minus the persistence annotations.
+/// A recorded match as [`writer`] saves it: the whole aggregate root, minus
+/// any persistence annotations -- there is no ORM here to need them.
 ///
 /// Read access never goes through this: [`query`] assembles
 /// [`umfl_domain::match_result::MatchResult`] instead. This exists only so an
@@ -73,9 +66,10 @@ pub struct TournamentMatchWrite {
     /// The picks half of the draft, to [`Self::bans`]' bans half.
     ///
     /// Hangs off the root rather than off a participant, where it would read
-    /// more naturally: `match_participants` has a composite key, and the Kotlin
-    /// aggregate could not map a child of an entity keyed that way. The shape
-    /// is kept because the *table* is the same either way.
+    /// more naturally: `match_participants` has a composite key, and
+    /// `match_hero_picks` is keyed on `(match_id, side, hero_id)` rather than
+    /// on a participant row, so grouping picks under the root matches the
+    /// schema.
     pub picks: Vec<HeroPickWrite>,
 }
 
@@ -126,9 +120,8 @@ pub struct HeroPickWrite {
 
 /// A recorded match on the wire.
 ///
-/// Every field but `games` is the domain type verbatim -- the Kotlin DTO copies
-/// them across unchanged too. `games` is wrapped only to carry `winner`; see
-/// [`GameResultDto`].
+/// Every field but `games` is the domain type verbatim. `games` is wrapped
+/// only to carry `winner`; see [`GameResultDto`].
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchResultDto {
@@ -158,15 +151,10 @@ impl From<MatchResult> for MatchResultDto {
     }
 }
 
-/// One game, plus the `winner` field Jackson emits from Kotlin's computed
-/// property.
-///
-/// **PORTING.md deviation (b).** `GameResult.winner` is a computed `val`, so it
-/// is not declared anywhere in the Kotlin DTO and yet appears in every response
-/// body. `MatchListAdmin.vue:121` derives the winner itself and never reads it,
-/// so it is dead weight on the wire -- but dropping it during the port would
-/// mix "port" and "change". It is reproduced here, on the DTO rather than on
-/// the domain type, and removed in its own commit once parity is green.
+/// One game, plus a `winner` field derived from it on the DTO rather than on
+/// the domain type. `MatchListAdmin.vue:121` derives the winner itself and
+/// never reads this field, so it is dead weight on the wire -- kept rather
+/// than dropped without a deliberate decision to change the response shape.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameResultDto {
@@ -203,9 +191,10 @@ impl From<GameResult> for GameResultDto {
 
 /// Each rule below is a garde `custom` rather than a built-in, because the
 /// message string is what the client renders and garde 0.23 cannot override a
-/// built-in rule's wording. Where a field carries both `@NotNull` and a second
-/// annotation, one function covers both without ambiguity: `@Size` and
-/// `@Positive` both ignore a null, so the two can never fail together.
+/// built-in rule's wording. Where a field is both required and needs a second
+/// check, one function covers both without ambiguity: the second check only
+/// applies once the value is known present, so the two can never fail
+/// together.
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchParticipantRequest {
@@ -290,7 +279,7 @@ pub struct RecordMatchRequest {
     pub bans: Vec<MatchBanRequest>,
 }
 
-/// `@NotNull`.
+/// Fails only on absent.
 fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Result {
     move |value, _| match value {
         Some(_) => Ok(()),
@@ -298,7 +287,7 @@ fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Resu
     }
 }
 
-/// `@NotBlank`: fails on absent *and* on whitespace-only.
+/// Fails on absent *and* on whitespace-only.
 fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),
@@ -306,8 +295,8 @@ fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> gard
     }
 }
 
-/// `@NotNull` and `@Positive` on one field. `@Positive` ignores a null, so
-/// exactly one of the two can fail.
+/// Present-and-positive on one field: absence and non-positivity are checked
+/// separately, so exactly one of the two can fail.
 fn required_positive(
     absent: &'static str,
     non_positive: &'static str,
@@ -319,9 +308,9 @@ fn required_positive(
     }
 }
 
-/// `@Size(min = 2, max = 2)`. Ignores a null, as `@Size` does -- an absent list
-/// is read as empty by the caller, which is live behaviour rather than an
-/// oversight.
+/// Rejects a present list of any length but 2; passes an absent one through
+/// -- an absent list is read as empty by the caller, which is live behaviour
+/// rather than an oversight.
 fn exactly_two<T>(message: &'static str) -> impl Fn(&Option<Vec<T>>, &()) -> garde::Result {
     move |value, _| match value {
         Some(items) if items.len() != 2 => Err(garde::Error::new(message)),
@@ -329,7 +318,7 @@ fn exactly_two<T>(message: &'static str) -> impl Fn(&Option<Vec<T>>, &()) -> gar
     }
 }
 
-/// `@Size(min, max)` over an optional list.
+/// Rejects a present list outside `[min, max]`; passes an absent one through.
 fn between<T>(
     min: usize,
     max: usize,
@@ -341,8 +330,8 @@ fn between<T>(
     }
 }
 
-/// `@Size(max = n)` over a list that defaults to empty rather than being
-/// optional.
+/// Rejects an oversized list. Takes a plain `Vec` rather than an `Option`,
+/// since the field this guards defaults to empty rather than being optional.
 fn max_entries<T>(max: usize, message: &'static str) -> impl Fn(&Vec<T>, &()) -> garde::Result {
     move |value, _| {
         if value.len() > max {
@@ -355,8 +344,7 @@ fn max_entries<T>(max: usize, message: &'static str) -> impl Fn(&Vec<T>, &()) ->
 
 impl RecordMatchRequest {
     /// The service's inputs, once validation has run -- which is why every
-    /// `expect` here is unreachable for the same reason the Kotlin controller's
-    /// `requireNotNull`s are.
+    /// `expect` below is unreachable.
     fn to_inputs(
         &self,
     ) -> (
@@ -421,8 +409,8 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-/// `@RequestParam(required = false) round` and
-/// `@RequestParam(required = false, defaultValue = "200") limit`.
+/// `round` and `limit` are both optional query parameters; `limit` defaults
+/// to 200.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ListQuery {

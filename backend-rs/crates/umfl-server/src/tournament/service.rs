@@ -1,9 +1,5 @@
 //! Registration, drafting and locking — the transaction boundaries.
 //!
-//! Oracle: `tournament/TournamentService.kt`. Every `@Transactional` method
-//! there is a `pool.begin()` here and nothing else is, which is what keeps the
-//! boundary auditable method by method (PORTING.md §7).
-//!
 //! The rules themselves are not here: they are
 //! [`umfl_domain::roster_policy`], called with their inputs passed in.
 
@@ -135,8 +131,8 @@ pub async fn register(
 
 /// The roster the caller already has here, or `None` if they have not entered.
 ///
-/// Not transactional in the Kotlin either — two reads, and nothing depends on
-/// their being one snapshot.
+/// Not transactional -- two reads, and nothing depends on their being one
+/// snapshot.
 pub async fn find_my_entry(
     state: &AppState,
     tournament_id: i64,
@@ -212,17 +208,17 @@ pub async fn lock_roster(
 
 /// Drop every entry that never locked in a roster.
 ///
-/// Oracle: `TournamentService.purgeUnlockedEntries`. Called by
-/// `super::admin_service::update` whenever a tournament's status is saved as
-/// [`TournamentStatus::Live`]. Once live, `Tournament::accepts_roster_changes`
-/// is `false`, which makes `roster_policy::validate_lock`'s
-/// `RosterRule::TournamentClosed` rule reject locking forever after — so an
-/// entry still in [`EntryStatus::Draft`] at that point can never score a
-/// single point. Leaving it registered would only leave a dead zero row on
-/// the standings board, which is why this runs as part of the LIVE
-/// transition rather than being left to an admin to notice.
-/// `crate::standings::query::rosters` also only reads locked entries, as a
-/// second line of defense for the case this purge is ever skipped or fails.
+/// Called by `super::admin_service::update` whenever a tournament's status
+/// is saved as [`TournamentStatus::Live`]. Once live,
+/// `Tournament::accepts_roster_changes` is `false`, which makes
+/// `roster_policy::validate_lock`'s `RosterRule::TournamentClosed` rule
+/// reject locking forever after -- so an entry still in
+/// [`EntryStatus::Draft`] at that point can never score a single point.
+/// Leaving it registered would only leave a dead zero row on the standings
+/// board, which is why this runs as part of the LIVE transition rather than
+/// being left to an admin to notice. `crate::standings::query::rosters` also
+/// only reads locked entries, as a second line of defense for the case this
+/// purge is ever skipped or fails.
 ///
 /// `on delete cascade` on `entry_slots` takes care of any picks the entry
 /// held but never locked in.

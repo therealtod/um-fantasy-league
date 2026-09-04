@@ -1,6 +1,6 @@
-//! The HTTP plumbing that reproduces what Spring MVC did for free: problem
-//! documents for the framework's own rejections, and the `instance` field the
-//! servlet layer filled in on its way out.
+//! The HTTP plumbing axum has no equivalent of out of the box: problem
+//! documents for the framework's own rejections, and the `instance` field
+//! filled in on a handler's error response.
 
 pub mod big_decimal;
 pub mod extract;
@@ -17,11 +17,10 @@ use problem::ProblemDetail;
 
 /// Fills a problem document's `instance` with the request path.
 ///
-/// Spring did this in `RequestResponseBodyMethodProcessor`: any `ProblemDetail`
-/// returned from a handler with a null `instance` got
-/// `HttpServletRequest.getRequestURI()` written into it just before
-/// serialisation. Every error body this API has ever produced therefore carries
-/// the path, and dropping it would be a wire change.
+/// Any `ProblemDetail` returned from a handler with `instance: None` gets the
+/// request path written into it just before serialisation. Every error body
+/// this API produces from a handler therefore carries the path, and dropping
+/// it would be a wire change.
 ///
 /// `IntoResponse for ProblemDetail` leaves a clone in the response extensions
 /// for exactly this. Placed outside `CatchPanicLayer` so the 500 a panic
@@ -69,8 +68,8 @@ pub async fn method_not_allowed_fallback(method: Method) -> ApiError {
     }
 }
 
-/// What `CatchPanicLayer` renders. Stands in for `handleUnexpected`'s 500 --
-/// a panic is this runtime's equivalent of the exception nobody anticipated.
+/// What `CatchPanicLayer` renders: the catch-all 500 for a panic, the
+/// runtime's equivalent of the exception nobody anticipated.
 pub fn panic_response(err: Box<dyn std::any::Any + Send + 'static>) -> Response {
     let detail = err
         .downcast_ref::<String>()

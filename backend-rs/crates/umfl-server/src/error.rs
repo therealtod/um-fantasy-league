@@ -1,20 +1,14 @@
 //! Every error this API returns, as an RFC 7807 problem detail.
 //!
-//! Oracle: `common/GlobalExceptionHandler.kt` and `common/DomainExceptions.kt`.
+//! Every case a request can go wrong in gets its real status and a `umfl`
+//! problem type rather than a 500 or a bodiless 404: a malformed body, an
+//! unparseable path variable, a wrong method, an unrouted path. That coverage
+//! comes from [`ApiError::Framework`], the extractors in
+//! [`crate::http::extract`], and the router's two fallbacks.
 //!
-//! The Kotlin's most awkward constraint does not survive the port and that is
-//! fine: `ResponseEntityExceptionHandler`'s ambiguous-mapping trap exists
-//! because `ExceptionHandlerExceptionResolver` runs ahead of
-//! `DefaultHandlerExceptionResolver`, and axum has no such ordering. What does
-//! survive is the *coverage* that inheritance bought — a malformed body, an
-//! unparseable path variable, a wrong method and an unrouted path must each
-//! answer with their real status and a `umfl` problem type rather than a 500 or
-//! a bodiless 404. On this side that comes from [`ApiError::Framework`], the
-//! extractors in [`crate::http::extract`], and the router's two fallbacks.
-//!
-//! **Every variant is defined here, in T0.** Feature tasks convert into these;
-//! adding a variant later is a cross-cutting change that touches every owner's
-//! merge, so it needs a reason, not a convenience.
+//! **Every variant is defined here, in one place.** Feature modules convert
+//! into these; adding a variant later is a cross-cutting change that touches
+//! every owner's merge, so it needs a reason, not a convenience.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -25,8 +19,7 @@ use crate::http::problem::ProblemDetail;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
-    /// The six domain exceptions, carrying their status mapping from
-    /// `DomainExceptions.kt`'s KDoc.
+    /// The six domain exceptions, carrying their own status mapping.
     #[error("{0}")]
     Domain(#[from] DomainError),
 
@@ -50,9 +43,10 @@ pub enum ApiError {
     #[error("validation failed")]
     Validation(IndexMap<String, String>),
 
-    /// A rejection Spring MVC raised from its own exception hierarchy, where
-    /// the title and problem-type slug come from the status' reason phrase and
-    /// the detail is Spring's own message, copied verbatim.
+    /// A rejection raised outside the domain layer -- a malformed request,
+    /// an unroutable path -- where the title and problem-type slug come from
+    /// the status' reason phrase and the detail is a fixed sentence pinned by
+    /// the wire contract (see [`crate::http::extract`]).
     ///
     /// See [`crate::http::extract`] for the messages and where each is raised.
     #[error("{detail}")]
@@ -70,13 +64,12 @@ pub enum ApiError {
 }
 
 impl ApiError {
-    /// Classifies a `sqlx` failure the way Spring's exception translation did:
-    /// an integrity constraint becomes the 409 backstop, anything else is a
-    /// 500.
+    /// Classifies a `sqlx` failure: an integrity constraint becomes the 409
+    /// backstop, anything else is a 500.
     ///
-    /// This is strictly better than the Kotlin, which substring-matched an
-    /// exception message — `DatabaseError::constraint()` hands back the index
-    /// name, so a feature service that wants to name a *specific* constraint
+    /// `DatabaseError::constraint()` hands back the index name directly
+    /// rather than requiring a substring match on the error message, so a
+    /// feature service that wants to name a *specific* constraint
     /// (`uq_tournament_match_external_link`) should match on it and raise a
     /// [`DomainError::Conflict`] before this ever runs.
     pub fn from_sqlx(err: sqlx::Error) -> Self {
@@ -182,9 +175,9 @@ fn rule_problem(
     err: &DomainError,
     violations: &[Violation],
 ) -> ProblemDetail {
-    // `detail` is the joined message list, exactly as the Kotlin exception's
-    // own `message` was; `violations` is the array the frontend reads off
-    // `ApiError.violations` to highlight every problem at once.
+    // `detail` is the joined message list; `violations` is the array the
+    // frontend reads off `ApiError.violations` to highlight every problem at
+    // once.
     ProblemDetail::new(
         StatusCode::UNPROCESSABLE_ENTITY,
         title,
@@ -285,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn domain_statuses_match_the_kotlin_kdoc() {
+    fn domain_statuses_match_their_documented_mapping() {
         assert_eq!(
             ApiError::Domain(DomainError::not_found("x"))
                 .problem()

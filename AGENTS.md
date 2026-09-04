@@ -8,20 +8,21 @@ A fantasy layer over **real** Unmatched tournaments: an admin records match resu
 heroes under a per-tournament budget, and points are derived from the recorded results by a scoring
 table that lives in the database. Nothing is simulated: match results, tournaments, heroes, maps and
 scoring rules are real facts an admin enters through the Admin API (`/api/admin/...`), not computed
-or randomly generated. Gradle multi-project (`:backend` only) + a separate npm frontend that is not
-part of the Gradle build.
+or randomly generated. A Cargo workspace (`backend-rs/`, two crates — `umfl-domain` for pure domain
+logic, `umfl-server` for the axum HTTP server) + a separate npm frontend that is not part of the
+Cargo workspace.
 
-`README.md` carries the domain rationale (why Spring Data JDBC over JPA, why cost is per tournament,
-why scoring is data, seed-data tuning). Read it before making design-level changes.
+`README.md` carries the domain rationale (why `sqlx` over an ORM, why cost is per tournament, why
+scoring is data, seed-data tuning). Read it before making design-level changes.
 
 ## Commands
 
 ```bash
-# Database (Postgres 17 on host port 5433)
-docker compose up -d db
+# Database + migrations (Postgres 17 on host port 5433)
+docker compose up -d db flyway   # flyway is one-shot: applies db/migration + db/seed, then exits
 
-# Backend — Flyway migrates the schema and, in dev/test only, seeds demo fixtures on first start
-./gradlew :backend:bootRun --args='--spring.profiles.active=dev'
+# Backend — cargo run against that database
+cd backend-rs && SPRING_PROFILES_ACTIVE=dev cargo run -p umfl-server
 
 # Frontend (separate shell) — Vite proxies /api to localhost:8080
 cd frontend && npm install && npm run dev
@@ -31,25 +32,28 @@ Migrations are periodically squashed back into a single `V1__core_schema.sql` ba
 admin authorization, no data — and, as of the most recent squash, every table renamed to a plural
 noun: `hero` → `heroes`, `tournament_hero` → `tournament_heroes`, `tournament_match` →
 `tournament_matches`, and so on throughout), so an older local database fails Flyway checksum
-validation. There is no production data: `docker compose down -v && docker compose up -d db`. `db/`
-also moved to the **repository root** in that same squash — it is no longer under
-`backend/src/main/resources` — because `backend-rs/` migrates the same directory, so the SQL is
-shared rather than copied into one build's resources; Flyway reads it off the filesystem
-(`filesystem:${DB_MIGRATIONS_DIR:../db}/...`, relative to Gradle's `backend/` working directory) with
-`DB_MIGRATIONS_DIR` as the escape hatch for any other launcher, same category as `DB_URL`. Data past
-that baseline splits by *kind*, not by environment: `db/migration/V2__reference_data.sql` carries the
-canonical hero and board catalogue — facts about Unmatched, not about a league, and the thing an admin
-prices into a pool — so it migrates in **every** profile, while demo/dev fixtures — three tournaments,
-seeded managers, a full recorded result set, draft picks and ban sides all included from the start —
-live in a second Flyway location, `db/seed/V3__demo_fixtures.sql`, that only `dev` and `test` add to
-`spring.flyway.locations` (see Profiles below). There is no longer a `V6__demo_draft_picks.sql` or
-`V8__demo_ban_sides.sql` — those existed only because the columns they filled postdated the seed's own
-migration; the squash folded them back into `V3` now that everything they depended on is already in
-`V1`. A default start or the `prod` profile therefore comes up with every hero and board and no mock
+validation. There is no production data: `docker compose down -v && docker compose up -d db flyway`.
+`db/` lives at the **repository root**, not under `backend-rs/`'s own tree, because it is Flyway's
+directory rather than the Rust crate's: `db/Dockerfile` and the `flyway` compose services apply it
+independently of any backend build, so the SQL is shared infrastructure rather than copied into a
+build's resources. Flyway is no longer embedded in the server process at all (see
+Profiles below): `db/Dockerfile` bakes `db/migration` and `db/seed` into the stock Flyway CLI image,
+and *which* locations a given run applies is decided by that invocation's `FLYWAY_LOCATIONS`, not by
+anything the backend process reads — `docker-compose.yml`'s `flyway` service passes both locations,
+`deploy/docker-compose.prod.yml`'s passes `db/migration` only. Data past the schema baseline splits by
+*kind*, not by environment: `db/migration/V2__reference_data.sql` carries the canonical hero and board
+catalogue — facts about Unmatched, not about a league, and the thing an admin prices into a pool — so
+it is applied by **every** Flyway invocation, while demo/dev fixtures — three tournaments, seeded
+managers, a full recorded result set, draft picks and ban sides all included from the start — live in
+a second Flyway location, `db/seed/V3__demo_fixtures.sql`, that only the dev-shaped invocation adds.
+There is no longer a `V6__demo_draft_picks.sql` or `V8__demo_ban_sides.sql` — those existed only
+because the columns they filled postdated the seed's own migration; a squash folded them back into
+`V3` now that everything they depended on is already in `V1`. A `migration`-only Flyway run (what
+`deploy/docker-compose.prod.yml` does) therefore leaves every hero and board in place and no mock
 league data at all.
 
 The admin match import needs the scraper sidecar. It is a plain Node process — Docker is only how it
-reaches the VPS — so a dev session runs it directly, and the backend's default `scraper.base-url`
+reaches the VPS — so a dev session runs it directly, and the backend's default `scraper_base_url`
 finds it with no configuration:
 
 ```bash
@@ -65,151 +69,163 @@ Tests:
 
 ```bash
 # Pure domain logic, no Docker needed — the highest-value gate in the repo
-./gradlew :backend:test --tests '*RosterPolicyTest' --tests '*ScoringEngineTest' --tests '*MatchMetricsTest'
+cargo test -p umfl-domain
 
-# Single test class / method
-./gradlew :backend:test --tests 'com.umfl.tournament.RosterPolicyTest'
-./gradlew :backend:test --tests '*RosterPolicyTest.some test name'
+# Full workspace, including sqlx-checked queries and integration tests (needs a running Docker
+# daemon — Testcontainers spins up Postgres, clones a migrated template database per test)
+cd backend-rs && cargo test --workspace
 
-# Full suite — Testcontainers integration tests need a running Docker daemon
-./gradlew :backend:test
+# Single test
+cargo test -p umfl-domain roster_policy::tests::some_test_name
 
 cd frontend && npm test              # vitest run, src/**/*.spec.ts
 cd frontend && npm run type-check    # vue-tsc --noEmit
 cd frontend && npx vitest run src/domain/rosterPolicy.spec.ts   # single file
 ```
 
+`backend-rs/crates/umfl-server/tests/it/` is one binary (`tests/it/main.rs` with `mod` declarations),
+one Postgres container, one migrated `umfl_template` database — each test does
+`CREATE DATABASE umfl_test_<n> TEMPLATE umfl_template` (Postgres file-copies it) rather than sharing
+one database and rolling back a transaction, because a service under test calls `state.pool.begin()`
+and gets a *different connection* than the test's own, which would see none of a rolled-back
+transaction's uncommitted fixtures. That has three consequences worth knowing: an after-commit-shaped
+listener actually fires during the suite (there is no rolled-back-transaction caveat to work around,
+so `StandingsSseHub`'s keep-alive push is exercised end to end rather than only unit-tested); nothing
+needs a per-test cache-invalidation hook, since `MatchResultCache` lives on `AppState` and every test
+constructs its own; and the suite runs in parallel by default, since every test owns a database cloned
+from the template with nothing to contend over — mark a test `#[serial]` only if it genuinely needs
+the whole binary to itself (there is currently exactly one `SELECT … FOR UPDATE` path, the tournament
+capacity check, and it's already isolated per-database).
+
 Formatting:
 
 ```bash
-./gradlew :backend:ktlintCheck    # merge gate, alongside :backend:test
-./gradlew :backend:ktlintFormat   # auto-fix — read the diff, it is not always an improvement
+cd backend-rs
+cargo fmt --all --check     # merge gate, alongside `cargo test --workspace`
+cargo fmt --all             # auto-fix
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Everything under `com.umfl.support.PostgresIntegrationTest` shares one static Postgres container and
-runs inside a rolled-back transaction, so tests may mutate seed data freely. That base class
-deliberately does **not** use `@Testcontainers`/`@Container`: the extension stops a static container
-in `afterAll` of *every* class it annotates, so from the second test class onward Spring's cached
-context points at a dead port. The container is started in a static initializer and lives for the
-JVM. Don't add the annotations back.
+`sort_unstable_*` is **banned** by `clippy.toml`'s `disallowed-methods` (see the `stable_sort_primitive`
+allowance in the workspace `Cargo.toml` for why the built-in clippy lint is off instead): the
+standings ranking (standard competition ranking: 1, 2, 2, 4) and the ticker's winner-first participant
+sort both depend on everything they did *not* compare keeping the order the database returned it in.
+Use `sort_by`/`sort_by_key`.
 
-Because every test there rolls back, **no `@TransactionalEventListener(AFTER_COMMIT)` in the app
-ever fires during the test suite.** A listener whose job is to *notify* can live with that
-(`StandingsSseHub` is verified by a pure unit test instead), but one whose job is to **invalidate**
-cannot: state a test wrote inside its rolled-back transaction, and something cached, would outlive
-the rollback into the next class through the shared context. So an invalidating listener uses
-`AFTER_COMPLETION` — `MatchResultCache` is the only one, and it also pairs that with a plain
-`@EventListener` so a write is visible to its own transaction. The base class additionally clears
-that cache in a `@BeforeEach`, which is a belt-and-braces against tests that mutate match tables by
-raw SQL and so publish nothing (`SchemaAndSeedTest` inserts into `match_games` directly), not the
-mechanism itself. Relatedly, the suite must stay sequential: there is no `junit-platform.properties`
-and turning on parallel execution would let two concurrently rolled-back transactions see each
-other's uncommitted rows through that shared cache.
-
-ktlint runs off the root `.editorconfig`, on the `intellij_idea` style baseline rather than the
-stricter `ktlint_official` one: the linter is there to *preserve* the existing formatting and catch
-the mechanical slips (unused imports, import order, stray whitespace), not to reformat the codebase
-into a different style. Three rules are off everywhere — the two `trailing-comma-*` rules and
-`function-signature`/`class-signature` — because they contradict each other over this codebase's
-multi-line-signature-with-trailing-comma house style, and `ktlintFormat` resolves that contradiction
-by collapsing declarations onto one line with a dangling comma. Test sources additionally opt out of
-the wrapping rules and the line-length cap so fixture tables can stay tabular. Retune the
-`.editorconfig` rather than reformatting a file to satisfy a rule.
-
-Spring Boot is pinned to 4.1.0, which manages Testcontainers 2.0.5 — verified against Docker Engine
-29.7.1 (API 1.55). Re-verify against your own Docker Engine before downgrading toward the
-3.5.x/Testcontainers 1.21.x line: that line negotiates a Docker API version too old for Engine 29+.
+`cargo sqlx prepare --workspace -- --all-targets` (with `DATABASE_URL` pointing at a migrated
+database) has to be re-run and its `.sqlx/` output committed before any commit that changed a
+`sqlx::query!`/`query_as!` call — forgetting it still compiles locally (there's a live database to
+check against) and only breaks the image build and CI's `--check` step, since both compile entirely
+offline against the committed `.sqlx/` cache, with no live database to fall back on if it's stale.
 
 ## Profiles
 
 | Profile | Auth | Notes |
 |---|---|---|
-| `dev` | `DevManagerAuthenticationFilter` resolves `X-Manager-Id` once at the filter level, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `DevManagerProvider` just reads the result back off `SecurityContextHolder` | DEBUG logging, plus `db/seed` added to `spring.flyway.locations` so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
-| `test` | same dev stub | Testcontainers Postgres via `@ServiceConnection`; same `db/seed` addition, since every integration test asserts against the fixtures |
-| `prod` | `SupabaseAuthenticationConverter` verifies the Supabase JWT, resolves `sub` → `managers.auth_user_id`, JIT-provisions, once per request; `SupabaseManagerProvider` just reads the result back off `SecurityContextHolder` | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through the Worker proxy) |
+| `dev` (or no profile at all) | `auth::dev::resolve` resolves `X-Manager-Id` once in the `authenticate` middleware, and *only* when the header is there — no header is an anonymous request, exactly as no bearer token is in `prod`, so a public route costs no manager lookup and anything gated needs the header; `CurrentManager`/`MaybeManager` just read the `Manager` back off the request extensions | plus `db/seed` applied via a dev-shaped Flyway invocation, so an admin manager (*NeonStrategist*, in the fixture) and the rest of the demo data actually exist |
+| `test` | same dev stub | Testcontainers Postgres, one database cloned per test from a migrated template; same `db/seed` content, since every integration test asserts against the fixtures |
+| `prod` | `auth::supabase::resolve` verifies the Supabase JWT, resolves `sub` → `managers.auth_user_id`, JIT-provisions, once per request | Needs `DB_URL`/`DB_USER`/`DB_PASSWORD`/`SUPABASE_JWKS_URI`, plus optional `FRONTEND_ORIGIN` (only for a frontend calling the API cross-origin instead of through the Worker proxy) |
+
+`Config::is_prod` (`SPRING_PROFILES_ACTIVE` containing `"prod"`, split on commas — the variable name
+did not change in the port, since it is the one both compose files and the VPS's hand-managed
+`/opt/umfl/.env` already set) is the **only** thing that decides which of the two credential paths
+`auth::authenticate` takes. It carries no route knowledge of its own — see `auth::authorize` below for
+that. Which Flyway locations were applied to the database is a separate, orthogonal question decided
+entirely by how the one-shot `flyway` container was invoked (see Commands above); the running server
+process never reads `db/seed` or knows whether it exists.
 
 The application makes exactly one outbound HTTP call, and only from the admin match import:
-`ScraperClient` → the scraper sidecar (see Match import below). Nothing else in the codebase talks to
-the network, which is why there is no HTTP client or HTML parser on the classpath — `RestClient`
-comes free with `spring-web`, and the sidecar returns JSON, so neither is needed.
+`matchimport::scraper::HttpScraperClient` → the scraper sidecar (see Match import below). Nothing
+else in the codebase talks to the network.
 
 There are no scheduled tasks and no background workers in any profile, with one narrow exception:
-`StandingsSseHub` runs a single-thread keep-alive that pings open standings SSE connections every
-20s so idle-timeout proxies/browsers don't silently drop them. It's transport plumbing for the live
-standings feed below, not a business-logic worker — it has no DB access and does nothing but write
-SSE comment lines to already-open connections.
+`standings::sse::StandingsSseHub` attaches a keep-alive to every open standings SSE stream so
+idle-timeout proxies/browsers don't silently drop them. It's transport plumbing for the live standings
+feed below, not a business-logic worker — it has no DB access and does nothing but write SSE comment
+lines to already-open connections. It has no dedicated thread pool: axum attaches the heartbeat to
+each response stream directly, and a slow client backs up in its own task and its own `broadcast`
+receiver rather than behind anything shared. A subscription is released by `Drop` on the response
+body.
 
-**Which routes need an identity is decided in exactly one place, for every profile**: the private
-`apiAuthorizationRules` function in `SecurityConfig.kt`, passed to `authorizeHttpRequests` by both
-chains. It allowlists the read-only GETs that viewing a tournament needs — nobody needs an account
-to browse tournaments, hero pools, standings or match history, only to enter and draft — and
-everything else under `/api/**` is `authenticated()`, with `anyRequest()` a `denyAll()` backstop. Keep
-it in step with `SecurityConfigTest` and `DevSecurityConfigTest`, which assert it from either side.
-Don't re-inline it into one chain: the two chains are meant to
-differ only in how a credential is *verified* (a Supabase JWT vs. an `X-Manager-Id` header), never in
-which routes require one — which is also why neither `SupabaseAuthenticationConverter` nor
-`DevManagerAuthenticationFilter` carries any route knowledge of its own. Each resolves an identity
-only when the request actually offered a credential; a request without one stays anonymous and lets
-the rules above decide, so no public GET pays a JWT verification or a manager lookup.
+**Which routes need an identity is decided in exactly one place, for every profile**: `auth::authorize`
+(`crates/umfl-server/src/auth/authorize.rs`)'s `rules()` table, an ordered list of
+`(method, ant-style path pattern, access)` rows that `authorize` walks first-match-wins. It allowlists
+the read-only GETs that viewing a tournament needs — nobody needs an account to browse tournaments,
+hero pools, standings or match history, only to enter and draft — and everything else under `/api/**`
+is `Access::Authenticated`, with a trailing `/**` → `Access::Deny` backstop. Keep it in step with
+`authorize_rules` in `tests/it/security.rs`, which asserts it from the outside. The two credential
+paths (`auth::dev`, `auth::supabase`) differ only in how a credential is *verified*, never in which
+routes require one — which is also why neither carries any route knowledge of its own; each resolves
+an identity only when the request actually offered a credential, so no public GET pays a JWT
+verification or a manager lookup. **A denial's status depends on who is asking**: an anonymous
+request gets 401 ("you have not said who you are"), an authenticated-but-not-admin one gets 403
+("you have, and it is not enough") — this is `authorize`'s own branch, not a framework default,
+and both bodies render without an `instance` field.
 
-Both chains also register `RateLimitFilter` (`com.umfl.ratelimit`), an IP-keyed token-bucket
-(bucket4j) throttle ahead of every `/api/**` route — `addFilterBefore` puts it ahead of
-`BearerTokenAuthenticationFilter` in `SecurityConfig` and ahead of `AuthorizationFilter` in
-`DevSecurityConfig`, so a flood doesn't pay JWT verification or the dev manager lookup either. It
-keys on `HttpServletRequest.remoteAddr` by default, because a forwarded-for header from a peer that
-could itself be the flooder is worthless. `X-Forwarded-For` is read *only* when the peer falls inside
-`RateLimitProperties.trustedProxies` — loopback plus the RFC1918 ranges, which is what a
-TLS-terminating reverse proxy on the same VPS looks like (note it arrives as the Docker bridge
-gateway, e.g. `172.17.0.1`, not `127.0.0.1`, even when the container is published on
-`127.0.0.1:8080`). Without that carve-out a proxied deployment puts the entire internet in one
-bucket. `RateLimitFilter.clientIp` reads the **last** forwarded entry, not the first: a proxy appends
-the address it saw, so the trailing entry is the only one it vouches for, and reading the first would
-let a flooder mint a fresh bucket per request with a fake prefix. A backend exposed directly on a
-public interface never matches a trusted range and keeps the original behaviour. The tradeoff moves
-one hop out rather than disappearing: traffic arriving through the Cloudflare Worker still shares a
-bucket per Cloudflare edge IP rather than per visitor. The
-per-IP bucket cache is Caffeine-backed (`RateLimitProperties.maxTrackedIps`, LRU-evicted, entries
-expire after two quiet refill periods) rather than an unbounded map, since the key space is every IP
-that ever touches `/api/`. Tuning (`capacity`, `refillPeriod`, `maxTrackedIps`, `trustedProxies`) lives in
-`RateLimitProperties` bound to `rate-limit.api.*` in `application.yml` — see the `umfl.*` invariant
-below for why this is the one `@ConfigurationProperties` block in the app despite that rule.
+`ratelimit::RateLimiter` is registered as middleware ahead of `authenticate` for every `/api/**`
+route, an IP-keyed token-bucket throttle, so a flood doesn't pay JWT verification or the dev manager
+lookup either. It keys on the peer address `into_make_service_with_connect_info` supplies by default,
+because a forwarded-for header from a peer that could itself be the flooder is worthless.
+`X-Forwarded-For` is read *only* when the peer falls inside `RateLimitConfig.trusted_proxies` —
+loopback plus the RFC1918 ranges, which is what a TLS-terminating reverse proxy on the same VPS looks
+like (note it arrives as the Docker bridge gateway, e.g. `172.17.0.1`, not `127.0.0.1`, even when the
+container is published on `127.0.0.1:8080`). Without that carve-out a proxied deployment puts the
+entire internet in one bucket. `RateLimiter::client_ip` reads the **last** forwarded entry, not the
+first: a proxy appends the address it saw, so the trailing entry is the only one it vouches for, and
+reading the first would let a flooder mint a fresh bucket per request with a fake prefix. A backend
+exposed directly on a public interface never matches a trusted range and keeps the original
+behaviour. The tradeoff moves one hop out rather than disappearing: traffic arriving through the
+Cloudflare Worker still shares a bucket per Cloudflare edge IP rather than per visitor. The per-IP
+bucket cache is bounded by `RateLimitConfig.max_tracked_ips` rather than an unbounded map, since the
+key space is every IP that ever touches `/api/`. Tuning (`capacity`, `refill_period`,
+`max_tracked_ips`, `trusted_proxies`) comes from the `RATE_LIMIT_API_*` environment variables via
+`Config` — see the `umfl.*` invariant below for why this, alongside `scraper_base_url`, is one of the
+only two things read from the environment rather than the database.
 
-Admin routes (`/api/admin/**`) therefore require `hasRole("ADMIN")` in both profiles — the role comes
-from `managers.is_admin`, our own data, resolved once per request by
-`SupabaseAuthenticationConverter`/`DevManagerAuthenticationFilter` via the shared, provider-agnostic
-`ManagerAuthorities` — never from an identity-provider claim, so swapping auth providers later never
-touches the role logic. `DevSecurityConfig` (`!prod`) is also what stops Spring Security's
-autoconfiguration from securing everything the moment the oauth2 starter is on the classpath. Don't
-delete it.
-
-Those matcher lists are the first layer, not the only one: `MethodSecurityConfig` turns on
-`@EnableMethodSecurity`, and every admin controller also carries `@PreAuthorize("hasRole('ADMIN')")`.
-The annotation travels with the code, so a future admin endpoint that forgets a URL matcher is still
-gated — two independent layers is the point, so keep both in step rather than collapsing one into
-the other.
+Admin routes (`/api/admin/**`) require `Access::Admin` — `manager.is_some_and(|m| m.is_admin)`, our
+own data (`managers.is_admin`), never an identity-provider claim, so swapping auth providers later
+never touches the role logic. There is **only one authorization layer here**: axum has no per-handler
+annotation to forget, because every route is declared exactly once, in its own feature's `routes()`,
+and merged into the single tree `auth::authorize` runs in front of. A feature handler that needs the
+caller extracts `CurrentManager` for the value, but the *admission* decision already happened in the
+middleware before the handler ever runs.
 
 Adding a Supabase project also requires the Discord provider configured in the Supabase dashboard —
 the backend never talks to Discord, only to Supabase-signed tokens.
 
 ## Backend architecture
 
-Package-by-feature under `com.umfl`, one package per domain concept, plus `api` (controllers +
-DTOs), `auth`, `common`, `config` and `ratelimit`.
+`backend-rs/` is a two-crate Cargo workspace. `umfl-domain` is pure — `serde`, `chrono`,
+`rust_decimal`, `indexmap`, `thiserror`, nothing that talks to a database or the network — and its
+manifest enforces that at build-file level rather than by convention: adding an I/O dependency to it
+is a compile-time question, not a review comment. `umfl-server` is `axum` + `sqlx` + all I/O, laid
+out package-by-feature: one module per domain concept
+(`hero`, `map`, `tournament`, `scoring`, `r#match`, `matchimport`, `standings`, `manager`), plus
+`auth`, `http`, `error.rs`, `ratelimit.rs`, `state.rs` and `config.rs`.
 
-**The read/write split is the central convention**, and the class names carry it: a plain
-`*Repository` is the Spring Data JDBC write/aggregate-loading side, a `*Query`/`*QueryRepository` is
-a hand-written `JdbcClient` read projection, and an `*AdminRepository` is a `JdbcClient` *write* for
-the composite-keyed link tables Spring Data JDBC can't map. Don't reach for a repository derived-query
-method when the screen wants a joined projection, and don't add an ORM. There is one `*Cache` —
-`MatchResultCache`, an in-memory read-through in front of `MatchResultQuery` — and it exists only
-because its key has a complete invalidation signal (see the standings section). A second one wants
-that same argument made explicitly, not a precedent.
+**The read/write split is the central convention**, and it is kept by filename inside each feature
+module rather than by class suffix: `query.rs` is the hand-written `sqlx::query_as!` read side,
+`writer.rs` is aggregate writes, `pool_admin.rs` is writes to a composite-keyed link table
+(`tournament_heroes`, `tournament_maps`), and `service.rs`/`admin_service.rs` are the transaction
+boundaries — the file that calls `pool.begin()` is the file responsible for the whole unit of work, so
+the boundary stays auditable file by file. There are no injected dependencies or
+a DI container to mock: everything is a free `async fn` taking `impl PgExecutor<'_>` (composes inside
+a transaction or outside one) or `&mut PgConnection` (part of somebody else's transaction) or, for a
+service, `&AppState`. `matchimport::scraper::ScraperClient` is the one trait in the whole crate,
+because it is the one genuine test seam (`tests/it/match_import.rs`'s `StubScraper` swaps it by
+mutating `AppState`); reaching for a second trait is almost always reproducing dependency injection
+rather than porting the read/write split. There is one cache — `r#match::cache::MatchResultCache`, an
+in-memory read-through in front of `r#match::query::find_by_tournament` — and it exists only because
+its key has a complete invalidation signal (see the standings section). A second one wants that same
+argument made explicitly, not a precedent.
 
-`TournamentEntry` is the manager-facing aggregate root — it owns `EntrySlot`s via `@MappedCollection`
-(list index → `entry_slots.slot_index`) and is saved as one unit. `managers` is written on
-JIT-provisioning in `prod`. Everything else is written only through the Admin API, whose own
-aggregates (`TournamentMatch`, `ScoringRuleSet`, `Hero`, `GameMap`) are described under Admin API
-below; nothing outside that surface writes reference data or results.
+DTOs live with their feature module rather than in a shared file: it removes the worst merge contention
+between people working on different features at once, without changing any JSON shape.
+`umfl_domain::tournament::TournamentEntry`
+is the manager-facing aggregate root, owning `EntrySlot`s by tournament-entry id; `managers` is
+written on JIT-provisioning in `prod`. Everything else is written only through the Admin API, whose
+own writers (`r#match::writer`, `scoring::writer`, `hero::writer`, `map::writer`) are described under
+Admin API below; nothing outside that surface writes reference data or results.
 
 ### Invariants
 
@@ -218,26 +234,26 @@ below; nothing outside that surface writes reference data or results.
 - **No cost snapshot.** `entry_slots` stores only the hero; cost is joined live, so re-pricing a hero
   re-prices an *unlocked* roster. That is intended. What *is* snapshotted is
   `tournament_entries.credit_grant`, copied off the tournament at registration —
-  `RosterPolicy.validateLock` takes the budget from the entry, never the tournament.
+  `roster_policy::validate_lock` takes the budget from the entry, never the tournament.
 - **Nothing writes points.** Match results are written by the Admin API (see below), but every
-  point total is still derived at read time in `StandingsService`; `totalCost` is derived from
-  slots. Do not materialise either. `MatchResultCache` is not a loophole in that: it holds the
-  fold's *input* — the assembled match list — in memory, never its output, and the asymmetry is
-  the point. Matches have exactly one writer and so a complete invalidation signal; a total would
-  depend on coefficients and costs that are retuned with a bare UPDATE and announce nothing. So
-  the rules, rosters and prices behind a board stay read live on every request, and only a
-  *match* can ever be a write behind.
+  point total is still derived at read time by `umfl_domain::standings::board`/`ticker`, called from
+  `standings::service`; total cost is derived from slots. Do not materialise either.
+  `MatchResultCache` is not a loophole in that: it holds the fold's *input* — the assembled match list
+  — in memory, never its output, and the asymmetry is the point. Matches have exactly one writer and
+  so a complete invalidation signal; a total would depend on coefficients and costs that are retuned
+  with a bare UPDATE and announce nothing. So the rules, rosters and prices behind a board stay read
+  live on every request, and only a *match* can ever be a write behind.
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
   `scoring_coefficients`, the budget is `tournaments.credit_grant` — both retuned with an UPDATE. Don't
-  reintroduce a tunables block in `application.yml`. There are exactly two exceptions, and both are
-  *infrastructure* rather than domain data — the same category as `DB_URL`, and unreadable from a
-  database the app hasn't reached yet: `rate-limit.api.*` (`RateLimitProperties`, see Profiles above),
-  operational tuning for how hard a deployed instance throttles per client IP; and `scraper.*`
-  (`ScraperProperties`, see Match import below), the address of the scraper sidecar. Neither belongs
-  in the database the way a scoring weight or a budget does. A third would want the same
-  justification, not a precedent — `MatchResultCache`'s sizing is Kotlin constants in a companion
-  object for exactly that reason, as is `StandingsSseHub`'s: how many match lists a JVM holds is
-  neither domain data nor deployment topology.
+  reintroduce a tunables block. There are exactly two exceptions, and both are *infrastructure* rather
+  than domain data — the same category as `DB_URL`, and unreadable from a database the process hasn't
+  reached yet: `RATE_LIMIT_API_*` (`RateLimitConfig`, see Profiles above), operational tuning for how
+  hard a deployed instance throttles per client IP; and `SCRAPER_BASE_URL` (see Match import below),
+  the address of the scraper sidecar. Neither belongs in the database the way a scoring weight or a
+  budget does. A third would want the same justification, not a precedent —
+  `standings::sse::MAX_SUBSCRIBERS_PER_TOURNAMENT`/`MAX_TOTAL_SUBSCRIBERS` and `MatchResultCache`'s
+  sizing are plain Rust constants for exactly that reason: how many match lists or SSE subscribers a
+  process holds is neither domain data nor deployment topology.
 - **A match names where it is recorded elsewhere, and that link is its identity.**
   `tournament_matches.external_link` is `not null` with a unique index per tournament
   (`uq_tournament_match_external_link`) — folded into the `V1` baseline by the most recent squash;
@@ -250,164 +266,166 @@ below; nothing outside that surface writes reference data or results.
   migration were backfilled with a synthetic `urn:umfl:match:<id>`. The uniqueness is scoped to the
   tournament rather than global, matching the importer's own per-tournament check, so the preview
   never reports "no duplicate" and then fails the save. Correcting a match reuses its link freely —
-  `correct` updates the row in place.
+  `r#match::admin_service::correct` updates the row in place.
 - **A match is a series, and every game in it has a winner.** `tournament_matches` is a best-of-N
   between two humans; each `match_games` row carries its own map and its own two
   `match_game_participants` rows, so a side can pilot a different hero per game. Exactly one of those
   two rows is flagged `is_winner` — a partial unique index stops two, and
-  `MatchResultPolicy.NOT_EXACTLY_ONE_WINNER` stops zero. **There is no draw**, and the loser never
-  survives: `MatchResultPolicy.LOSER_HAS_POSITIVE_HEALTH` requires the losing side to finish on 0 or
-  less (an overkill hit lands it below zero), and every recorded game in `V3__demo_fixtures.sql`
-  respects that. Nothing stores who won the *series*: `MatchListAdmin` counts games won client-side,
+  `MatchRule::NotExactlyOneWinner` (`umfl_domain::match_policy`) stops zero. **There is no draw**, and
+  the loser never survives: `MatchRule::LoserHasPositiveHealth` requires the losing side to finish on
+  0 or less (an overkill hit lands it below zero), and every recorded game in `V3__demo_fixtures.sql`
+  respects that. Nothing stores who won the *series*: the admin frontend counts games won client-side,
   like every other derived number here.
 - **The draft is recorded in full, as picks *and* bans, and both name a side.** `hero_bans
   (match_id, hero_id, ban_type, side)` holds the heroes struck out of a series;
   `match_hero_picks (match_id, side, hero_id)` holds the heroes each side took. Both are per series,
-  never per game. A recorded draft is *complete* — `MatchResultPolicy.PLAYED_HERO_NOT_DRAFTED`
-  rejects a game whose hero is missing from that side's picks — which is what lets `APPEARANCE` be
-  "was drafted and not banned" rather than "played". `BANNED_HERO_DRAFTED` keeps the two halves
-  disjoint. There is deliberately no `unique (match_id, hero_id)` on the picks: games are
-  independent, so a hero may legitimately go to one side in game 1 and the other in game 2, and
-  `MatchResult.draftedHeroIds` de-duplicates instead. `hero_bans` *does* keep that key, so a hero is
-  struck at most once per series however many sides wanted it — which is what `DUPLICATE_BAN` means.
+  never per game. A recorded draft is *complete* — `MatchRule::PlayedHeroNotDrafted` rejects a game
+  whose hero is missing from that side's picks — which is what lets `APPEARANCE` be "was drafted and
+  not banned" rather than "played". `MatchRule::BannedHeroDrafted` keeps the two halves disjoint.
+  There is deliberately no `unique (match_id, hero_id)` on the picks: games are independent, so a hero
+  may legitimately go to one side in game 1 and the other in game 2, and
+  `MatchResult::drafted_hero_ids` (`umfl_domain::match_result`) de-duplicates instead. `hero_bans`
+  *does* keep that key, so a hero is struck at most once per series however many sides wanted it —
+  which is what `MatchRule::DuplicateBan` means.
 - **A ban's `side` is the draft it came out of, not who struck it.** `ban_type` already says that:
   `SELF_BAN` is a side striking one of its own, `OPPONENT_BAN` the other side striking it, and a
-  `PRE_BAN` precedes side assignment and so carries no side at all (`BAN_SIDE_INVALID` rejects one
-  that does). The column is **nullable and stays that way**: rows written before it existed have no
-  side and cannot be given one after the fact, so a typed ban without one is legal rather than making
-  an already-recorded match uncorrectable — `BAN_SIDE_INVALID` polices an *impossible* side, never a
-  missing one. The column arrived as a dedicated `V7__hero_ban_side.sql` migration, since folded into
-  the `V1` baseline like `V9__external_link_required.sql` above; tightening the invariant to "every
-  typed ban names a side" still needs a migration that can first attribute the rows already in the
-  table, and cannot be done by editing the baseline, which fails Flyway validation and stops the app
-  booting (see Commands). Scoring never reads the column: `MatchMetrics.banOfType` prices a ban by
-  category alone, because points are per hero and never per player.
+  `PRE_BAN` precedes side assignment and so carries no side at all (`MatchRule::BanSideInvalid`
+  rejects one that does). The column is **nullable and stays that way**: rows written before it
+  existed have no side and cannot be given one after the fact, so a typed ban without one is legal
+  rather than making an already-recorded match uncorrectable — `BanSideInvalid` polices an
+  *impossible* side, never a missing one. The column arrived as a dedicated `V7__hero_ban_side.sql`
+  migration, since folded into the `V1` baseline like `V9__external_link_required.sql` above;
+  tightening the invariant to "every typed ban names a side" still needs a migration that can first
+  attribute the rows already in the table, and cannot be done by editing the baseline, which fails
+  Flyway checksum validation. Scoring never reads the column: `umfl_domain::match_metrics`'s ban
+  extractors price a ban by category alone, because points are per hero and never per player.
 - **No `player` entity.** Every point is scored per *hero*: no metric extractor, no coefficient and
   no standings query reads the human who piloted it. So the competitor is
   `match_participants.player_label` — one row per side for the whole series, nullable free text with
-  no table, no FK, no repository and deliberately no admin API. An admin records a new competitor by typing their name. It is display
-  text for the ticker and the admin match list, nothing more, and `MatchResultPolicy` never validates
-  it (a blank label normalises to null in `AdminMatchService`). Promote it to a real table only if
-  something starts scoring or ranking the humans — until then, a `player` table only buys you CRUD
-  you have to build and a foreign key that can 500.
+  no table, no FK, no repository and deliberately no admin API. An admin records a new competitor by
+  typing their name. It is display text for the ticker and the admin match list, nothing more, and
+  `umfl_domain::match_policy::validate` never validates it (a blank label normalises to `None` in
+  `r#match::admin_service`). Promote it to a real table only if something starts scoring or ranking
+  the humans — until then, a `player` table only buys you CRUD you have to build and a foreign key
+  that can 500.
 
-Domain rules live in pure `object`s with no Spring or persistence dependency — `RosterPolicy`,
-`MatchMetrics`, `ScoringEngine`. New rules belong there, tested directly, not inside a `@Service`.
+Domain rules live in pure functions in `umfl-domain`, with no `sqlx`/`axum`/I/O dependency at all —
+`roster_policy`, `match_policy`, `match_metrics`, `scoring_engine`, `scoring_rule_set_policy`. New
+rules belong there, tested directly, not inside a `service.rs`.
 
-`RosterPolicy.validateDraft` deliberately permits over-budget selections (the builder is a
-scratchpad, the meter just runs past 100%); `validateLock` adds the budget and roster-size checks.
+`roster_policy::validate_draft` deliberately permits over-budget selections (the builder is a
+scratchpad, the meter just runs past 100%); `validate_lock` adds the budget and roster-size checks.
 Both return *all* violations at once so the UI can highlight every problem in one pass. The rule
 codes are the `RosterRule` enum, documented constant by constant.
 
-`MatchMetrics` is a registry keyed by the free-form `scoring_coefficients.metric` string. It
+`match_metrics` is a registry keyed by the free-form `scoring_coefficients.metric` string. It
 implements `APPEARANCE`, `SELF_BAN`, `OPPONENT_BAN`, `WIN`, `LOSS`, `HEALTH_REMAINING`,
 `HEALTH_DIFFERENTIAL`, `HEALTH_DIFFERENTIAL_TWO_WAY`, `SHUTOUT`, and **silently ignores everything
-else** — unknown keys score
-zero, are dropped from the leaderboard's columns and throw nothing. The seed's `CROWD_FAVOURITE` is
-the deliberate proof of that; leave it unimplemented. There is deliberately no `DRAW`: every game
-has exactly one winner (see the invariant above), so `WIN` and `LOSS` are exhaustive within a game
-and a `DRAW` column would price something that cannot be recorded. Extractors take a `MetricContext`
-(the hero's role in one match — `Played`, which is scoped to *one game* of it, or the per-series
-`Drafted`/`Banned`), not a bare participant row, because
-`HEALTH_DIFFERENTIAL` needs the opponent and `APPEARANCE`/`SELF_BAN`/`OPPONENT_BAN` have no
-participant row at all — they price the draft, reading `hero_bans.ban_type` off the match or the role
-itself, so a hero banned `PRE_BAN` (struck before sides are known) scores neither ban metric.
-`HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not win
-the game scores 0.0 rather than a negative differential, since there is no losing side of that
+else** — unknown keys score zero, are dropped from the leaderboard's columns and error nothing. The
+seed's `CROWD_FAVOURITE` is the deliberate proof of that; leave it unimplemented. There is
+deliberately no `DRAW`: every game has exactly one winner (see the invariant above), so `WIN` and
+`LOSS` are exhaustive within a game and a `DRAW` column would price something that cannot be
+recorded. Extractors take a `MetricContext` (`umfl_domain::match_result` — the hero's role in one
+match: `Played`, scoped to *one game* of it, or the per-series `Drafted`/`Banned`), not a bare
+participant row, because `HEALTH_DIFFERENTIAL` needs the opponent and
+`APPEARANCE`/`SELF_BAN`/`OPPONENT_BAN` have no participant row at all — they price the draft, reading
+`hero_bans.ban_type` off the match or the role itself, so a hero banned `PRE_BAN` (struck before sides
+are known) scores neither ban metric. `HEALTH_DIFFERENTIAL` is also win-gated: a hero that did not
+win the game scores 0.0 rather than a negative differential, since there is no losing side of that
 metric to price. `HEALTH_DIFFERENTIAL_TWO_WAY` is the ungated half of that pair and the *only*
-difference between them — same gap (both share the private `healthGap` helper), but the loser scores
+difference between them — same gap (both share a private `health_gap` helper), but the loser scores
 its negative, so a heavy defeat costs what a clean victory earns. They are two registry keys rather
 than one key with a flag because a rule set is a set of weighted metric rows: an admin picks the
 behaviour by naming it, and pricing both is legal. Don't collapse them back into one extractor.
-`WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and
-drops game 2 of a Bo3 collects one of each.
+`WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and drops game 2 of a
+Bo3 collects one of each.
 
-`MatchResult.heroContexts()` is where per-game and per-series part ways, and the split is the whole
-reason `APPEARANCE` is not multiplied by series length: a hero that played yields one `Played`
-context *per game* plus exactly one `Drafted` context, a hero drafted and never fielded yields only
-the `Drafted` one, and a banned hero yields only `Banned`. `StandingsService.ticker` has to bridge
-that, since its rows are games: it banks the `Drafted` context against the hero's **first** game so
-the ticker's per-game points still sum to what the board gained, and names the never-fielded picks
-separately as `draftedUnplayedHeroNames`.
+`MatchResult::hero_contexts()` (`umfl_domain::match_result`) is where per-game and per-series part
+ways, and the split is the whole reason `APPEARANCE` is not multiplied by series length: a hero that
+played yields one `Played` context *per game* plus exactly one `Drafted` context, a hero drafted and
+never fielded yields only the `Drafted` one, and a banned hero yields only `Banned`.
+`umfl_domain::standings::ticker` has to bridge that, since its rows are games: it banks the `Drafted`
+context against the hero's **first** game so the ticker's per-game points still sum to what the board
+gained, and names the never-fielded picks separately.
 
-`StandingsService` returns a `StandingsBoard` that carries its own `metrics` column definitions —
-the backend cannot know the columns until it reads `scoring_coefficients`. Ranking is standard
-competition ranking (1, 2, 2, 4). The ticker's polling key is **`sinceMatchId`** (monotonic
-`bigserial`), never `playedAt`: parallel tables in a round share a timestamp.
+`umfl_domain::standings::board` returns a `StandingsBoard` that carries its own `MetricColumn`
+definitions — the backend cannot know the columns until it reads `scoring_coefficients`. Ranking is
+standard competition ranking (1, 2, 2, 4), computed by the private `rank()` in the same module. The
+ticker's polling key is **`sinceMatchId`** (monotonic `bigserial`), never `playedAt`: parallel tables
+in a round share a timestamp.
 
-`GET /api/tournaments/{id}/standings/stream` is an SSE endpoint (`StandingsController` →
-`StandingsSseHub`) that pushes a bare "something changed" event after `AdminMatchService.record` /
-`correct` / `delete` commits (`StandingsUpdateEvent`, delivered via
-`@TransactionalEventListener(phase = AFTER_COMMIT)` so it only fires once the row is actually
-visible). The event carries no board/ticker payload — the frontend already knows how to pull fresh
+`GET /api/tournaments/{id}/standings/stream` is an SSE endpoint (`standings::sse::StandingsSseHub`)
+that pushes a bare "something changed" event after `r#match::admin_service::record`/`correct`/`delete`
+commits. The event carries no board/ticker payload — the frontend already knows how to pull fresh
 data via the existing `/standings` and `/matches` endpoints, so the stream is purely a "poll now"
 signal, not a second copy of the data.
 
-That push is also what makes the read path bursty, and `MatchResultCache` (`com.umfl.match`) is the
+That push is also what makes the read path bursty, and `MatchResultCache` (`r#match::cache`) is the
 answer to it: one write tells up to 200 tabs per tournament to refetch, and each pulls *both* the
 board and the ticker head, so uncached that is hundreds of simultaneous runs of
-`MatchResultQuery.findByTournament`'s six unbounded queries against a ten-connection pool. The cache
-is a read-through front for that query — `StandingsService` calls `findByTournament` /
-`findByTournamentSince` on the cache, never on the query — and Caffeine's per-key atomic `get`
-collapses the burst onto one load. **It holds the fold's input only**; see the "Nothing writes
-points" invariant for why a cached `StandingsBoard` would be the thing with no complete
-invalidation signal. The ticker's page is sliced out of the same cached list rather than requeried:
-`(played_at, id)` is a total order, so reversing the ascending list *the database ordered* is
-exactly the ticker's `desc` — which is why `findByTournamentSince` survives with no production
-caller, as the SQL oracle `MatchResultCacheIntegrationTest` checks the slice against.
+`r#match::query::find_by_tournament`'s six unbounded queries against a ten-connection pool. The cache
+is a read-through front for that query — `standings::service` calls `find_by_tournament`/
+`find_by_tournament_since` on the cache, never on the query directly — and moka's `try_get_with` is
+atomic per key, collapsing the burst onto one load. **It holds the fold's input only**; see the
+"Nothing writes points" invariant for why a cached `StandingsBoard` would be the thing with no
+complete invalidation signal. The ticker's page is sliced out of the same cached list rather than
+requeried: `(played_at, id)` is a total order, so reversing the ascending list *the database ordered*
+is exactly the ticker's `desc` — which is why `find_by_tournament_since` survives with no production
+caller, as `tests/it/match_cache.rs` checks the slice against a SQL oracle.
 
-Three details there are load-bearing and easy to undo by accident. **Invalidation listens to
-`StandingsUpdateEvent` twice**, once as a plain `@EventListener` (immediately, inside the writing
-transaction, so the writer sees its own effect) and once as `@TransactionalEventListener` — and that
-second one is **`AFTER_COMPLETION`, not `AFTER_COMMIT`**, because a rollback un-writes rows the
-cache may already have loaded inside that transaction and so invalidates just as surely as a commit.
-`StandingsSseHub` stays `AFTER_COMMIT` on the same event, since telling browsers "something changed"
-about a rolled-back write would be a lie; the asymmetry is deliberate. **`invalidate` bumps a
-per-tournament version and deliberately does not evict** — a bumped version already means no reader
-accepts the entry, and Caffeine's `invalidate` would have to take the key's lock, putting an admin's
-write behind a stranger's in-flight query. That version stamp is what closes the
+Three details there are load-bearing and easy to undo by accident. **Every write announces
+invalidation twice, at two different moments**: `r#match::admin_service`'s `record`/`correct`/`delete`
+each call `announce` before the transaction commits (so the writer sees its own effect immediately)
+and `announce_completed` after the transaction *ends*, on **commit or rollback both** — a rollback
+un-writes rows the cache may already have loaded inside that transaction, and so invalidates just as
+surely as a commit. `announce_committed`, the third call at each site, fires **only** on commit, and
+is what `StandingsSseHub` listens to — telling browsers "something changed" about a rolled-back write
+would be a lie, so the SSE push and the cache invalidation deliberately fire on different signals.
+**`invalidate` bumps a per-tournament version and deliberately does not evict** — a bumped version
+already means no reader accepts the entry, and an eager evict would have to take the key's lock,
+putting an admin's write behind a stranger's in-flight query. That version stamp is what closes the
 invalidate-during-load race (a reader that misses, loads across a write, and would otherwise store a
-stale list nothing ever invalidates again). And **there is no `expireAfterWrite`**: a TTL cannot add
-a guarantee the stamp does not already give, and would only turn a missing hook into an intermittent
-bug. A hero or board **rename** is the one staleness a match write cannot announce, since
-`heroName`/`mapName` are copied into an assembled `MatchResult` — `AdminHeroService.update` and
-`AdminMapService.update` publish `ReferenceDataRenamedEvent` for it, an event rather than a direct
-call so it gets the same two-phase treatment. `AdminTournamentService.delete` needs no hook: every
-standings route calls `requireTournament` and 404s first.
+stale list nothing ever invalidates again — the stamp is read *before* the load starts, so a spurious
+mismatch costs one extra load rather than swallowing a real invalidation). And **there is no TTL**: an
+expiry cannot add a guarantee the stamp does not already give, and would only turn a missing hook into
+an intermittent bug. A hero or board **rename** is the one staleness a match write cannot announce,
+since `hero_name`/`map_name` are copied into an assembled `MatchResult` — `hero::admin_service::update`
+and `map::admin_service::update` call `state.match_cache.invalidate_all()` directly when the name
+actually changed, the same two-phase treatment a match write gets. `tournament::admin_service::delete`
+needs no hook: every standings route calls `require_tournament` and 404s first.
 
-Controllers take the caller via `@CurrentManager` (resolved by `CurrentManagerArgumentResolver`
-against the `CurrentManagerProvider` seam); a nullable parameter yields `currentOrNull()`. Errors go
-through `GlobalExceptionHandler` as RFC 7807 problem details: the domain exceptions in
-`common/DomainExceptions.kt` each map to a status there, and the three `*RuleException` types all
-render 422 with a `violations` array. Throw one of those rather than a bare `ResponseStatusException`.
+Handlers take the caller via the `CurrentManager`/`MaybeManager` extractors (`crate::auth`); a route
+that permits anonymous access takes `MaybeManager` instead. Errors go through `ApiError`
+(`crate::error`) as RFC 7807 problem details: `DomainError` (`umfl_domain`) covers the six domain
+exceptions with their status mapping, and `RosterRule`/`MatchRule`/`ScoringRule` violations all render
+422 with a `violations` array. Convert into one of `ApiError`'s existing variants rather than adding
+a bare status code — every variant is defined once, in `error.rs`, precisely so a feature never has
+to decide its own error shape. Every error this API produces is an RFC 7807 document; there is no
+bare status code or plain-text body anywhere in a handler.
 
-`GlobalExceptionHandler` **extends `ResponseEntityExceptionHandler`, and must keep doing so**:
-`ExceptionHandlerExceptionResolver` runs ahead of `DefaultHandlerExceptionResolver`, so the
-`@ExceptionHandler(Exception)` catch-all intercepts Spring MVC's own exceptions before the resolver
-that knows their real status — without the base class an unparseable path variable, a malformed body,
-a wrong HTTP method and a `@PreAuthorize` denial all answered 500. That inheritance is also a
-constraint: the base already maps every type listed on its `handleException`, and mapping one twice
-is an ambiguous-handler error at *context startup*, so customise anything in that set by overriding
-the matching `protected` hook (as `handleMethodArgumentNotValid` does to keep the `fields` property),
-never with a second `@ExceptionHandler`. `GlobalExceptionHandlerMvcTest` pins the statuses through a
-real dispatch — a direct unit call cannot see resolver ordering, which is the whole bug.
+Never use a bare `axum::Json`, `Path` or `Query` as a request extractor in a handler — use
+`http::extract::{AppJson, ValidJson, AppPath, AppQuery}` instead. A bare extractor rejects with
+axum's plain-text body and no problem type, which is a wire-contract break; the wrappers reject with
+the same RFC 7807 shape every other error does. (`axum::Json` as a **response** type is fine — the
+rule is about the request side.) This is grep-able on purpose:
+`grep -rn 'axum::Json<\|Json(\w*): *Json<\|Path(\|Query(' crates/umfl-server/src --include='*.rs'`.
 
-`HeroSort` holds ORDER BY fragments as an enum whitelist because sort keys can't be parameterised —
-keep new sorts inside that enum.
+`hero::query::HeroSort` holds ORDER BY fragments as an enum whitelist because sort keys can't be
+parameterised — keep new sorts inside that enum.
 
-Migrations are `db/migration/V*__*.sql` at the **repository root** (see Commands above for why it
-moved there), forward-only, squashed to a single `V1__core_schema.sql` baseline (see Commands above
-for why, and for the seed's separate Flyway location). Tables the app loads or writes as aggregates
-carry a surrogate `bigserial` id next to a unique natural key because Spring Data JDBC can't map
-composite primary keys; the pure link tables (`tournament_heroes`, `tournament_maps`, `entry_slots`,
-`hero_bans`, `match_hero_picks`, `match_game_participants`) keep natural composite keys. The
-integration tests assert on the seed's numbers exactly — changing a seeded price or result means
-updating `V3__demo_fixtures.sql` and the tests together. New *league* data past that fixed baseline
-goes through the Admin API (see below), not another migration. The one thing that legitimately
-arrives as a migration is reference data: a hero or a board Restoration Games releases later belongs
-in a forward migration alongside `V2__reference_data.sql` (or through `/api/admin/heroes` /
-`/api/admin/maps`, which write the same tables), since a `prod` database has to have it without
-anyone hand-entering 74 heroes.
+Migrations are `db/migration/V*__*.sql` at the **repository root**, forward-only, squashed to a single
+`V1__core_schema.sql` baseline (see Commands above for why, and for the seed's separate Flyway
+location). Tables the app loads or writes as aggregates carry a surrogate `bigserial` id next to a
+unique natural key; the pure link tables (`tournament_heroes`, `tournament_maps`, `entry_slots`,
+`hero_bans`, `match_hero_picks`, `match_game_participants`) keep natural composite keys and are read
+and written through hand-written SQL rather than an aggregate mapper. The integration tests assert on
+the seed's numbers exactly — changing a seeded price or result means updating
+`V3__demo_fixtures.sql` and the tests together. New *league* data past that fixed baseline goes
+through the Admin API (see below), not another migration. The one thing that legitimately arrives as
+a migration is reference data: a hero or a board Restoration Games releases later belongs in a
+forward migration alongside `V2__reference_data.sql` (or through `/api/admin/heroes`/`/api/admin/maps`,
+which write the same tables), since a `prod` database has to have it without anyone hand-entering
+74 heroes.
 
 ## Frontend architecture
 
@@ -416,9 +434,9 @@ Vue 3 `<script setup>` + Pinia setup-stores + Vue Router, Tailwind v4. `@/` alia
 `src/api/client.ts` is the only place that calls `fetch` — it attaches the Supabase bearer token,
 unwraps RFC 7807 bodies into `ApiError` (with `.violations` for 422s), and exposes a typed `api`
 object. Add endpoints there, with matching types in `src/api/types.ts` — that file is the contract
-anchor, so change it first and let `npm run type-check` point at every consumer. Jackson runs with
-`default-property-inclusion: non_null`, so nullable fields are *absent*, not `null`; templates need a
-`?? '—'` fallback (e.g. `mapName`).
+anchor, so change it first and let `npm run type-check` point at every consumer. The backend
+serializes nullable response fields with `skip_serializing_if = "Option::is_none"`, so a nullable
+field is *absent* on the wire, not `null`; templates need a `?? '—'` fallback (e.g. `mapName`).
 
 Stores: `auth` (Supabase session), `manager`, `heroes` (keyed by tournament — cost is
 tournament-scoped), `tournaments`, `roster`, `standings`. `roster` keeps an optimistic `selectedIds`
@@ -430,19 +448,20 @@ removes one, so an incremental "since" fetch could miss either. There's still no
 timer; the server-pushed event is what triggers each `refresh()`. The stream is closed and reopened
 on tournament switch and closed on unmount.
 
-`src/domain` is this side's answer to the backend's pure `object`s: plain functions over plain data,
-no Vue import, tested as data rather than through a `mount()`. A rule that a component can state
-without a DOM belongs there. Two modules live in it.
+`src/domain` is this side's answer to the backend's pure `umfl-domain` functions: plain functions over
+plain data, no Vue import, tested as data rather than through a `mount()`. A rule that a component can
+state without a DOM belongs there. Two modules live in it.
 
-`src/domain/rosterPolicy.ts` intentionally duplicates the Kotlin budget arithmetic (`budgetStatus`)
-so the meter reacts on click. **If you change that arithmetic, change both sides** —
-`RosterPolicy.kt` and `rosterPolicy.ts` — and their tests. The server stays authoritative.
+`src/domain/rosterPolicy.ts` intentionally duplicates the Rust budget arithmetic
+(`roster_policy::budget_status`) so the meter reacts on click. **If you change that arithmetic, change
+both sides** — `crates/umfl-domain/src/roster_policy.rs` and `rosterPolicy.ts` — and their tests. The
+server stays authoritative.
 
 `src/domain/matchForm.ts` is `MatchResultWizard.vue`'s whole domain half — the `MatchForm` model,
 the seeding (`formFromPreview`, `formFromMatch`), the payload conversion (`toPayload`), the dropdown
 option lists, the edits that cascade (`removeDraftPick`, `removeGame`, `assignBanToSide`,
-`setWinner`) and `validate`. It has no counterpart in Kotlin the way `rosterPolicy.ts` does: it is
-not a mirror of a server rule but the arithmetic that keeps this one *form* consistent with the API
+`setWinner`) and `validate`. It has no counterpart on the backend the way `rosterPolicy.ts` does: it
+is not a mirror of a server rule but the arithmetic that keeps this one *form* consistent with the API
 it posts to. The wizard and each of its section components import it as `matchForm.*`, so a
 `matchForm.` call site marks a rule and anything without one is rendering. Tests split the same way — `matchForm.spec.ts` is data-in/data-out
 and owns every rule, `MatchResultWizard.spec.ts` mounts only to pin the wiring between the two.
@@ -452,7 +471,7 @@ a session plus a `beforeEnter` guard that bounces to the lobby unless the manage
 the tournament accepts registration. `/admin` (`AdminDashboardView.vue`) has a `beforeEnter` guard
 that bounces non-admins to the lobby, and `AppShell.vue` only renders the nav link when
 `manager.isAdmin` — both are UI convenience, not the security boundary, since every Admin API call is
-still `hasRole("ADMIN")`-gated server-side.
+still `Access::Admin`-gated server-side.
 
 The UI implements the Stitch "Tactical Analytics" design system: obsidian surfaces, 1px borders,
 **zero border radius everywhere** (`main.css` sets `* { border-radius: 0 }` as a base rule), neon
@@ -489,94 +508,94 @@ plus optional `VITE_DEV_MANAGER_ID` to skip Supabase Auth against a dev backend.
 
 ## Admin API
 
-`/api/admin/**`, `hasRole("ADMIN")`-gated, backed by `managers.is_admin` (our own data, independent of
+`/api/admin/**`, `Access::Admin`-gated, backed by `managers.is_admin` (our own data, independent of
 any identity provider). Covers create/update for tournaments, heroes, maps, per-tournament hero
 pool/pricing (`tournament_heroes`), per-tournament board pool (`tournament_maps`), and scoring rule
 sets/coefficients, plus create/update/delete for match results. Both pools also support removal, and
-the two removals are deliberately asymmetric: dropping a hero from `tournament_heroes` is always
-allowed and simply re-prices any roster still holding it to 0 (the "no cost snapshot" invariant
-above, applied to a removal rather than a re-price), while dropping a map from `tournament_maps` is
-rejected with a `ConflictException` when the tournament has a recorded game on it, since
-`match_games` carries a composite FK onto that row. That FK is `DEFERRABLE INITIALLY DEFERRED` so a
-tournament delete (which cascades to `tournament_maps` and, one level deeper, to `match_games`) is not
-tripped by cascade ordering — which is why `AdminMapService.removeFromPool` calls
-`MapPoolAdminRepository.checkMapInPoolNow()` (`set constraints … immediate`) after its DELETE: the
-violation has to surface inside the method that can still name the map, not at commit.
+the two removals are deliberately asymmetric: dropping a hero from `tournament_heroes`
+(`hero::pool_admin::remove_from_pool`) is always allowed and simply re-prices any roster still holding
+it to 0 (the "no cost snapshot" invariant above, applied to a removal rather than a re-price), while
+dropping a map from `tournament_maps` (`map::admin_service::remove_from_pool`) is rejected with
+`DomainError::conflict` when the tournament has a recorded game on it, since `match_games` carries a
+composite FK onto that row. That FK is `DEFERRABLE INITIALLY DEFERRED` so a tournament delete (which
+cascades to `tournament_maps` and, one level deeper, to `match_games`) is not tripped by cascade
+ordering — which is why `map::admin_service::remove_from_pool` calls
+`map::pool_admin::check_map_in_pool_now()` (`set constraints … immediate`) after its DELETE: the
+violation has to surface inside the function that can still name the map, not at commit.
 
-The reference and result tables have a Spring Data JDBC write side: `Hero`, `GameMap`,
-`TournamentMatch` (owning `participants` as a `List` keyed by `side`, plus `games`, `bans` and
-`picks` as `Set`-mapped children — no `keyColumn` there,
-since none carries a list-position column; each `MatchGame` in turn owns its own participants)
-and `ScoringRuleSet` (owning `coefficients`). `picks` hangs off the match root rather than off
-`MatchParticipant`, where it would read more naturally: `match_participants` is composite-keyed and
-Spring Data JDBC cannot map a child of an entity keyed that way. The *API* still hangs the draft off
-the side that owns it — `MatchParticipantRequest.draftedHeroIds` in, `MatchParticipantResult.draftedHeroes`
-out, with `side` the list position as it already is for `player_label` — and `AdminMatchService.toPicks`
-does the transposition, which is also why an out-of-range side is unrepresentable and no rule polices
-one. `tournament_heroes` and `tournament_maps` stay
-composite-keyed link tables with no Kotlin entity — `HeroPoolAdminRepository`/`MapPoolAdminRepository`
-write them via `JdbcClient`, the same read/write split the rest of the app already uses.
+`hero`, `map`, `r#match` and `scoring` each own a `writer.rs` that inserts/updates the aggregate with
+plain `sqlx` statements — there is no ORM anywhere in this crate, so there is no distinction between
+what an ORM could map automatically and what needs hand-written SQL; every write is hand-written, and
+the read/write split (query.rs vs. writer.rs vs. pool_admin.rs) is a convention rather than a tooling
+constraint. A `TournamentMatch`'s participants, games, bans and picks
+are all written inside `r#match::writer`'s one transaction. The *API* still hangs the draft off the
+side that owns it — `MatchParticipantRequest.drafted_hero_ids` in, `MatchParticipantResult
+.drafted_heroes` out (`side` is the position in `participants`, as it already is for `player_label`) —
+and `r#match::admin_service::to_picks` does the transposition into per-side pick rows, which is also
+why an out-of-range side is unrepresentable and no rule polices one.
 
-`MatchResultPolicy` (pure, mirrors `RosterPolicy`) validates a match submission before save, raising
-`MatchRuleException` (422, same shape as `RosterRuleException`, kept as a separate type rather than
-merged into it). The checks are the `MatchRule` enum, one KDoc line each — read them there. Two
-enforce the no-draw invariant above and are the ones to know before touching the policy:
-`NOT_EXACTLY_ONE_WINNER` treats zero winners as being as wrong as two, and
-`LOSER_HAS_POSITIVE_HEALTH` rejects a loser who survived. Three more police the draft:
-`PLAYED_HERO_NOT_DRAFTED` is what makes a recorded draft complete (and so what makes `APPEARANCE`
-measurable), `BANNED_HERO_DRAFTED` keeps picks and bans disjoint, and `DUPLICATE_PICK` mirrors
-`DUPLICATE_BAN`. `BAN_SIDE_INVALID` polices the ban side described in the invariants above. Activating a scoring rule set deactivates any active sibling in the same transaction, since only one may be active per tournament. An unknown
-scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a non-blocking warning on the
-response, never rejected.
+`umfl_domain::match_policy::validate` (mirrors `roster_policy`) validates a match submission before
+save, raising a `Vec<MatchViolation>` the service converts into `ApiError::Domain` at the boundary
+(422, same shape as a roster rule breach). The checks are the `MatchRule` enum, one doc line each —
+read them there. Two enforce the no-draw invariant above and are the ones to know before touching the
+policy: `NotExactlyOneWinner` treats zero winners as being as wrong as two, and
+`LoserHasPositiveHealth` rejects a loser who survived. Three more police the draft:
+`PlayedHeroNotDrafted` is what makes a recorded draft complete (and so what makes `APPEARANCE`
+measurable), `BannedHeroDrafted` keeps picks and bans disjoint, and `DuplicatePick` mirrors
+`DuplicateBan`. `BanSideInvalid` polices the ban side described in the invariants above. Activating a
+scoring rule set deactivates any active sibling in the same transaction, since only one may be active
+per tournament. An unknown scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a
+non-blocking warning on the response, never rejected.
 
-`ScoringRuleSetPolicy` (pure, same pattern again) validates a rule set's coefficients on create and
-update, with rule codes `DUPLICATE_METRIC` and `MALFORMED_METRIC`, raising `ScoringRuleException` —
-a third 422 type of the same shape. Both checks run against the *normalised* metric, so `' win '`
-and `'Win'` are a duplicate of each other, and `MALFORMED_METRIC` mirrors the schema's
-`^[A-Z][A-Z0-9_]*$` CHECK in Kotlin. Without it a duplicated or hyphenated metric reached the
-database and came back as the `DataIntegrityViolationException` backstop's generic 409, which names
-nothing. The policy validates the *shape* of a metric name and never the *set* — an unimplemented
-metric stays a warning, per the paragraph above.
+`umfl_domain::scoring_rule_set_policy::validate` (pure, same pattern again) validates a rule set's
+coefficients on create and update, with rule codes `DUPLICATE_METRIC` and `MALFORMED_METRIC`,
+converted into the same 422 shape. Both checks run against the *normalised* metric, so `' win '` and
+`'Win'` are a duplicate of each other, and `MALFORMED_METRIC` mirrors the schema's
+`^[A-Z][A-Z0-9_]*$` CHECK. Without it a duplicated or hyphenated metric reached the database and came
+back as `ApiError::DataIntegrity`'s generic 409, which names nothing. The policy validates the *shape*
+of a metric name and never the *set* — an unimplemented metric stays a warning, per the paragraph
+above.
 
 ## Match import
 
-`POST /api/admin/tournaments/{id}/matches/import` (`AdminMatchImportController` → `MatchImportService`,
-package `com.umfl.matchimport`) turns a tabletopleague.com match URL into a reviewable draft, so an
-admin doesn't re-type a result the source site already has.
+`POST /api/admin/tournaments/{id}/matches/import` (`matchimport::mod::routes` → `matchimport::service
+::preview`) turns a tabletopleague.com match URL into a reviewable draft, so an admin doesn't re-type
+a result the source site already has.
 
 **The endpoint writes nothing.** It scrapes, resolves names to ids, and returns a
-`MatchImportPreviewDto`; the client fills the gaps and submits through the ordinary record endpoint.
-That is the whole design — an imported match goes through `MatchResultPolicy` exactly as a typed one
-does, and the importer never needs to know the result rules. `MatchImportEndpointTest` pins it by
-feeding a preview straight back into `POST .../matches` and asserting a 201; that test is the seam
+`MatchImportPreview`; the client fills the gaps and submits through the ordinary record endpoint.
+That is the whole design — an imported match goes through `match_policy::validate` exactly as a typed
+one does, and the importer never needs to know the result rules. `tests/it/match_import.rs` pins it
+by feeding a preview straight back into `POST .../matches` and asserting a 201; that test is the seam
 that fails if the importer ever starts emitting something the policy rejects.
 
-**Why a sidecar.** tabletopleague.com is client-rendered Next.js: fetching a match page from Kotlin
-returns the JS bundle and no data, so a real browser has to render it. That browser is
+**Why a sidecar.** tabletopleague.com is client-rendered Next.js: fetching a match page from the
+backend returns the JS bundle and no data, so a real browser has to render it. That browser is
 `tools/tabletopleague-scraper/server.mjs` — a Node/Playwright HTTP wrapper around the same
 `scrapeOne` the CLI uses, so there is no second extractor to keep in step. The backend reaches it
-with `RestClient` at `scraper.base-url`. It is *not* in the Alpine JRE backend image, which is the
-wrong base for Playwright, and the backend does not `depend_on` it: a scraper that is down costs the
-import endpoint a 503 (`ServiceUnavailableException`, message naming the address and how to start it)
-and nothing else.
+with a plain HTTP client at `SCRAPER_BASE_URL`. It is *not* in the backend's own image, since running
+a real browser is a different deployment shape entirely, and the backend does not depend on it at
+startup: a scraper that is down costs the import endpoint a 503
+(`DomainError::service_unavailable`, message naming the address and how to start it) and nothing
+else.
 
 **Three things a scrape cannot supply**, by nature rather than by omission: the `tournamentId` (a
 path variable), the `round` — the source names its pools ("The Wayward Sisters") where the schema
-wants a positive `Int`, so the preview carries `roundName` as context and the admin types a number —
+wants a positive integer, so the preview carries `roundName` as context and the admin types a number —
 and hero/map **ids**, since the site only ever has names. A fourth is conditional: `playedAt` is
-parsed best-effort by `ScrapedTimestamps`, which returns **null rather than throwing** on a timezone
-abbreviation it can't resolve unambiguously. Losing a whole scraped match over one rendered
-timestamp would be a bad trade; the wizard's date picker already defaults to now.
+parsed best-effort by `umfl_domain::scraped_timestamps::parse`, which returns **`None` rather than
+erroring** on a timezone abbreviation it can't resolve unambiguously. Losing a whole scraped match
+over one rendered timestamp would be a bad trade; the wizard's date picker already defaults to now.
 
 **A ban's side is scraped, not inferred.** The source groups its "Self ban"/"Opp. ban" chips under
-the side that owned the hero (`ScrapedSide.bans`), and `scraped.preBans` belongs to neither — so
-`MatchImportService` emits each typed ban's side straight through to `hero_bans.side`. It used to
+the side that owned the hero (`ScrapedSide.bans`), and `scraped.pre_bans` belongs to neither — so
+`matchimport::service` emits each typed ban's side straight through to `hero_bans.side`. It used to
 flatten both sides into one list and throw the attribution away, because the table had nowhere to put
 it. The flattening remains, since `hero_bans` is keyed `(match_id, hero_id)` and the same hero cannot
 be struck twice in one series; only the discarding is gone.
 
-**Name resolution is exact-after-normalisation, with no fuzzy fallback** (`NameResolver`, pure).
-Normalisation covers the drift actually seen — case, whitespace, the `.` in `Dr. Ellie Sattler`,
+**Name resolution is exact-after-normalisation, with no fuzzy fallback** (`umfl_domain::name_resolver`,
+pure). Normalisation covers the drift actually seen — case, whitespace, the `.` in `Dr. Ellie Sattler`,
 `&` versus `and` — and nothing more. A near miss that silently resolves to the wrong hero scores
 points for the wrong manager and is invisible until someone doubts the standings; an unmatched name
 is merely reported. Don't turn this into an alias table: a genuinely differently-named hero is a
@@ -586,12 +605,11 @@ Anything unresolved comes back in `unresolved[]` with the source's own spelling 
 *import* — only the recording. `MAP_NOT_IN_POOL` is the one that fires in practice, because
 `match_games` carries a composite FK onto `tournament_maps`; heroes reference `heroes(id)` directly and
 have no equivalent constraint. `external_link` stores the source URL, which is also the duplicate
-check — and since `V9__external_link_required.sql` it is a rule rather than a warning: the column is
-`not null` with a unique index per tournament, `MatchImportService` reports the clash as
-`alreadyImportedMatchId`, and `AdminMatchService` refuses the write with a `ConflictException` naming
-the match to correct. A correction still reuses the URL legitimately — `correct` re-saves the same
-aggregate root, so the row is updated in place and never meets the index; only moving one match's
-link onto another's conflicts.
+check — the column is `not null` with a unique index per tournament,
+`matchimport::service::preview` reports the clash as `already_imported_match_id`, and
+`r#match::admin_service` refuses the write with `DomainError::conflict` naming the match to correct. A
+correction still reuses the URL legitimately — `correct` re-saves the same aggregate root, so the row
+is updated in place and never meets the index; only moving one match's link onto another's conflicts.
 
 ## Admin frontend
 
@@ -602,14 +620,14 @@ per-entity wizard components (`TournamentManagementWizard`, `HeroManagementWizar
 through the same `src/api/client.ts`. Those are the dashboard's own children; only
 `MatchResultWizard` is itself composed further, out of the four section components below. It's
 reachable only by managers with `isAdmin` true — see
-Routes above for the two layers of UI gating — with the Admin API's own `hasRole("ADMIN")` check as
+Routes above for the two layers of UI gating — with the Admin API's own `Access::Admin` check as
 the actual security boundary.
 
 `ScoringRuleSetWizard` is the one place the "unknown metrics are a warning, not a rejection" rule
 becomes visible. It lists a tournament's rule sets with their active flag, edits and activates them,
 and **renders `ScoringRuleSetDto.warnings` after every save** — without that, a mistyped metric is a
 clean `201` followed by a column that silently scores zero forever. Its `knownMetrics` array mirrors
-`MatchMetrics`' extractor registry and only drives a hint (an inline flag while typing, normalised
+`match_metrics`' extractor registry and only drives a hint (an inline flag while typing, normalised
 the same `trim().uppercase()` way); it never blocks a save, because the server deciding what it can
 price is the whole point of the warning. Keep the array in step when adding an extractor — and note
 `DRAW` is *not* in it, deliberately, so pricing one is flagged like any other metric this build
@@ -689,35 +707,23 @@ A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched sta
 
 ## CI/CD
 
-**The Rust port is the default backend now**, in every environment: the root `docker-compose.yml`'s
-`backend` service builds `backend-rs/Dockerfile`, and `deploy/docker-compose.prod.yml`'s `backend`
-pulls `ghcr.io/<owner>/umfl-backend-rs:latest`. Neither compose file's `backend` service is Kotlin any
-more. Since the Rust server deliberately carries no migration runner of its own (see
-`backend-rs/crates/umfl-server/src/config.rs` — Flyway is still "the migration mechanism", just no
-longer embedded in the server process), both compose files gained a `flyway` service: a tiny image
-built from `db/Dockerfile` that bakes `db/migration` and `db/seed` into the stock Flyway CLI image and
-runs `migrate` once, gated by `depends_on: condition: service_completed_successfully` ahead of
-`backend`. The root compose file's `flyway` uses both locations (it runs the `dev` profile, same as
-`spring.flyway.locations` would); the prod one uses `db/migration` only — `db/seed` is demo/dev
-fixture data and must never touch the real league's database. The Kotlin backend (`backend/`, root
-`Dockerfile`) still exists and still migrates itself the old way (`spring-boot-starter-flyway`
-embedded in the jar) — it just isn't what either compose file's `backend` service runs by default any
-more. Reach it explicitly with `docker build .` / `docker run` if you need it.
+The root `docker-compose.yml`'s `backend` service builds `backend-rs/Dockerfile`, and
+`deploy/docker-compose.prod.yml`'s `backend` pulls `ghcr.io/<owner>/umfl-backend-rs:latest` — it is
+the only backend either compose file runs. Since the server deliberately carries no migration runner
+of its own (see
+`backend-rs/crates/umfl-server/src/config.rs` — Flyway is still "the migration mechanism", just not
+embedded in the server process), both compose files carry a `flyway` service: a tiny image built from
+`db/Dockerfile` that bakes `db/migration` and `db/seed` into the stock Flyway CLI image and runs
+`migrate` once, gated by `depends_on: condition: service_completed_successfully` ahead of `backend`.
+The root compose file's `flyway` uses both locations; the prod one uses `db/migration` only —
+`db/seed` is demo/dev fixture data and must never touch the real league's database.
 
-GitHub Actions, and there are two backend pipelines because of that same cutover.
-`.github/workflows/backend-ci.yml` runs `:backend:ktlintCheck` then `:backend:test` (Testcontainers
-included — GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master` branches,
-as the Kotlin merge gate; `.github/workflows/backend-rs-ci.yml` is its Rust equivalent (`cargo test
---workspace` against the committed `.sqlx/` metadata), running alongside it rather than replacing it,
-since the Kotlin backend still exists as (for now) the behavioural oracle the Rust port was built
-against. `.github/workflows/backend-deploy.yml` re-runs the Kotlin tests, then on a green push to
-`master` still builds the root `Dockerfile` and pushes `ghcr.io/<owner>/umfl-backend:{sha,latest}` —
-purely so a tagged Kotlin image keeps existing for a manual rollback — but its `deploy` job no longer
-touches the VPS's `backend` service, only `scraper` (`ghcr.io/<owner>/umfl-scraper:{sha,latest}`, the
-Playwright sidecar built from `tools/tabletopleague-scraper/`, which is also on its path filter and has
-no other workflow that builds or deploys it). `.github/workflows/backend-rs-deploy.yml` is what now owns
-`backend` (and `flyway`) on the VPS: it runs the Rust test suite, pushes
-`ghcr.io/<owner>/umfl-backend-rs:{sha,latest}` from `backend-rs/Dockerfile` *and*
+GitHub Actions. `.github/workflows/backend-ci.yml` is the backend merge gate: `cargo fmt --all
+--check`, `cargo clippy --workspace --all-targets -- -D warnings`, a check that the committed `.sqlx/`
+query metadata is current, then `cargo test --workspace` (Testcontainers included —
+GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master` branches.
+`.github/workflows/backend-deploy.yml` re-runs that test suite, then on a green push to `master`
+builds and pushes `ghcr.io/<owner>/umfl-backend-rs:{sha,latest}` from `backend-rs/Dockerfile` *and*
 `ghcr.io/<owner>/umfl-migrator:{sha,latest}` from `db/Dockerfile`, then SSHes into the VPS to pull and
 `up -d` `flyway` and `backend` (in that order, so a freshly pulled migrator image is what actually
 runs) against `deploy/docker-compose.prod.yml` — which the VPS keeps a copy of at `/opt/umfl`, alongside
@@ -725,22 +731,31 @@ a `.env` — modeled on `deploy/.env.example` — that is managed by hand on the
 CI. The `prod` profile there talks to Supabase Postgres directly (over the internet, not a compose
 network), so there is no `db` service in that compose file, unlike the root `docker-compose.yml` —
 `flyway`'s `${DB_URL}`/`${DB_USER}`/`${DB_PASSWORD}` come from that same `.env` via compose variable
-substitution, reusing the JDBC-shaped `DB_URL` `backend`'s own `env_file` already reads. That compose
-file also runs `cloudflared` as a service (`tunnel run`, authenticated by `CLOUDFLARE_TUNNEL_TOKEN` in
-`.env`), publishing `backend` to the internet as a named Cloudflare Tunnel rather than an ad-hoc
-`cloudflared tunnel --url ...` quick tunnel run by hand on the box. A named tunnel's hostname is stable
-across restarts and redeploys — it comes from the tunnel's own identity, configured once in the
-Cloudflare Zero Trust dashboard, not minted fresh each time the process starts — which is what lets
-`BACKEND_HOST` below be a plain committed value instead of a dashboard-only secret. `backend` itself
-only `expose`s :8080 on the compose network rather than publishing it to the host, since `cloudflared`
-is the only thing that needs to reach it now.
+substitution, reusing the JDBC-shaped `DB_URL` `backend`'s own `env_file` already reads (the Rust
+process converts it to a libpq-shaped URL itself — see `config::to_libpq_url` — so the VPS's `.env`
+never had to change format across the cutover). That compose file also runs `cloudflared` as a
+service (`tunnel run`, authenticated by `CLOUDFLARE_TUNNEL_TOKEN` in `.env`), publishing `backend` to
+the internet as a named Cloudflare Tunnel rather than an ad-hoc `cloudflared tunnel --url ...` quick
+tunnel run by hand on the box. A named tunnel's hostname is stable across restarts and redeploys — it
+comes from the tunnel's own identity, configured once in the Cloudflare Zero Trust dashboard, not
+minted fresh each time the process starts — which is what lets `BACKEND_HOST` below be a plain
+committed value instead of a dashboard-only secret. `backend` itself only `expose`s :8080 on the
+compose network rather than publishing it to the host, since `cloudflared` is the only thing that
+needs to reach it now.
+
+`.github/workflows/scraper-deploy.yml` builds and publishes the `tabletopleague-scraper` sidecar
+image on its own, decoupled from `backend-deploy.yml` so publishing a scraper change doesn't also
+trigger an unconditional SSH redeploy of the backend. It has no test job of its own — the sidecar has
+no test script, and `backend-ci.yml` exercises the backend that calls it, not the scraper itself.
+
 `.github/workflows/frontend-ci.yml` runs on `frontend/**` changes — `npm ci`, `npm run lint`,
-`npm run type-check`, `npm test` (vitest) — as that side's merge gate; it does not build or deploy anything. Deployment of
-the frontend stays separate: Cloudflare Pages is connected directly to the GitHub repo and builds
-`frontend/` on every push and PR (its own preview-deployment mechanism, running `vue-tsc -b && vite
-build`, no tests), independent of the backend pipeline — the two sides deploy independently since
-neither needs the other to be green. The Playwright e2e suite (`frontend/e2e/`) needs a live backend
-and Postgres and is not wired into either workflow yet.
+`npm run type-check`, `npm test` (vitest) — as that side's merge gate; it does not build or deploy
+anything. Deployment of the frontend stays separate: Cloudflare Pages is connected directly to the
+GitHub repo and builds `frontend/` on every push and PR (its own preview-deployment mechanism,
+running `vue-tsc -b && vite build`, no tests), independent of the backend pipeline — the two sides
+deploy independently since neither needs the other to be green. The Playwright e2e suite
+(`frontend/e2e/`) needs a live backend and Postgres and is not wired into either workflow yet.
+
 `frontend/src/worker.ts` is what routes the deployed frontend to the backend. The frontend deploys as
 a **Cloudflare Worker with static assets** (`frontend/wrangler.toml`), not a Pages project, so
 `public/_redirects` would never be read — the Worker proxies `/api/*` to `env.BACKEND_HOST` by hand

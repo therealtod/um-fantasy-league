@@ -1,21 +1,16 @@
-//! RFC 7807 problem documents, shaped exactly as Spring's `ProblemDetail`
-//! serialises them.
-//!
-//! Oracle: `common/GlobalExceptionHandler.kt` plus Spring Framework 7.0.8's
-//! `ProblemDetail` + `ProblemDetailJacksonMixin`. Three details of that
-//! serialisation are contract and are reproduced here deliberately:
+//! RFC 7807 problem documents. Three details of the wire shape are contract,
+//! deliberately fixed:
 //!
 //! * **Field order** is `type, title, status, detail, instance`, then any
-//!   extra properties — Jackson's declaration order over `ProblemDetail`'s
-//!   fields, with `properties` an `@JsonAnyGetter` that flattens last.
-//! * **`@JsonInclude(NON_EMPTY)`** means a null `detail` is *absent*, not
-//!   `null` — the same rule as the app-wide `default-property-inclusion:
-//!   non_null`. Every `Option` here therefore carries `skip_serializing_if`.
-//! * **`instance` is filled in by the framework, not by the handler.**
-//!   `RequestResponseBodyMethodProcessor` sets it to `HttpServletRequest
-//!   .getRequestURI()` whenever a returned `ProblemDetail` leaves it null, so
-//!   every error body this API has ever produced carries the request path.
-//!   [`super::fill_problem_instance`] is where that happens on this side.
+//!   extra properties -- declaration order below, with `properties` flattened
+//!   last via `#[serde(flatten)]`.
+//! * **A null `detail` is *absent*, not `null`** -- the same rule as the
+//!   app-wide `default-property-inclusion: non_null`. Every `Option` here
+//!   therefore carries `skip_serializing_if`.
+//! * **`instance` is filled in by middleware, not by the handler.**
+//!   [`super::fill_problem_instance`] sets it from the request path whenever
+//!   a returned `ProblemDetail` leaves it `None`, so every error body this
+//!   API produces from a handler carries the request path.
 
 use axum::http::StatusCode;
 use indexmap::IndexMap;
@@ -39,9 +34,9 @@ pub struct ProblemDetail {
     pub detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance: Option<String>,
-    /// `setProperty(...)` on the Kotlin side: the `violations` array on a 422
-    /// and the `fields` object on a validation 400. Flattened into the
-    /// document root, exactly as `@JsonAnyGetter` does.
+    /// Extra properties beyond the fixed RFC 7807 fields: the `violations`
+    /// array on a 422 and the `fields` object on a validation 400. Flattened
+    /// into the document root.
     #[serde(flatten)]
     pub properties: IndexMap<String, serde_json::Value>,
 }
@@ -87,15 +82,13 @@ impl ProblemDetail {
     /// Renders this document **without** leaving a copy in the response
     /// extensions, so [`super::fill_problem_instance`] does not add `instance`.
     ///
-    /// This is the security-filter half of a split the Kotlin makes by
-    /// accident and the wire therefore depends on. `instance` is filled in by
-    /// `RequestResponseBodyMethodProcessor`, which is Spring **MVC** -- it only
-    /// ever sees a document a *handler* returned. The three rejections raised
-    /// inside the filter chain (`ProblemDetailAuthenticationEntryPoint`'s 401,
-    /// `ProblemDetailAccessDeniedHandler`'s 403 and `RateLimitFilter`'s 429)
-    /// serialise themselves straight to the response with `jsonMapper
-    /// .writeValue`, never reach `DispatcherServlet`, and so carry no
-    /// `instance` at all. Verified against the running Kotlin backend:
+    /// A route handler's `ApiError` goes through the ordinary `IntoResponse`,
+    /// which leaves a copy in the response extensions for
+    /// [`super::fill_problem_instance`] to fill `instance` from the request
+    /// path. The three rejections raised by middleware ahead of the router
+    /// -- `auth::authorize`'s 401 and 403, and `ratelimit::RateLimiter`'s 429
+    /// -- use this method instead, and so carry no `instance` at all. This is
+    /// a deliberate wire contract rather than an oversight to fix:
     ///
     /// ```text
     /// GET /api/me            -> {"detail":"Authentication is required...","status":401,...}   (no instance)

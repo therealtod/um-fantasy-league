@@ -1,19 +1,13 @@
 //! The Supabase bearer token: the `prod` credential.
 //!
-//! Oracle: `auth/SupabaseAuthenticationConverter.kt`, plus the explicit
-//! `NimbusJwtDecoder` bean in `config/SecurityConfig.kt`.
-//!
 //! Supabase Auth mints this token whatever the upstream identity provider --
 //! Discord OAuth is only how the end user authenticated *with Supabase*, and
 //! this backend never talks to Discord. The `sub` claim is the stable
 //! `auth.users.id` UUID, and it is the only claim that decides identity.
 //!
-//! **ES256, not RS256.** Boot's autoconfigured decoder, built from the
-//! `jwk-set-uri` property alone, accepts RS256 only; Supabase's current "JWT
-//! Signing Keys" projects sign with ES256, so that decoder rejects every real
-//! token with "no matching key(s) found" even though the `kid` is right there
-//! in the JWKS. The Kotlin works around it with a hand-built decoder naming the
-//! algorithm; here the algorithm is simply named.
+//! **ES256, not RS256.** Supabase's current "JWT Signing Keys" projects sign
+//! with ES256, so the decoder below names that algorithm explicitly rather
+//! than leaving it to be inferred from the JWKS alone.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -190,9 +184,8 @@ async fn verify(state: &AppState, token: &str) -> Result<Claims, ApiError> {
         ApiError::Unauthorized
     })?;
 
-    // `JwtValidators.createDefault()`: expiry and not-before, with Nimbus'
-    // 60-second clock skew, and **no** audience or issuer check -- none is
-    // configured on the Kotlin decoder either.
+    // Expiry and not-before, with a 60-second clock skew allowance, and
+    // **no** audience or issuer check -- neither is configured below.
     let mut validation = Validation::new(Algorithm::ES256);
     validation.leeway = 60;
     validation.validate_aud = false;
@@ -266,8 +259,8 @@ fn is_unique_violation(err: &sqlx::Error) -> bool {
     matches!(err, sqlx::Error::Database(db) if db.is_unique_violation())
 }
 
-/// The Discord profile claims Supabase surfaces in `user_metadata`, with the
-/// same fallback chain the Kotlin uses.
+/// The Discord profile claims Supabase surfaces in `user_metadata`, tried in
+/// the fallback chain below.
 fn discord_username(claims: &Claims, auth_user_id: Uuid) -> String {
     let metadata = claims.user_metadata.as_ref();
     let field = |name: &str| {
@@ -284,8 +277,9 @@ fn discord_username(claims: &Claims, auth_user_id: Uuid) -> String {
 
 /// `sanitized`, then `sanitized1`, `sanitized2`, ... until one is free.
 ///
-/// Kotlin's `Char.isLetterOrDigit` is Unicode-aware, so `char::is_alphanumeric`
-/// is the faithful filter rather than `is_ascii_alphanumeric`.
+/// `char::is_alphanumeric` is Unicode-aware, which matters for a Discord
+/// display name that is not ASCII -- `is_ascii_alphanumeric` would strip more
+/// than intended.
 async fn unique_handle(state: &AppState, base: &str) -> Result<String, ApiError> {
     let sanitized: String = base.chars().filter(|c| c.is_alphanumeric()).collect();
     let sanitized = if sanitized.is_empty() {

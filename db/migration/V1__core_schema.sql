@@ -15,8 +15,8 @@
 --     into a tournament pool.
 --   * `db/seed/V3__demo_fixtures.sql` -- three demo tournaments, seeded
 --     managers, a full recorded result set. A separate Flyway location that
---     only the `dev` and `test` profiles add to `spring.flyway.locations` (see
---     `application-dev.yml` / `application-test.yml`).
+--     only a dev-shaped Flyway invocation applies (see AGENTS.md's Commands
+--     section on why that's decided by the invocation, not by the backend).
 --
 -- So a real deployment (`prod`, or any start with no profile at all) comes up
 -- with a full hero and board catalogue and a league that has never been
@@ -26,15 +26,16 @@
 -- reserved words in the SQL standard and quoting them at every call site
 -- would be noise.
 --
--- Note on surrogate keys: tables that Spring Data JDBC loads or writes as
--- aggregates carry a bigserial id, because Spring Data JDBC cannot map a
--- composite primary key. The pure link tables (`tournament_heroes`,
--- `tournament_maps`, `entry_slots`, `match_participants`, `match_game_participants`,
--- `hero_bans`, `match_hero_picks`) are read through JdbcClient or mapped as
--- @MappedCollection children keyed by list position or by their own natural
--- key, so they keep their natural composite key with no surrogate. `match_games`
--- is the one exception among the match tables: it is itself the parent of
--- `match_game_participants`, so it needs a surrogate id to be referenced by.
+-- Note on surrogate keys: tables the app loads or writes as aggregates carry
+-- a bigserial id next to their unique natural key, so they have a stable
+-- identity a composite key can't give a foreign key or a URL path variable.
+-- The pure link tables (`tournament_heroes`, `tournament_maps`, `entry_slots`,
+-- `match_participants`, `match_game_participants`, `hero_bans`,
+-- `match_hero_picks`) are read and written through hand-written SQL keyed by
+-- list position or by their own natural key, so they keep their natural
+-- composite key with no surrogate. `match_games` is the one exception among
+-- the match tables: it is itself the parent of `match_game_participants`, so
+-- it needs a surrogate id to be referenced by.
 -- ===========================================================================
 
 -- Names are unique because every seed insert and every integration test looks
@@ -139,8 +140,8 @@ create table tournament_entries (
         check (status <> 'LOCKED' or locked_at is not null)
 );
 
--- Child of the TournamentEntry aggregate. Spring Data JDBC maps this as a keyed
--- collection: entry_id is the back-reference, slot_index the list index.
+-- Child of the TournamentEntry aggregate, held as a keyed collection:
+-- entry_id is the back-reference, slot_index the list index.
 --
 -- No acquisition_cost column: the roster's cost is joined live from
 -- `tournament_heroes`. The hero FK has no cascade on purpose -- deleting a hero
@@ -178,7 +179,7 @@ create index idx_entry_slot_hero on entry_slots (hero_id);
 --
 -- `is_active` defaults to false: which rule set is live is an explicit admin
 -- decision (`POST .../scoring-rule-sets/{id}/activate`), never a property of
--- having been inserted. Spring Data JDBC writes every mapped column on
+-- having been inserted. The application writes every column explicitly on
 -- insert regardless, so this default only matters to a hand-written INSERT
 -- (a fixture, a psql session) -- and there, defaulting to active is exactly
 -- wrong: it would make a draft rule set live, or trip
@@ -197,8 +198,9 @@ create unique index uq_scoring_rule_set_active
 
 -- One weighted metric. `metric` is deliberately free-form text, not an enum and
 -- not a foreign key: an admin must be able to add a row without a migration.
--- A Kotlin registry prices the keys it implements and silently ignores the
--- rest, so an unknown metric costs nothing and breaks nothing.
+-- `umfl_domain::match_metrics`'s registry prices the keys it implements and
+-- silently ignores the rest, so an unknown metric costs nothing and breaks
+-- nothing.
 --
 -- The CHECK is a typo guard (SCREAMING_SNAKE only), not a whitelist -- it stops
 -- 'win ' and 'Win' from becoming separate columns, without pinning the set of
@@ -260,9 +262,9 @@ comment on column tournament_matches.external_link is
 -- only the two human competitors are fixed for the series.
 --
 -- No surrogate id: `side` (0 or 1) is a stable ordinal with no data of its
--- own, exactly like `entry_slots.slot_index` -- Spring Data JDBC maps this as
--- a List<MatchParticipant> child keyed by list position, so the Kotlin class
--- carries no explicit `side` field.
+-- own, exactly like `entry_slots.slot_index` -- the application holds a
+-- match's participants as a list keyed by that position, so no domain type
+-- carries an explicit `side` field of its own.
 create table match_participants (
     match_id     bigint  not null references tournament_matches (id) on delete cascade,
     side         integer not null check (side in (0, 1)),
@@ -280,14 +282,14 @@ comment on column match_participants.player_label is
 -- One game within a series. `tournament_id` is denormalized from
 -- `tournament_matches` purely so this table can carry the same composite
 -- "map is in this tournament's pool" foreign key `tournament_matches` used to
--- carry directly -- Spring Data JDBC needs it as a real field to build that
--- FK; nothing besides construction reads it otherwise.
+-- carry directly -- the column exists to build that FK; nothing besides
+-- construction reads it otherwise.
 -- Being a copy, it can in principle drift from the parent match's own
 -- `tournament_id`, and a game filed under the wrong tournament is invisible
--- to MapPoolAdminRepository.hasRecordedMatch (which filters on this column)
--- while its pool FK points at some other tournament's pool row -- so
+-- to `map::query::has_recorded_match` (which filters on this column) while
+-- its pool FK points at some other tournament's pool row -- so
 -- `match_game_of_match` pins the copy to its parent instead of leaving the
--- two in step by AdminMatchService's construction alone.
+-- two in step by `r#match::admin_service`'s construction alone.
 -- `match_game_map_in_pool` is DEFERRABLE INITIALLY DEFERRED: deleting a
 -- tournament cascades to `tournament_maps` (a direct child) and to `match_games`
 -- (a grandchild, via `tournament_matches`) in the same statement, and Postgres
@@ -317,7 +319,7 @@ create table match_games (
 -- A losing hero has 0 or less health at the end of the game. The winner can
 -- have any health, including a negative value. Exactly one side of a game
 -- carries `is_winner` -- a game always has a winner, enforced in
--- MatchResultPolicy (NOT_EXACTLY_ONE_WINNER) rather than here, since a partial
+-- `match_policy` (`NOT_EXACTLY_ONE_WINNER`) rather than here, since a partial
 -- unique index could pin "at most one" but not "at least one".
 --
 -- `unique (game_id, hero_id)` is unambiguous here precisely because banned
@@ -327,9 +329,10 @@ create table match_games (
 -- doing that would require denormalizing match_id onto this table too, one
 -- level further down. The side-pairing between match_participants and
 -- match_game_participants (side 0 of a game is played by side 0 of the
--- series) is an APPLICATION-level invariant, enforced by MatchResultPolicy /
--- AdminMatchService always building both lists in the same order -- the same
--- tier of guarantee "exactly 2 participants" already was before this change.
+-- series) is an APPLICATION-level invariant, enforced by `match_policy` /
+-- `r#match::admin_service` always building both lists in the same order --
+-- the same tier of guarantee "exactly 2 participants" already was before
+-- this change.
 create table match_game_participants (
     game_id          bigint  not null references match_games (id) on delete cascade,
     side             integer not null check (side in (0, 1)),
@@ -353,7 +356,7 @@ create unique index uq_match_game_participant_winner
 --
 -- Bans happen once, before the series starts -- not per game -- which is why
 -- this references tournament_matches, not match_games. `ban_type` follows this
--- file's existing check-constrained text + Kotlin enum convention (see
+-- file's existing check-constrained-text-plus-Rust-enum convention (see
 -- tournaments.status).
 --
 -- The primary key stays (match_id, hero_id): a hero is banned at most once per
@@ -366,9 +369,9 @@ create unique index uq_match_game_participant_winner
 -- assignment and so carries no side at all (`hero_ban_pre_ban_has_no_side`
 -- rejects one that does). It stays nullable rather than becoming a
 -- non-optional fact: a ban typed by hand with nothing to attribute it to is
--- still a legal ban. Scoring never reads this column -- MatchMetrics.banOfType
--- prices a ban by category alone, because points are per hero and never per
--- player.
+-- still a legal ban. Scoring never reads this column -- `match_metrics`'s ban
+-- extractors price a ban by category alone, because points are per hero and
+-- never per player.
 --
 -- A parallel `map_ban (match_id, map_id, ban_type)` table is a plausible
 -- future extension for board draft/bans -- not built now.
@@ -398,8 +401,9 @@ comment on column hero_bans.side is
 -- column, because the two carry different data: a pick has an owning `side`
 -- and no category, a ban has a category (`PRE_BAN`/`OPPONENT_BAN`/`SELF_BAN`)
 -- and no side -- a pre-ban belongs to neither. A hero cannot be both; that is
--- enforced in Kotlin as `MatchRule.BANNED_HERO_DRAFTED`, alongside
--- `PLAYED_HERO_NOT_DRAFTED`, which is what keeps a recorded draft complete.
+-- enforced by `umfl_domain::match_policy::MatchRule::BannedHeroDrafted`,
+-- alongside `PlayedHeroNotDrafted`, which is what keeps a recorded draft
+-- complete.
 --
 -- Deliberately no `unique (match_id, hero_id)`. Games in a series are
 -- independent -- side 0 may pilot a hero in game 1 and side 1 the same hero in

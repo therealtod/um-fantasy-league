@@ -348,7 +348,8 @@ describe('the union and the subtraction are inverses', () => {
 })
 
 /* -------------------------------------------------------------------------
- * Option lists — what makes most of MatchResultPolicy unreachable from the form.
+ * Option lists — what makes most of match_policy's MatchRule violations
+ * unreachable from the form.
  * ------------------------------------------------------------------------- */
 
 describe('option lists', () => {

@@ -1,9 +1,8 @@
 //! Boards and board pools, through `/api/admin/maps` and
 //! `/api/admin/tournaments/{id}/maps`.
 //!
-//! Oracle: `map/AdminMapServiceIntegrationTest.kt`, driven over HTTP rather
-//! than against the service, so the DTO shape and the status codes are checked
-//! by the same test that checks the rule.
+//! Driven over HTTP rather than against the service, so the DTO shape and
+//! the status codes are checked by the same test that checks the rule.
 //!
 //! The seed's board pools are asserted exactly, as `AGENTS.md` requires:
 //! *Summer of Legends* plays on Baskerville Manor, Sherwood Forest and Raptor
@@ -27,9 +26,8 @@ async fn map_id(app: &TestApp, name: &str) -> i64 {
         .unwrap_or_else(|e| panic!("no board {name}: {e}"))
 }
 
-/// The pool as the database holds it -- the equivalent of the Kotlin's
-/// `mapPoolAdminRepository.poolMapIds(...)`, read directly rather than through
-/// the endpoint so a pool assertion cannot be satisfied by a broken read path.
+/// The pool as the database holds it, read directly rather than through the
+/// endpoint so a pool assertion cannot be satisfied by a broken read path.
 async fn pool_map_ids(app: &TestApp, tournament_id: i64) -> Vec<i64> {
     sqlx::query_scalar!(
         "select map_id from tournament_maps where tournament_id = $1",
@@ -180,7 +178,7 @@ async fn renaming_an_unknown_map_is_a_404() {
     assert_eq!(response.json()["detail"], "No map with id 9999999");
 }
 
-/// `@NotBlank(message = "name is required")` -- whitespace fails it, and the
+/// `name` must be present and non-blank -- whitespace fails it, and the
 /// message is the one the client renders.
 #[tokio::test]
 async fn a_blank_map_name_is_a_400_naming_the_field() {
@@ -334,7 +332,8 @@ async fn add_batch_to_pool_adds_several_new_maps_in_one_call() {
         )
         .await;
 
-    // 200, not 201 -- `addBatchToPool` carries no `@ResponseStatus`.
+    // 200, not 201 -- this adds to an existing pool rather than creating a
+    // new resource.
     assert_eq!(response.status, 200, "{}", response.text());
     response.assert_no_json_nulls();
     assert_eq!(response.json().as_array().expect("an array").len(), 2);
@@ -398,7 +397,8 @@ async fn add_batch_to_pool_rejects_an_unknown_map_id() {
     );
 }
 
-/// `@Size(min = 1, max = 64)` -- and the message the client renders.
+/// `mapIds` must contain between 1 and 64 entries when present -- and the
+/// message the client renders.
 #[tokio::test]
 async fn an_empty_batch_is_a_400_naming_the_field() {
     let app = TestApp::spawn().await;
@@ -420,9 +420,8 @@ async fn an_empty_batch_is_a_400_naming_the_field() {
     );
 }
 
-/// `@Size` ignores a null and there is no `@NotNull` beside it, so an omitted
-/// `mapIds` is a valid request that adds nothing. Ported because it is live
-/// behaviour, not because anything sends it.
+/// An omitted `mapIds` is deliberately a valid request that adds nothing.
+/// Asserted because it is live behaviour, not because anything sends it.
 #[tokio::test]
 async fn an_omitted_batch_is_accepted_and_adds_nothing() {
     let app = TestApp::spawn().await;

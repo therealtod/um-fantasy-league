@@ -1,4 +1,5 @@
-//! The handle every handler is given, in place of Spring's injected beans.
+//! The handle every handler is given: shared state passed explicitly rather
+//! than injected.
 //!
 //! Feature tasks **append** fields here (the match-result cache, the SSE hub,
 //! the JWKS cache). That makes this one of the two files with a real merge
@@ -35,10 +36,10 @@ pub struct AppState {
     /// The open standings streams, keyed by tournament. Shared for the same
     /// reason `match_cache` is: a per-request hub would have nobody to notify.
     pub standings_hub: StandingsSseHub,
-    /// The scraper sidecar, behind this crate's **one** trait (PORTING.md §3).
-    /// It is a trait object rather than a concrete client because the Kotlin
-    /// had a genuine test seam here: `MatchImportServiceTest` substitutes a
-    /// stub rather than standing up Playwright.
+    /// The scraper sidecar, behind this crate's **one** trait. It is a trait
+    /// object rather than a concrete client because it is a genuine test
+    /// seam: `tests/it/match_import.rs`'s `StubScraper` substitutes a stub
+    /// rather than standing up a real browser.
     pub scraper: Arc<dyn ScraperClient>,
 }
 
@@ -74,7 +75,7 @@ impl AppState {
 ///
 /// Postgres accepts `set transaction isolation level` only before the
 /// transaction's first query; issued any later it is not an error, it is a
-/// silent no-op that leaves the transaction at READ COMMITTED (PORTING.md §7).
+/// silent no-op that leaves the transaction at READ COMMITTED.
 /// A multi-statement read that quietly degrades that way still returns
 /// plausible rows -- just rows from several different snapshots -- so nothing
 /// surfaces until someone doubts the leaderboard. That is exactly the failure

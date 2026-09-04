@@ -7,7 +7,7 @@
 //! every test file is a `mod` of it. Adding a test area means adding a `mod`
 //! line here and a file next to this one; it never means a new `tests/*.rs`.
 //!
-//! Layer 2 of PORTING.md §13. Layer 1 -- the pure domain tests -- lives in
+//! Layer 2 of the test suite. Layer 1 -- the pure domain tests -- lives in
 //! `umfl-domain` and needs neither Docker nor this file.
 
 mod harness;

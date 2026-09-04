@@ -2,12 +2,12 @@
 # decoupled from backend-deploy.yml's build-and-push job so this can run
 # without also triggering that workflow's `deploy` job (an unconditional SSH
 # redeploy to the production VPS). Deliberately does not SSH-deploy anywhere
-# itself, mirroring backend-rs-deploy.yml's shape.
+# itself, mirroring backend-deploy.yml's shape.
 #
 # tools/tabletopleague-scraper has no test script (AGENTS.md: "not part of
-# the Gradle/npm build") and no CI gate of its own, so there's no `test` job
-# to run first here -- backend-ci.yml/backend-rs-ci.yml exercise the two
-# backends that call it, not the scraper itself.
+# the Cargo workspace or the npm build") and no CI gate of its own, so
+# there's no `test` job to run first here -- backend-ci.yml exercises the
+# backend that calls it, not the scraper itself.
 name: scraper-deploy
 
 on:

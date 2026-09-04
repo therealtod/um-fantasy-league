@@ -1,9 +1,8 @@
 //! The registry of scoring metrics this application knows how to measure.
 //!
-//! A direct port of `scoring/MatchMetrics.kt`, minus the `MetricContext`/
-//! `HeroRole` pair it declares alongside the registry -- those live in
-//! [`crate::match_result`], because `MatchResult::hero_contexts` is their only
-//! constructor and splitting them would make the two modules circular.
+//! Minus the `MetricContext`/`HeroRole` pair, which live in
+//! [`crate::match_result`] instead -- `MatchResult::hero_contexts` is their
+//! only constructor, and splitting them would make the two modules circular.
 //!
 //! `scoring_coefficients.metric` is free-form text so an admin can add a weighted
 //! row without a migration. This registry prices the keys it implements and
@@ -27,8 +26,7 @@ pub type Extractor = fn(&MetricContext<'_>) -> f64;
 ///
 /// A slice rather than a map: there are nine entries, a linear scan is free at
 /// this size, and a `const` array cannot drift out of the order the leaderboard
-/// reads it in the way a lazily built `HashMap` could. Kotlin uses
-/// `linkedMapOf` for exactly the same ordering reason.
+/// reads it in the way a lazily built `HashMap` could.
 const EXTRACTORS: &[(&str, Extractor)] = &[
     ("APPEARANCE", appearance),
     ("SELF_BAN", self_ban),
@@ -47,8 +45,6 @@ pub fn known() -> impl Iterator<Item = &'static str> {
 }
 
 /// The extractor for `metric`, or `None` when nothing implements it.
-///
-/// Kotlin spells this `MatchMetrics[metric]`.
 pub fn get(metric: &str) -> Option<Extractor> {
     let normalised = normalise(metric);
     EXTRACTORS
@@ -64,8 +60,7 @@ pub fn normalise(metric: &str) -> String {
 
 /// The subset of `metrics` no extractor implements -- typically a typo.
 ///
-/// Normalised, de-duplicated, and returned in first-encounter order, matching
-/// Kotlin's `map(::normalise).distinct().filterNot(...)`.
+/// Normalised, de-duplicated, and returned in first-encounter order.
 pub fn unknown<'a>(metrics: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     let mut seen: Vec<String> = Vec::new();
     for metric in metrics {
@@ -95,8 +90,8 @@ pub fn label(metric: &str) -> String {
         .join(" ")
 }
 
-// The extractors below are free functions for the same reason the Kotlin's are
-// named rather than inline lambdas: several need an early return.
+// The extractors below are free functions rather than inline closures:
+// several need an early return.
 
 /// A hero featured in this match's draft and not banned out of it -- whether or
 /// not it went on to play a game. Scored off the draft rather than off a
@@ -237,8 +232,7 @@ fn shutout(context: &MetricContext<'_>) -> f64 {
     }
 }
 
-/// A per-metric truth table over hand-built matches -- a near-1:1 port of
-/// `MatchMetricsTest`.
+/// A per-metric truth table over hand-built matches.
 ///
 /// The fixtures mirror the shapes the seed data actually contains: a decided
 /// match, the round-2 shutout, the round-3 game won on health with both heroes

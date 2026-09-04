@@ -1,8 +1,5 @@
 //! Create, update, list and activate a tournament's scoring rule sets.
 //!
-//! Oracle: `scoring/AdminScoringService.kt`. Every `@Transactional` method
-//! there is a `pool.begin()` here and nothing else is (PORTING.md §7).
-//!
 //! The rules themselves are not here: they are
 //! [`umfl_domain::scoring_rule_set_policy`], which validates the *shape* of a
 //! metric name and never the *set* of legal names. A metric no extractor
@@ -34,8 +31,7 @@ pub struct ScoringRuleSetResult {
 /// Every rule set for `tournament_id`, active one first -- an admin's only way
 /// to see what already exists.
 ///
-/// Transactional despite being a read, exactly as the Kotlin's
-/// `@Transactional(readOnly = true)` is: the roots and their coefficients are
+/// Transactional despite being a read: the roots and their coefficients are
 /// separate statements, so without one the listing could straddle a concurrent
 /// activate or update.
 pub async fn list(state: &AppState, tournament_id: i64) -> ApiResult<Vec<ScoringRuleSetResult>> {
@@ -45,7 +41,7 @@ pub async fn list(state: &AppState, tournament_id: i64) -> ApiResult<Vec<Scoring
     tx.commit().await?;
 
     // `compareByDescending { it.isActive }.thenBy { it.name }`. `sort_by`, not
-    // `sort_unstable_by` -- PORTING.md §8.
+    // `sort_unstable_by` -- see AGENTS.md on `sort_unstable_*`.
     rule_sets.sort_by(|a, b| {
         b.is_active
             .cmp(&a.is_active)
@@ -198,9 +194,8 @@ fn name_taken(tournament_id: i64, name: &str) -> DomainError {
 /// The stored form of what the admin submitted.
 ///
 /// The metric is normalised on the way in, because that is the column value the
-/// duplicate check was made against. The Kotlin collects into a `Set`, which
-/// would drop an exactly-repeated row; nothing reaches here to drop, since
-/// [`validate`] has already rejected a repeated metric.
+/// duplicate check was made against. There is no repeated-metric row to drop
+/// here, since [`validate`] has already rejected a repeated metric.
 fn to_coefficients(coefficients: &[ScoringCoefficientInput]) -> Vec<ScoringCoefficient> {
     coefficients
         .iter()

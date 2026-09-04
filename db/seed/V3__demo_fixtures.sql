@@ -1,15 +1,15 @@
 -- ===========================================================================
 -- Demo/dev fixtures -- NOT part of the default migration path.
 --
--- This file lives outside `db/migration` on purpose. `spring.flyway.locations`
--- in the base `application.yml` points at `classpath:db/migration` only, so a
--- default start (no profile) or the `prod` profile migrates the schema in
+-- This file lives outside `db/migration` on purpose. A default start (no
+-- profile) or the `prod` profile migrates only the schema in
 -- `V1__core_schema.sql` plus the canonical heroes and boards in
 -- `V2__reference_data.sql`, and ends up with a league that has never been
--- played: zero tournaments, zero managers, zero recorded results.
--- `application-dev.yml` and `application-test.yml` each add `classpath:db/seed`
--- to that list, which is what pulls this file in for local dev and for the
--- test suite.
+-- played: zero tournaments, zero managers, zero recorded results. Only a
+-- dev-shaped Flyway invocation adds this file's location too (see AGENTS.md's
+-- Commands section on why that's decided by the invocation, not by the
+-- backend's own profile) -- which is what pulls this file in for local dev
+-- and for the test suite.
 --
 -- Nothing here writes `heroes` or `game_maps`. Those are reference data, not
 -- fixtures, so they migrate in every profile from `V2__reference_data.sql`;
@@ -24,21 +24,23 @@
 -- natural key -- see the comment there.
 --
 -- NeonStrategist is flagged admin (see below) -- the only such manager here,
--- which makes it the manager `DevManagerAuthenticationFilter` falls back to
--- when a dev-profile request carries no `X-Manager-Id` header (it resolves
--- *some* admin manager, not this handle specifically -- see AGENTS.md's
--- Profiles table). Seeded manager ids are 1 through 4 (see README's
--- `VITE_DEV_MANAGER_ID`).
+-- and it is also seeded first, so it lands on id 1: the default
+-- `VITE_DEV_MANAGER_ID` (see README) a fresh frontend checkout already sends.
+-- That is a seeding convenience, not a backend fallback -- the dev auth stub
+-- (`auth::dev::resolve`) never guesses at an identity for a request with no
+-- `X-Manager-Id` header; it treats it as anonymous, exactly as `prod` treats
+-- one with no bearer token (see AGENTS.md's Profiles table). Seeded manager
+-- ids are 1 through 4.
 --
 -- Integration tests assert on these numbers exactly. Changing a seeded price
 -- or result means updating them.
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- Managers. NeonStrategist is flagged admin -- that is what makes the admin
--- API reachable in local dev/test with zero extra setup, since the dev auth
--- stub falls back to whichever manager is admin when no `X-Manager-Id` header
--- is sent. No credit balances: budget is granted per registration.
+-- Managers. NeonStrategist is flagged admin -- and, being inserted first,
+-- lands on id 1, the default `VITE_DEV_MANAGER_ID` a fresh frontend checkout
+-- already sends -- so the admin API is reachable in local dev/test with zero
+-- extra setup. No credit balances: budget is granted per registration.
 -- ---------------------------------------------------------------------------
 
 insert into managers (handle, display_name, is_admin) values
@@ -134,9 +136,10 @@ from (values
 -- ---------------------------------------------------------------------------
 -- Scoring. One active rule set per tournament, all carrying the same weights.
 --
--- CROWD_FAVOURITE is intentional: no Kotlin extractor implements it, so it is
--- the seeded proof that an unknown metric contributes zero, is dropped from
--- the leaderboard's columns, and throws nothing. Do not implement it.
+-- CROWD_FAVOURITE is intentional: no extractor in `umfl_domain::match_metrics`
+-- implements it, so it is the seeded proof that an unknown metric contributes
+-- zero, is dropped from the leaderboard's columns, and throws nothing. Do not
+-- implement it.
 --
 -- sort_order fixes the leaderboard's left-to-right column order.
 -- ---------------------------------------------------------------------------
@@ -182,7 +185,7 @@ from scoring_rule_sets rs
 -- Its three bans (Bruce Lee, Deadpool, Invisible Man) are outside Summer of
 -- Legends' own `tournament_heroes` pool for the same reason -- nothing in the
 -- schema requires a banned or played hero to be pool-priced, only that maps
--- come from `tournament_maps` (see `MatchResultPolicy.UNKNOWN_HERO`, which
+-- come from `tournament_maps` (see `MatchRule::UnknownHero`, which
 -- validates against `heroes`, never `tournament_heroes`). `external_link` is
 -- required (`V1__core_schema.sql`); match 13 carries a real one, and every
 -- other match gets the same synthetic `urn:umfl:match:<id>` placeholder a

@@ -1,17 +1,12 @@
 //! Extractors whose rejections are RFC 7807 problem documents.
 //!
-//! Oracle: `ResponseEntityExceptionHandler` -- the base class
-//! `GlobalExceptionHandler` inherits from purely so that Spring MVC's own
-//! failures answer with their real status instead of the catch-all's 500. axum
-//! has no such resolver ordering, so the equivalent coverage has to come from
-//! the extractors themselves.
-//!
 //! **Never use a bare `axum::Json`, `Path` or `Query` in a handler.** A bare
 //! one rejects with axum's plain-text body and no problem type, which is a wire
-//! change. That rule is grep-able on purpose -- see `PORTING.md`.
+//! change. That rule is grep-able on purpose.
 //!
-//! The `detail` strings are Spring's own, read out of spring-web 7.0.8 rather
-//! than paraphrased.
+//! The `detail` strings below are pinned wire contract, asserted exactly by
+//! the integration suite -- treat a wording change here as a breaking change,
+//! not a copyedit.
 
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{FromRequest, FromRequestParts, Path, Query, RawPathParams, Request};
@@ -34,8 +29,8 @@ where
     type Rejection = ApiError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        // Captured before the body is consumed: the 415 names the offending
-        // Content-Type, as `HttpMediaTypeNotSupportedException` does.
+        // Captured before the body is consumed: the 415 below names the
+        // offending Content-Type.
         let content_type = req
             .headers()
             .get(header::CONTENT_TYPE)
@@ -52,8 +47,8 @@ where
                 },
             }),
             // Everything else -- unparseable JSON, a value of the wrong type, a
-            // body that could not be read at all -- is what Spring surfaced as
-            // `HttpMessageNotReadableException`, and it says exactly this much.
+            // body that could not be read at all -- collapses to this one
+            // sentence, which says exactly this much and no more.
             Err(_) => Err(ApiError::Framework {
                 status: StatusCode::BAD_REQUEST,
                 detail: "Failed to read request".to_owned(),
@@ -64,16 +59,15 @@ where
 
 /// A JSON body that must also satisfy its `garde` rules.
 ///
-/// The 400 it raises is `handleMethodArgumentNotValid`'s: a `fields` object
-/// mapping each failing path to its message, so the client can highlight every
-/// bad field at once rather than one per round trip. garde renders a path as
-/// `a.b[0].c`, which is the shape Spring's `FieldError.getField()` produced.
+/// The 400 it raises carries a `fields` object mapping each failing path to
+/// its message, so the client can highlight every bad field at once rather
+/// than one per round trip. garde renders a path as `a.b[0].c`.
 ///
-/// The one adjustment is [`camel_case`]: `FieldError.getField()` named the
-/// *Java* field, which is camelCase, while garde names the Rust one, which is
-/// snake_case. Every request DTO here is `#[serde(rename_all = "camelCase")]`,
-/// so the mapping is total and belongs at this single boundary rather than
-/// being spelled out per field — garde 0.23 has no `rename` attribute to spell
+/// The one adjustment is [`camel_case`]: garde names the Rust field, which is
+/// snake_case, but every request DTO here is
+/// `#[serde(rename_all = "camelCase")]` on the wire. So the mapping is total
+/// and belongs at this single boundary rather than being spelled out per
+/// field — garde 0.23 has no `rename` attribute to spell
 /// it with anyway.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValidJson<T>(pub T);
@@ -100,9 +94,9 @@ where
 
 /// Re-spells a garde path in the field names the wire uses.
 ///
-/// Only `_x` becomes `X`; the `.` and `[0]` separators garde emits are already
-/// what Spring's `FieldError.getField()` produced, and a leading underscore is
-/// left alone because it is not a word boundary in any DTO here.
+/// Only `_x` becomes `X`; the `.` and `[0]` separators garde emits already
+/// match the wire's field-path shape, and a leading underscore is left alone
+/// because it is not a word boundary in any DTO here.
 fn camel_case(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     let mut upper_next = false;
@@ -133,9 +127,9 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Captured before delegating, because a **single**-parameter `Path<T>`
         // deserializes the value directly and its rejection carries no key at
-        // all -- only the multi-parameter form reports one. Spring named the
-        // variable in both cases, so the name is recovered from the route's own
-        // parameter list here.
+        // all -- only the multi-parameter form reports one. Naming the
+        // variable in both cases needs the name recovered from the route's
+        // own parameter list here.
         let names: Vec<String> = RawPathParams::from_request_parts(parts, state)
             .await
             .map(|params| {
@@ -156,8 +150,8 @@ where
 /// `MethodArgumentTypeMismatchException`, as `handleTypeMismatch` renders it:
 /// `Failed to convert 'id' with value: 'not-a-number'`.
 ///
-/// This is the defect `GlobalExceptionHandlerMvcTest` was written for -- an
-/// unparseable path variable answered 500 before the base class went back in.
+/// This used to answer 500 before the base class went back in -- an
+/// unparseable path variable now gets this message instead.
 fn path_error(rejection: PathRejection, names: &[String]) -> ApiError {
     use axum::extract::path::ErrorKind;
 
@@ -169,8 +163,8 @@ fn path_error(rejection: PathRejection, names: &[String]) -> ApiError {
             }
             // The single-parameter form, which knows the value but not the
             // name. There is exactly one name to reach for, and reaching for
-            // it is what keeps `/api/tournaments/{id}` answering Spring's
-            // sentence rather than axum's.
+            // it is what keeps `/api/tournaments/{id}` naming the field
+            // rather than falling back to axum's generic sentence.
             ErrorKind::ParseError { value, .. } => match names {
                 [only] => format!("Failed to convert '{only}' with value: '{value}'"),
                 _ => format!("Failed to convert path variable with value: '{value}'"),
@@ -187,8 +181,8 @@ fn path_error(rejection: PathRejection, names: &[String]) -> ApiError {
 
 /// Query parameters. Replaces `axum::extract::Query`.
 ///
-/// **Known deviation, allowlisted in the differential rig.** Spring named the
-/// offending parameter (`Failed to convert 'sinceMatchId' with value: 'abc'`);
+/// **Known limitation.** [`AppPath`] names the offending parameter
+/// (`Failed to convert 'sinceMatchId' with value: 'abc'`); this does not.
 /// `serde_urlencoded` reports only what went wrong, not which key it was
 /// deserialising, and recovering the key would mean deserialising field by
 /// field through a hand-written `Deserializer`. Status (400) and problem type
@@ -220,7 +214,7 @@ mod tests {
     use super::camel_case;
 
     /// `fields` is keyed by the name the client knows the field by, which is
-    /// the camelCase one Jackson emitted and `types.ts` declares.
+    /// the camelCase one `types.ts` declares.
     #[test]
     fn a_field_path_is_reported_in_the_names_the_wire_uses() {
         assert_eq!(camel_case("hero_ids"), "heroIds");

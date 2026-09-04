@@ -1,10 +1,9 @@
 //! Hero identities and per-tournament hero pools, through
 //! `/api/admin/heroes` and `/api/admin/tournaments/{id}/heroes`.
 //!
-//! Oracle: `hero/AdminHeroServiceIntegrationTest.kt`, driven over HTTP rather
-//! than against the service, so the DTO shape and the status codes are
-//! checked by the same test that checks the rule -- see `map_admin.rs` for
-//! the same treatment of `AdminMapServiceIntegrationTest`.
+//! Driven over HTTP rather than against the service, so the DTO shape and
+//! the status codes are checked by the same test that checks the rule --
+//! see `map_admin.rs` for the same treatment.
 
 use serde_json::json;
 
@@ -175,7 +174,7 @@ async fn updating_an_unknown_hero_is_a_404() {
     assert_eq!(response.json()["detail"], "No hero with id 9999999");
 }
 
-/// `@NotBlank(message = "name is required")` -- whitespace fails it, and the
+/// `name` must be present and non-blank -- whitespace fails it, and the
 /// message is the one the client renders.
 #[tokio::test]
 async fn a_blank_hero_name_is_a_400_naming_the_field() {
@@ -308,9 +307,8 @@ async fn setting_the_cost_of_an_unknown_hero_is_a_404() {
     assert_eq!(response.json()["detail"], "No hero with id 9999999");
 }
 
-/// PORTING.md deviation (a)'s shape, ported to the hero pool's own
-/// `@Positive`-without-`@NotNull` `cost` field: an absent cost is a 400
-/// naming the field, not a 500.
+/// The same present-and-positive shape, on the hero pool's own `cost` field:
+/// an absent cost is a 400 naming the field, not a 500.
 #[tokio::test]
 async fn an_absent_cost_is_a_400_naming_the_field() {
     let app = TestApp::spawn().await;
@@ -470,7 +468,8 @@ async fn add_batch_to_pool_rejects_an_unknown_hero_id_and_writes_nothing_from_th
     );
 }
 
-/// `@Size(min = 1, max = 128)` -- and the message the client renders.
+/// `heroes` must contain between 1 and 128 entries when present -- and the
+/// message the client renders.
 #[tokio::test]
 async fn an_empty_batch_is_a_400_naming_the_field() {
     let app = TestApp::spawn().await;
@@ -492,8 +491,7 @@ async fn an_empty_batch_is_a_400_naming_the_field() {
     );
 }
 
-/// `@Size` ignores a null and there is no `@NotNull` beside it, so an
-/// omitted `heroes` is a valid request that adds nothing.
+/// An omitted `heroes` is deliberately a valid request that adds nothing.
 #[tokio::test]
 async fn an_omitted_batch_is_accepted_and_adds_nothing() {
     let app = TestApp::spawn().await;

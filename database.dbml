@@ -106,8 +106,8 @@ Table tournament_entries {
 }
 
 // Child of the tournament_entries aggregate: entry_id is the back-reference,
-// slot_index the list position (Spring Data JDBC @MappedCollection). No
-// acquisition_cost column -- roster cost is joined live from tournament_heroes.
+// slot_index the list position. No acquisition_cost column -- roster cost is
+// joined live from tournament_heroes.
 Table entry_slots {
   entry_id   int [not null]
   slot_index int [not null]
@@ -196,7 +196,7 @@ Table match_games {
 
 // One side's result in one game: the hero it brought and how it ended. Exactly
 // one side of a game carries is_winner (partial unique index enforces "at most
-// one"; MatchResultPolicy.NOT_EXACTLY_ONE_WINNER enforces "at least one"). A
+// one"; match_policy's NOT_EXACTLY_ONE_WINNER enforces "at least one"). A
 // losing hero finishes on 0 or less health.
 Table match_game_participants {
   game_id          int [not null]

@@ -1,42 +1,66 @@
+# The backend's merge gate.
+#
+# This file used to be backend-rs-ci.yml; it dropped the `-rs` suffix once it
+# became the only backend gate this repo has.
 name: backend-ci
 
 on:
   pull_request:
     paths:
-      - "backend/**"
+      - "backend-rs/**"
       - "db/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle/**"
-      - ".editorconfig"
       - ".github/workflows/backend-ci.yml"
   push:
     branches-ignore:
       - master
     paths:
-      - "backend/**"
+      - "backend-rs/**"
       - "db/**"
-      - "build.gradle.kts"
-      - "settings.gradle.kts"
-      - "gradle/**"
-      - ".editorconfig"
       - ".github/workflows/backend-ci.yml"
+
+defaults:
+  run:
+    working-directory: backend-rs
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Every step compiles against the committed query metadata, never a live
+      # database -- the same way the release build does.
+      SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v5
+      # `backend-rs/rust-toolchain.toml` pins the version; this action reads it.
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          distribution: temurin
-          java-version: "21"
+          components: rustfmt, clippy
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend-rs
 
-      - name: Check Kotlin formatting
-        run: ./gradlew :backend:ktlintCheck
+      - name: Check formatting
+        run: cargo fmt --all --check
 
-      - name: Run backend test suite
-        run: ./gradlew :backend:test
+      # `clippy.toml` bans `sort_unstable_*` here: recorded order is contract.
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Editing a query and forgetting to re-run `cargo sqlx prepare` still
+      # compiles locally (a live DATABASE_URL is there) and breaks the image
+      # build -- see AGENTS.md.
+      - name: Check the offline query metadata is current
+        run: |
+          if [ -d .sqlx ]; then
+            cargo install sqlx-cli --locked --no-default-features --features postgres,rustls
+            cargo sqlx prepare --workspace --check -- --all-targets
+          else
+            echo "No .sqlx/ yet -- no compile-time-checked queries in the tree."
+          fi
+
+      # Integration tests need a Docker daemon, which GitHub-hosted runners
+      # have preinstalled.
+      - name: Test
+        run: cargo test --workspace

@@ -4,8 +4,8 @@
 //! `map::query`: the importer wants *every* hero and board as `(id, name)`
 //! pairs -- not the pool-scoped, priced hero view the roster screens read, and
 //! not the map aggregate the admin screens write. Keeping them here also keeps
-//! this feature off two other features' projection shapes, which is the same
-//! merge-contention argument PORTING.md §3 makes for DTOs.
+//! this feature off two other features' projection shapes, for the same
+//! merge-contention reason DTOs live with their own feature module.
 //!
 //! Note the scope: the hero catalogue is **not** filtered to the tournament's
 //! pool. `match_game_participants.hero_id` and `hero_bans.hero_id` reference

@@ -1,20 +1,12 @@
-//! Scoring rule-set reads.
-//!
-//! Oracle: `scoring/ScoringRuleSetQuery.kt` (the `JdbcClient` projection) and
-//! the derived queries on `scoring/ScoringRuleSetRepository.kt`.
-//!
-//! Both halves are reads and both live here, which is the split the Kotlin
-//! class names were carrying (PORTING.md §3); `ScoringRuleSetRepository.save`
-//! is `writer.rs`.
+//! Scoring rule-set reads. The writes are `writer.rs`.
 //!
 //! # Loading the aggregate
 //!
-//! Spring Data JDBC loads a root's `@MappedCollection` children in a statement
-//! of their own, one per root. These functions issue **one** child statement
-//! for every root instead. The rows are identical and both callers are inside
-//! a transaction, so the two cannot observe a different database; what changes
-//! is the statement count, which is why `AdminScoringService.list` was
-//! transactional in the first place.
+//! Each of these functions issues **one** child statement per root to load a
+//! rule set's coefficients, rather than loading them per-row. Both callers are
+//! inside a transaction, so an equivalent per-row approach could not observe a
+//! different database either; what changes is the statement count, which is
+//! why `scoring::admin_service::list` is transactional in the first place.
 
 use indexmap::IndexMap;
 use rust_decimal::Decimal;
@@ -32,9 +24,9 @@ use super::{ScoringCoefficient, ScoringRuleSet};
 /// event), so this returns the empty rules rather than failing.
 ///
 /// The `left join` is what makes a rule set with no coefficients yet still
-/// yield its id and name, and is why the Kotlin's row type has a nullable
-/// `metric`: `sqlx` types that column `Option<String>` for the same reason, and
-/// the `else { continue }` below is the Kotlin's `?: continue`.
+/// yield its id and name: `sqlx` types the joined `metric` column
+/// `Option<String>`, and the `else { continue }` below skips the row when it's
+/// `None`.
 pub async fn active_rules(
     db: impl PgExecutor<'_>,
     tournament_id: i64,
@@ -42,8 +34,7 @@ pub async fn active_rules(
     let rows = sqlx::query!(
         // `as "metric?"` / `as "coefficient?"`: the columns are `not null` in
         // their own table, so sqlx infers them non-nullable and cannot see
-        // that the `left join` makes them optional here. The Kotlin row type
-        // marks the same two fields nullable for the same reason.
+        // that the `left join` makes them optional here.
         r#"select rs.id as rule_set_id, rs.name, c.metric as "metric?", c.coefficient as "coefficient?"
            from scoring_rule_sets rs
            left join scoring_coefficients c on c.rule_set_id = rs.id
@@ -61,7 +52,7 @@ pub async fn active_rules(
     let (rule_set_id, name) = (header.rule_set_id, header.name.clone());
 
     // An `IndexMap` keeps `sort_order`, which is the leaderboard's column
-    // order -- the Kotlin's `linkedMapOf` (PORTING.md §4.2).
+    // order.
     let mut coefficients: IndexMap<String, Decimal> = IndexMap::with_capacity(rows.len());
     for row in rows {
         let Some(metric) = row.metric else { continue };
@@ -128,8 +119,8 @@ pub async fn find_by_tournament_id_and_name(
     }))
 }
 
-/// `findById`. The tournament filter the Kotlin applies afterwards is the
-/// service's, not this function's.
+/// Looks up a rule set by id alone. Filtering by tournament is the caller's
+/// job, not this function's.
 pub async fn find_by_id(
     conn: &mut PgConnection,
     rule_set_id: i64,
@@ -154,11 +145,9 @@ pub async fn find_by_id(
 
 /// One rule set's coefficients, in column order.
 ///
-/// `sort_order, id` rather than the Kotlin's nothing-in-particular: the child
-/// collection is a `Set<ScoringCoefficient>` there, so its iteration order is
-/// unspecified and `ScoringRuleSetDto.from` re-sorts by `sort_order` anyway.
-/// Ordering here makes the tie deterministic instead of hash-dependent, and
-/// `id` is insertion order, which is the order the admin submitted them in.
+/// `sort_order, id`: `sort_order` is the leaderboard's column order, and `id`
+/// -- insertion order, the order the admin submitted them in -- makes the tie
+/// deterministic.
 async fn coefficients_of(
     conn: &mut PgConnection,
     rule_set_id: i64,

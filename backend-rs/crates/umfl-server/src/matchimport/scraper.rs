@@ -1,8 +1,5 @@
 //! The Tabletop League scraper sidecar, and the URL rules that guard it.
 //!
-//! Oracle: `matchimport/ScraperClient.kt`, `matchimport/ScrapedMatch.kt`,
-//! `matchimport/ScraperProperties.kt`.
-//!
 //! This is the application's one outbound HTTP call, and it exists because
 //! tabletopleague.com is client-rendered Next.js: fetching a match page from
 //! here would return the JS bundle and no data, so a real browser has to render
@@ -15,9 +12,9 @@
 //! scraped a real page and failed on it -- a **409** naming what went wrong,
 //! usually selector drift after the source site changed its markup.
 //!
-//! [`ScraperClient`] is **the only trait in this crate** (PORTING.md §3). It
-//! earns that because the Kotlin has a genuine test seam here: `MatchImportServiceTest`
-//! substitutes a stub rather than standing up Playwright.
+//! [`ScraperClient`] is **the only trait in this crate**. It earns that
+//! because it is a genuine test seam: `tests/it/match_import.rs`'s
+//! `StubScraper` substitutes a stub rather than standing up a real browser.
 
 use std::time::Duration;
 
@@ -44,8 +41,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// A constant rather than configuration, unlike `scraper.base-url`: only the
 /// address is bound to an environment variable in `application.yml`, and the
 /// remaining `ScraperProperties` defaults were never overridden anywhere. Same
-/// reasoning as `MatchResultCache`'s sizing (PORTING.md, the `umfl.*`
-/// invariant).
+/// reasoning as `MatchResultCache`'s sizing -- see AGENTS.md's `umfl.*`
+/// invariant.
 const ALLOWED_HOSTS: &[&str] = &["www.tabletopleague.com"];
 
 /// The seam. One method, because scraping one match page is the only thing the
@@ -124,10 +121,9 @@ impl ScraperClient for HttpScraperClient {
 
 /// Pulls the sidecar's own error sentence out of its `{"error": "..."}` body.
 ///
-/// Parsed rather than pattern-matched (the Kotlin uses a regex to avoid a full
-/// parse on an error path). The one visible difference is in favour of this
-/// side: an escaped quote inside the message arrives unescaped rather than as
-/// `\"`.
+/// Parsed as JSON rather than pattern-matched with a regex: `serde_json` is
+/// already a dependency, so a full parse costs nothing extra even on an error
+/// path.
 fn scraper_error_message(body: Option<&str>) -> String {
     let Some(body) = body.map(str::trim).filter(|b| !b.is_empty()) else {
         return "no detail given".to_owned();
@@ -143,7 +139,7 @@ fn scraper_error_message(body: Option<&str>) -> String {
 ///
 /// The sidecar enforces the same rule -- this copy is the one that sees a URL
 /// typed by a user, and every string it returns is rendered to that user, so
-/// they are wire contract (PORTING.md §1).
+/// they are wire contract.
 pub fn validate_source_url(source_url: &str) -> Option<String> {
     let trimmed = source_url.trim();
     let url = match reqwest::Url::parse(trimmed) {
@@ -191,8 +187,8 @@ fn is_uri_illegal(c: char) -> bool {
 }
 
 /// `/o/<org>/<competition>/matches/<id>`, with an optional trailing slash --
-/// the Kotlin's `MATCH_PATH` regex, spelt out because this crate has no regex
-/// engine and does not need one for a fixed six-segment shape.
+/// spelt out as a segment check rather than a regex, because this crate has
+/// no regex engine and does not need one for a fixed six-segment shape.
 fn is_match_path(path: &str) -> bool {
     let path = path.strip_suffix('/').unwrap_or(path);
     let segments: Vec<&str> = path.split('/').collect();

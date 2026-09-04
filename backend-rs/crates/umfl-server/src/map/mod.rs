@@ -1,9 +1,5 @@
 //! Boards, and which of them a tournament may be played on.
 //!
-//! Oracle: `api/AdminMapController.kt`, the map block of `api/AdminDtos.kt`,
-//! `map/GameMap.kt`, `map/GameMapRepository.kt`,
-//! `map/MapPoolAdminRepository.kt` and `map/AdminMapService.kt`.
-//!
 //! The catalogue is reference data -- facts about Unmatched, seeded by
 //! `V2__reference_data.sql` and extended when Restoration Games releases a
 //! board. The *pool* is league data: which of those boards this tournament
@@ -56,7 +52,7 @@ impl From<GameMap> for MapAdminDto {
     }
 }
 
-/// `@NotBlank(message = "name is required")`.
+/// `name` must be present and non-blank.
 ///
 /// A `custom` rule rather than garde's built-in, because the message is what
 /// the client renders and garde 0.23 cannot override a built-in rule's wording.
@@ -67,7 +63,7 @@ pub struct CreateMapRequest {
     pub name: Option<String>,
 }
 
-/// `typealias UpdateMapRequest = CreateMapRequest` -- same body, same rule.
+/// Same body, same rule as [`CreateMapRequest`].
 pub type UpdateMapRequest = CreateMapRequest;
 
 #[derive(Debug, Deserialize, garde::Validate)]
@@ -77,7 +73,7 @@ pub struct AddMapsToPoolRequest {
     pub map_ids: Option<Vec<i64>>,
 }
 
-/// `@NotBlank`: fails on absent *and* on whitespace-only.
+/// Fails on absent *and* on whitespace-only.
 fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),
@@ -85,12 +81,10 @@ fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> gard
     }
 }
 
-/// `@Size(min = 1, max = 64, message = "mapIds must contain between 1 and 64 entries")`.
-///
-/// Bean Validation's `@Size` **ignores a null** and there is no `@NotNull`
-/// beside it, so a request that omits `mapIds` entirely is valid and adds
-/// nothing -- the controller reads it as `request.mapIds.orEmpty()`. Porting
-/// faithfully means the absent case passes here too.
+/// `mapIds` must contain between 1 and 64 entries when present -- a request
+/// that omits `mapIds` entirely is deliberately valid and adds nothing; only
+/// a *present but empty or oversized* array is rejected, by [`batch_size`]
+/// below.
 fn batch_size(value: &Option<Vec<i64>>, _: &()) -> garde::Result {
     match value {
         Some(ids) if ids.is_empty() || ids.len() > 64 => Err(garde::Error::new(
@@ -114,10 +108,10 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-// `hasRole('ADMIN')` is enforced by `auth::authorize` for every `/api/admin/**`
-// path -- the `@PreAuthorize` on the controller and the URL matcher in one
-// place. Each handler still takes the `CurrentManager` its Kotlin counterpart
-// declares, so the identity a route needs stays visible at the route.
+// `Access::Admin` is enforced by `auth::authorize` for every `/api/admin/**`
+// path -- the admission check and the URL matcher live in one place. Each
+// handler still takes `CurrentManager` for the identity, so who a route
+// needs stays visible at the route.
 
 async fn list(
     State(state): State<AppState>,

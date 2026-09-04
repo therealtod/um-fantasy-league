@@ -7,11 +7,10 @@
 //! convention connects the garde rule to the `.expect` -- add a field with the
 //! `Option` type and forget the rule, and a missing field stops being a 400
 //! naming it and becomes a **500** from the `.expect` instead. That is a real,
-//! already-observed shape in this codebase: PORTING.md §3b's note on
-//! `SetHeroCostRequest`/`HeroPoolEntryRequest.cost` records it being found by
-//! hand, the identical shape Deviation (a) already fixed once for
-//! `capacity`/`rosterSize`/`creditGrant`. Nothing stops a fourth instance
-//! appearing silently.
+//! already-observed shape in this codebase: `SetHeroCostRequest`/
+//! `HeroPoolEntryRequest.cost` had exactly this gap, found by hand -- the
+//! identical shape already fixed once for `capacity`/`rosterSize`/
+//! `creditGrant`. Nothing stops a fourth instance appearing silently.
 //!
 //! This module is the check that convention alone can't be. **Asserting the
 //! full field-*set*, not merely that `fields` is non-empty, is the entire
@@ -24,13 +23,12 @@
 //! Two endpoints are deliberately **not** in the table below, for a different
 //! reason than "can't reach validation": `AddHeroesToPoolRequest.heroes` and
 //! `AddMapsToPoolRequest.map_ids` are `Option<Vec<_>>` with no `required(...)`
-//! rule at all -- `{}` validates cleanly and the handler reads the field as an
-//! empty batch (`.unwrap_or_default()`), exactly mirroring the Kotlin's
-//! `@Size` (which ignores a null) with no `@NotNull` beside it, and the
-//! `.orEmpty()` the controller reads it with. There is no `.expect(...)` on
-//! either field, so there is no defect shape here for this module to guard --
-//! see `an_empty_batch_pool_body_is_accepted_as_an_empty_batch` below, which
-//! pins that this is a deliberate, working design rather than an oversight.
+//! rule at all -- `{}` validates cleanly and the handler deliberately reads
+//! the field as an empty batch (`.unwrap_or_default()`). There is no
+//! `.expect(...)` on either field, so there is no defect shape here for this
+//! module to guard -- see `an_empty_batch_pool_body_is_accepted_as_an_empty_batch`
+//! below, which pins that this is a deliberate, working design rather than an
+//! oversight.
 
 use std::collections::BTreeSet;
 
@@ -291,11 +289,10 @@ async fn an_empty_body_fails_validation_naming_exactly_the_required_fields() {
 /// Pins the two endpoints excluded from the table above as a deliberate
 /// design, not an oversight: `AddHeroesToPoolRequest.heroes` and
 /// `AddMapsToPoolRequest.map_ids` are `Option<Vec<_>>` with no `required(...)`
-/// rule, so `{}` validates cleanly -- the handler reads it as an empty batch,
-/// same as the Kotlin's `request.heroes.orEmpty()` /
-/// `request.mapIds.orEmpty()`. Neither field is ever `.expect()`-unwrapped,
-/// so there is no `Option` + missing-rule + `.expect()` triad here for this
-/// module to guard -- an empty body is genuinely valid input, not a gap.
+/// rule, so `{}` validates cleanly -- the handler deliberately reads it as an
+/// empty batch. Neither field is ever `.expect()`-unwrapped, so there is no
+/// `Option` + missing-rule + `.expect()` triad here for this module to guard
+/// -- an empty body is genuinely valid input, not a gap.
 #[tokio::test]
 async fn an_empty_batch_pool_body_is_accepted_as_an_empty_batch() {
     let app = TestApp::spawn().await;

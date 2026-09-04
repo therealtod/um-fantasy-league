@@ -3,7 +3,7 @@
 //! Each feature exposes `pub fn routes() -> Router<AppState>` from its own
 //! module and is merged here in one line. That is deliberately the *only*
 //! place independent feature tasks touch in common -- DTOs live with their
-//! feature rather than in a shared `Dtos.kt`, precisely so this stays the
+//! feature rather than in one shared file, precisely so this stays the
 //! single merge point.
 
 pub mod actuator;

@@ -1,18 +1,15 @@
 //! The authorization rule table, asserted from outside the process.
 //!
-//! Oracle: `config/SecurityConfigTest.kt`, `config/DevSecurityConfigTest.kt`
-//! and `config/AdminSecurityDevTest.kt` -- three classes because Spring needed
-//! a separate application context per profile. Here the profile is a field on
-//! `Config`, so the dev-credential half is one file, and the prod half (a
-//! signed ES256 token and a JWKS to verify it against) is a unit-level concern
-//! rather than something to stand a fake identity provider up for.
+//! The profile is a field on `Config`, so the dev-credential half is one
+//! file, and the prod half (a signed ES256 token and a JWKS to verify it
+//! against) is a unit-level concern rather than something to stand a fake
+//! identity provider up for.
 //!
-//! **These assert the gate, not the routes.** Most feature routes have not
-//! landed yet, so a request the table *permits* reaches the router and 404s.
+//! **These assert the gate, not the routes.** A request the table *permits*
+//! still has to reach an actual handler to answer with anything but a 404.
 //! That is precisely the distinction worth pinning: 401/403 is the rule table
-//! refusing, 404 is the rule table having let go. The Kotlin tests assert
-//! `isOk()` where these assert "not a rejection", and they converge as each
-//! feature merges.
+//! refusing, 404 is the rule table having let go -- these tests assert "not a
+//! rejection" rather than a specific successful response.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -77,8 +74,8 @@ async fn the_public_reads_need_no_credential() {
     }
 }
 
-/// The `permitAll` rules are GET-only. Verified against the running Kotlin
-/// backend: `POST /api/tournaments` and `PUT /api/tournaments/1` both 401.
+/// The publicly readable rules are GET-only: `POST /api/tournaments` and
+/// `PUT /api/tournaments/1` both 401.
 #[tokio::test]
 async fn a_write_to_a_publicly_readable_path_still_needs_an_identity() {
     let app = TestApp::spawn().await;
@@ -152,12 +149,11 @@ async fn a_bad_credential_is_rejected_rather_than_treated_as_anonymous() {
 /// Resolution is conditional on a credential being **offered**, never on the
 /// route -- so a bad one is rejected even where the route needed none.
 ///
-/// This is the outward half of `DevSecurityConfigTest`'s "a public route costs
-/// no manager lookup": the filter knows nothing about routes, so it cannot
-/// skip a lookup for a public one, and equally cannot run one when no header
-/// arrived. Confirmed against the running Kotlin backend, which answers 401 to
-/// `GET /api/tournaments` and even `GET /actuator/health` when the header names
-/// no manager.
+/// This is the outward half of "a public route costs no manager lookup": the
+/// filter knows nothing about routes, so it cannot skip a lookup for a
+/// public one, and equally cannot run one when no header arrived: this
+/// answers 401 to `GET /api/tournaments` and even `GET /actuator/health`
+/// when the header names no manager.
 #[tokio::test]
 async fn a_bad_credential_is_rejected_even_on_a_public_route() {
     let app = TestApp::spawn().await;
@@ -177,11 +173,9 @@ async fn a_bad_credential_is_rejected_even_on_a_public_route() {
     );
 }
 
-/// `anyRequest().denyAll()`, and the reason authorization is one middleware
-/// over the raw path rather than a per-route layer: a per-route layer never
-/// runs for a path matching no route, so axum would 404 where Spring denies.
-///
-/// The four rows are transcribed from probing the running Kotlin backend.
+/// The reason authorization is one middleware over the raw path rather than a
+/// per-route layer: a per-route layer never runs for a path matching no
+/// route, so axum would 404 there instead of denying it.
 #[tokio::test]
 async fn an_unrouted_path_is_denied_by_the_table_not_by_the_router() {
     let app = TestApp::spawn().await;
@@ -221,12 +215,13 @@ async fn the_rest_of_the_actuator_is_not_exposed() {
     }
 }
 
-/// A filter-level rejection carries no `instance`; a handler-level one does.
-///
-/// `instance` is written by `RequestResponseBodyMethodProcessor`, which is
-/// Spring MVC and never sees a body the security filters wrote. Emitting one on
-/// a 401 would be an added field, and an added field is as much a contract
-/// break as a missing one.
+/// A middleware-level rejection carries no `instance`; a handler-level one
+/// does. `instance` is filled in by [`http::fill_problem_instance`] only when
+/// a `ProblemDetail` was left in the response extensions, which a
+/// middleware-level rejection deliberately does not do (see
+/// `ProblemDetail::into_response_without_instance`). Emitting one on a 401
+/// would be an added field, and an added field is as much a contract break as
+/// a missing one.
 #[tokio::test]
 async fn only_handler_level_problems_name_the_request_path() {
     let app = TestApp::spawn().await;
@@ -246,10 +241,9 @@ async fn only_handler_level_problems_name_the_request_path() {
     assert_eq!(handler_level.json()["instance"], "/api/nope");
 }
 
-/// Deviation (c) in PORTING.md: dev-profile `OPTIONS /api/**` used to 401,
-/// because `DevSecurityConfig` never called `.cors()`. Here `CorsLayer` sits
-/// outside `authorize` in both profiles, so a preflight is answered rather than
-/// denied. Prod behaviour is unchanged while `FRONTEND_ORIGIN` is unset.
+/// `CorsLayer` sits outside `authorize` in both profiles, so a preflight
+/// `OPTIONS /api/**` is answered rather than denied. Prod behaviour is
+/// unchanged while `FRONTEND_ORIGIN` is unset.
 #[tokio::test]
 async fn a_preflight_is_answered_rather_than_denied() {
     let app = TestApp::spawn().await;
@@ -282,9 +276,8 @@ async fn a_preflight_is_answered_rather_than_denied() {
 ///
 /// A 404 is the *correct* answer here, not a weaker stand-in for 403: nothing
 /// routes at these spellings, and the four-row table in `authorize.rs`'s
-/// module doc (also PORTING.md §12's first "assumed wrong and corrected
-/// against the running backend" bullet) says an authenticated caller under
-/// `/api/**` is handed to the router, which is free to 404 its own way.
+/// module doc says an authenticated caller under `/api/**` is handed to the
+/// router, which is free to 404 its own way.
 /// `%61` is `a`, so `/api/%61dmin/heroes` is the percent-encoded spelling of
 /// `/api/admin/heroes`; `/api/x/../admin/heroes` is the `..`-traversal
 /// spelling of the same route.

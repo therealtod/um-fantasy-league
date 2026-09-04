@@ -1,18 +1,17 @@
 //! The leaderboard, the ticker and the live stream, against the recorded
 //! results in the seed.
 //!
-//! Oracle: `standings/StandingsIntegrationTest.kt`, driven over HTTP wherever
-//! the Kotlin drove the service, so the routes, the JSON shape and the status
-//! codes are checked by the same test that checks the fold.
+//! Driven over HTTP, so the routes, the JSON shape and the status codes are
+//! checked by the same test that checks the fold.
 //!
 //! The seed is static, so every assertion here is exact rather than "something
 //! is nonzero". Weights (`Season 2026 Standard`): WIN 10, HEALTH_REMAINING
 //! 0.75, HEALTH_DIFFERENTIAL 0.5, SHUTOUT 3, SELF_BAN 2, OPPONENT_BAN 2,
 //! APPEARANCE 1 -- plus the deliberately unimplemented CROWD_FAVOURITE 5.
 //!
-//! This file is where PORTING.md §13's headline assertion finally lives: the
-//! hand-derived leaderboard is simultaneously the tripwire for `round2` drift,
-//! `numeric(10,4)` decode drift and fold-order drift.
+//! This file is where the headline leaderboard-parity assertion finally
+//! lives: the hand-derived leaderboard is simultaneously the tripwire for
+//! `round2` drift, `numeric(10,4)` decode drift and fold-order drift.
 
 use std::time::Duration;
 
@@ -56,8 +55,8 @@ async fn summer_ticker(app: &TestApp) -> Vec<Value> {
     ticker(app, id, "").await
 }
 
-/// One row by handle. Every seeded handle is unique, so this is the Kotlin's
-/// `singleOrNull` with the same intent.
+/// One row by handle. Every seeded handle is unique, so exactly one row (or
+/// none) is expected.
 fn row<'a>(board: &'a Value, handle: &str) -> &'a Value {
     let rows = board["rows"].as_array().expect("rows");
     let mut matching = rows.iter().filter(|r| r["handle"] == handle);
@@ -187,7 +186,8 @@ async fn the_seeded_crowd_favourite_metric_is_weighted_but_scores_nothing_anywhe
     }
 }
 
-/// PORTING.md §13's headline assertion, asserted with exact `f64` equality.
+/// The headline leaderboard-parity assertion, asserted with exact `f64`
+/// equality.
 #[tokio::test]
 async fn the_leaderboard_is_exact_ordered_and_complete() {
     let app = TestApp::spawn().await;
@@ -844,10 +844,10 @@ async fn a_recorded_match_is_on_the_board_and_the_ticker_immediately() {
 
 /// The push that makes the read path bursty, end to end.
 ///
-/// This is the test `AGENTS.md` says the Kotlin suite cannot have: its
-/// `AFTER_COMMIT` listener never fires there, because every test rolls back. It
-/// fires here (PORTING.md §13), so the assertion is the real one -- a match
-/// write reaches an open stream.
+/// This is the test a transaction-rollback harness could not have: an
+/// `AFTER_COMMIT` listener never fires under one, because every test rolls
+/// back. It fires here, so the assertion is the real one -- a match write
+/// reaches an open stream.
 #[tokio::test]
 async fn a_committed_match_write_pushes_an_update_to_an_open_stream() {
     let app = TestApp::spawn().await;

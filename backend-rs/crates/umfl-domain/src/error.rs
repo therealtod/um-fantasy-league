@@ -1,22 +1,21 @@
 //! The domain's error vocabulary.
 //!
-//! A direct port of `common/DomainExceptions.kt`. Each variant maps to exactly
-//! one HTTP status in `umfl-server`'s `ApiError`; the mapping lives there so
-//! this crate stays free of anything web-shaped.
+//! Each variant maps to exactly one HTTP status in `umfl-server`'s
+//! `ApiError`; the mapping lives there so this crate stays free of anything
+//! web-shaped.
 
 use std::fmt;
 
 /// One broken rule, as it appears on the wire.
 ///
 /// The `rule` field is the *name* of the rule enum constant (`"BUDGET_EXCEEDED"`,
-/// `"NOT_EXACTLY_ONE_WINNER"`, ...), which is what the Kotlin's Jackson
-/// serialization of the enum produced and what `frontend/src/api/client.ts`
+/// `"NOT_EXACTLY_ONE_WINNER"`, ...), which is what `frontend/src/api/client.ts`
 /// reads back off `ApiError.violations`.
 ///
 /// This is deliberately *not* generic over the three rule enums. Each policy
 /// module owns its own enum and converts here, so adding a rule never touches
-/// this file -- which is what lets the roster, match and scoring policies be
-/// ported independently of each other.
+/// this file -- which is what lets the roster, match and scoring policies
+/// evolve independently of each other.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Violation {
     pub rule: String,
@@ -32,9 +31,8 @@ impl Violation {
     }
 }
 
-/// Joins violation messages the way `DomainExceptions.kt` builds its
-/// exception message: `violations.joinToString("; ") { it.message }`.
-/// That string becomes the problem document's `detail`.
+/// Joins violation messages with `"; "` to build the exception message that
+/// becomes the problem document's `detail`.
 fn join(violations: &[Violation]) -> String {
     violations
         .iter()
@@ -43,11 +41,9 @@ fn join(violations: &[Violation]) -> String {
         .join("; ")
 }
 
-/// The three rule families are separate variants rather than one, exactly as
-/// the Kotlin keeps `RosterRuleException`, `MatchRuleException` and
-/// `ScoringRuleException` as three types: they render the same 422 shape but
-/// carry different titles and problem-type slugs, and each vocabulary evolves
-/// independently.
+/// The three rule families are separate variants rather than one: they render
+/// the same 422 shape but carry different titles and problem-type slugs, and
+/// each vocabulary evolves independently.
 #[derive(Debug, Clone)]
 pub enum DomainError {
     NotFound(String),
@@ -99,8 +95,7 @@ mod tests {
 
     #[test]
     fn joins_violation_messages_with_semicolons() {
-        // Mirrors DomainExceptions.kt's `joinToString("; ") { it.message }`,
-        // which becomes the problem document's `detail`.
+        // Joined with `"; "`, which becomes the problem document's `detail`.
         let err = DomainError::RosterRule(vec![
             Violation::new(
                 "INCOMPLETE_ROSTER",

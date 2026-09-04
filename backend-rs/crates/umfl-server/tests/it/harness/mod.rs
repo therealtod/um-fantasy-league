@@ -1,27 +1,26 @@
 //! One container per test binary, one migrated template database, one clone of
 //! it per test.
 //!
-//! **This is deliberately not the Kotlin harness.** `PostgresIntegrationTest`
-//! wraps each test in a transaction and rolls it back, which works because
-//! Spring's transaction manager is thread-bound: the service under test joins
-//! the test's own transaction and sees its uncommitted fixtures. In Rust a
-//! service calls `state.pool.begin()` and gets a *different connection*, which
-//! would see none of it. Preserving rollback would mean threading
-//! `&mut PgConnection` through every service signature -- distorting production
-//! code to suit the harness. So each test gets a real, committed database of
-//! its own instead, cloned from a template Postgres file-copies.
+//! **Deliberately not a wrap-each-test-in-a-transaction-and-roll-it-back
+//! harness.** That approach only works when the service under test joins the
+//! test's own transaction and so can see its uncommitted fixtures -- which
+//! needs a thread-bound (or otherwise implicit) connection. Here a service
+//! calls `state.pool.begin()` and gets a *different connection*, which would
+//! see none of a rolled-back transaction's fixtures. Preserving rollback
+//! would mean threading `&mut PgConnection` through every service signature
+//! -- distorting production code to suit the harness. So each test gets a
+//! real, committed database of its own instead, cloned from a template
+//! Postgres file-copies.
 //!
-//! Three caveats in `AGENTS.md` are consequences of the rollback design and
-//! **do not apply here**, which is worth knowing before porting a test that
-//! works around them:
+//! Three things worth knowing follow from that:
 //!
-//! * `AFTER_COMMIT` paths actually run. `StandingsSseHub` no longer has to be
-//!   verified by a pure unit test standing in for an integration one.
-//! * The `MatchResultCache.invalidateAll()` `@BeforeEach` is unnecessary: the
-//!   cache is per-`AppState`, and every test has its own.
-//! * The suite may run in parallel -- the shared-cache hazard that forced the
-//!   Kotlin suite sequential is gone. Mark `SELECT ... FOR UPDATE` tests
-//!   `#[serial]` if one ever needs it.
+//! * `AFTER_COMMIT` paths actually run: `StandingsSseHub` is exercised end to
+//!   end rather than only unit-tested.
+//! * Nothing needs a per-test cache-invalidation hook: `MatchResultCache`
+//!   lives on `AppState`, and every test constructs its own.
+//! * The suite may run in parallel -- there is no cache shared across tests
+//!   to make sequential execution necessary. Mark `SELECT ... FOR UPDATE`
+//!   tests `#[serial]` if one ever needs it.
 
 // Shared scaffolding for fifteen independent task owners, so a helper is
 // routinely written one merge before its first caller. `dead_code` here would
@@ -71,7 +70,7 @@ use umfl_server::state::AppState;
 /// at the filter level, and only when it is present.
 pub const MANAGER_ID_HEADER: &str = "X-Manager-Id";
 
-/// `docker-compose.yml` and `PostgresIntegrationTest` both pin 17.
+/// `docker-compose.yml` pins the same Postgres major version, 17.
 const POSTGRES_IMAGE_TAG: &str = "17-alpine";
 const TEMPLATE_DB: &str = "umfl_template";
 
@@ -89,11 +88,9 @@ struct Template {
 /// the load-bearing part: `#[tokio::test]` builds and *drops* a runtime per
 /// test, so a `ContainerAsync` initialised on the first test's runtime would
 /// lose the background tasks its Docker client depends on the moment that test
-/// finished. Tying the container's life to the process instead is what the
-/// Kotlin harness achieves by starting its container in a static initialiser
-/// -- but the JVM runs shutdown hooks on exit and a bare `cargo test` binary
-/// does not, so getting there needs one more piece here: see
-/// `reap_container_at_exit`.
+/// finished. Tying the container's life to the process instead needs one more
+/// piece, since a `static` gets no automatic finalisation signal when the
+/// process exits: see `reap_container_at_exit`.
 ///
 /// The thread parks on `shutdown_rx` rather than `std::future::pending`.
 /// Parking on `pending` would mean the container is never dropped at all --
@@ -102,8 +99,8 @@ struct Template {
 /// process exits, `cargo test`'s harness included. So nothing short of an
 /// explicit signal into this thread, acted on while its runtime is still
 /// alive, ever gets `ContainerAsync::drop` to run -- and testcontainers-rs
-/// has no Ryuk-style reaper (unlike the Java/Kotlin client) to fall back on
-/// if it doesn't.
+/// has no Ryuk-style reaper (unlike the Java client) to fall back on if it
+/// doesn't.
 fn template() -> &'static Template {
     static TEMPLATE: OnceLock<Template> = OnceLock::new();
     TEMPLATE.get_or_init(|| {
@@ -193,9 +190,9 @@ extern "C" fn reap_container_at_exit() {
 
 /// Migrates `umfl_template` once: schema, reference data **and** seed.
 ///
-/// The seed is included because the `test` profile includes it -- every
-/// integration test in the Kotlin suite asserts against those fixtures, so a
-/// template without them would be a different oracle.
+/// The seed is included because the `test` profile includes it -- this suite
+/// asserts against those fixtures, so a template without them would be a
+/// different oracle.
 async fn migrate_template(base_url: &str) {
     let mut admin = connect(&format!("{base_url}postgres")).await;
     admin
@@ -224,10 +221,9 @@ async fn connect(url: &str) -> PgConnection {
 /// The repository root, found by walking up from this crate until `db/migration`
 /// appears.
 ///
-/// Walked rather than hard-coded as `../../../..`: `db/` moved out of
-/// `backend/src/main/resources` to the repository root so that the Kotlin
-/// backend and this one migrate the *same* files, and a relative-hop count is
-/// the thing that silently breaks the next time the tree is rearranged.
+/// Walked rather than hard-coded as `../../../..`: `db/` lives at the
+/// repository root (see `AGENTS.md`), and a relative-hop count is the thing
+/// that silently breaks the next time the tree is rearranged.
 fn repo_root() -> &'static Path {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
@@ -258,8 +254,8 @@ impl TestApp {
     /// A fresh app whose `AppState` is adjusted before the router is built.
     ///
     /// The one thing worth swapping is `scraper`, this crate's only trait and
-    /// the seam `MatchImportServiceTest` used a `@MockitoBean` for -- the
-    /// alternative is standing Playwright up inside the test suite. The hook is
+    /// a genuine test seam -- the alternative is standing a real browser up
+    /// inside the test suite. The hook is
     /// deliberately "mutate the state" rather than a scraper-shaped parameter,
     /// so the next seam (if one is ever justified) needs no second constructor.
     pub async fn spawn_with(adjust: impl FnOnce(&mut AppState)) -> Self {
@@ -471,13 +467,9 @@ impl TestResponse {
         std::str::from_utf8(&self.body).unwrap_or("<not utf-8>")
     }
 
-    /// `jackson.default-property-inclusion: non_null` as an assertion.
-    ///
-    /// A null field is **absent** from a Kotlin response body, never `null`, so
-    /// one emitted `null` anywhere in a document is a contract break. This is
-    /// the same walk the differential rig runs over every parity body; it is
-    /// here so a feature test can make the check on its own endpoint without
-    /// waiting for the rig.
+    /// A nullable field must be **absent** from a response body, never
+    /// serialized as `null` -- so any JSON `null` anywhere in a document is a
+    /// contract break.
     pub fn assert_no_json_nulls(&self) {
         fn walk(value: &serde_json::Value, path: &str, whole: &serde_json::Value) {
             match value {

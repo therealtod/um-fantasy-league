@@ -1,11 +1,7 @@
 //! Tournaments, entries and the Roster Builder's write path.
 //!
-//! Oracle: `api/TournamentController.kt`, `api/Dtos.kt`,
-//! `tournament/TournamentService.kt`, `tournament/TournamentRepositories.kt`,
-//! `tournament/TournamentEntryQuery.kt`.
-//!
-//! The DTOs live here rather than in a shared `Dtos.kt` (PORTING.md §3); the
-//! JSON shape is unchanged, and `frontend/src/api/types.ts` is the contract.
+//! The DTOs live here rather than in one shared file; the JSON shape is
+//! unchanged, and `frontend/src/api/types.ts` is the contract.
 
 pub mod admin_service;
 pub mod query;
@@ -97,9 +93,9 @@ impl From<BudgetStatus> for BudgetStatusDto {
 /// One manager's roster, as the Roster Builder renders it.
 ///
 /// `locked_at` is skipped when absent even though `types.ts` declares it
-/// `string | null`. That is deviation (d) in PORTING.md and it is **preserved**:
-/// `non_null` has been omitting the field all along and the frontend copes;
-/// emitting `null` would be the actual wire change.
+/// `string | null`. That is **preserved** deliberately: `non_null` has been
+/// omitting the field all along and the frontend copes; emitting `null`
+/// would be the actual wire change.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RosterDto {
@@ -152,14 +148,13 @@ impl From<RosterSnapshot> for RosterDto {
     }
 }
 
-/// `@NotNull(message = "heroIds is required")` plus
-/// `@Size(max = 64, message = "heroIds must not exceed 64 entries")`.
+/// `heroIds` must be present, and at most 64 entries.
 ///
-/// Both are `custom` rather than garde's own `required` / `length` rules,
-/// because the message string is what the client renders and garde 0.23 has no
-/// way to override a built-in rule's wording. One function covers both
-/// annotations without ambiguity: `@Size` ignores a null, so the two can never
-/// fail together.
+/// Both checks are `custom` rather than garde's own `required` / `length`
+/// rules, because the message string is what the client renders and garde
+/// 0.23 has no way to override a built-in rule's wording. One function
+/// covers both without ambiguity: the length check only applies once the
+/// value is known present, so the two can never fail together.
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct SetSlotsRequest {
@@ -175,18 +170,10 @@ fn hero_ids_rule(value: &Option<Vec<i64>>, _: &()) -> garde::Result {
     }
 }
 
-/// `@NotBlank(message = "name is required")` / `@NotNull(message = "... is
-/// required")`. Oracle: `AdminDtos.kt`'s `CreateTournamentRequest`.
-///
-/// `capacity` / `roster_size` / `credit_grant` carry only `@Positive` in the
-/// Kotlin, no `@NotNull` -- an omitted value there passes Bean Validation
-/// (`@Positive` ignores a null) and then 500s on the controller's
-/// `requireNotNull`. This is PORTING.md deviation (a): **fixed**, and the
-/// message for the newly-added not-null half is Hibernate's own default for
-/// a bare `@NotNull` with no custom message, `"must not be null"`, since no
-/// annotation with a custom message ever existed for that case -- unlike
-/// `gameNumber` below, which has a real `@NotNull(message = "gameNumber is
-/// required")` in the Kotlin and keeps that string.
+/// `name` must be present and non-blank; every other field below must be
+/// present, and `capacity`/`roster_size`/`credit_grant` must also be
+/// positive -- an absent one is a 400 naming the field ("must not be null")
+/// rather than a 500 from an unwrap deeper in the service.
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTournamentRequest {
@@ -212,7 +199,7 @@ pub struct CreateTournamentRequest {
 /// Full replace — every field is resubmitted, including `status`.
 pub type UpdateTournamentRequest = CreateTournamentRequest;
 
-/// `@NotNull`.
+/// Fails only on absent.
 fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Result {
     move |value, _| match value {
         Some(_) => Ok(()),
@@ -220,7 +207,7 @@ fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Resu
     }
 }
 
-/// `@NotBlank`: fails on absent *and* on whitespace-only.
+/// Fails on absent *and* on whitespace-only.
 fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),
@@ -228,8 +215,8 @@ fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> gard
     }
 }
 
-/// `@NotNull` and `@Positive` on one field. `@Positive` ignores a null, so
-/// exactly one of the two can fail.
+/// Present-and-positive on one field: absence and non-positivity are checked
+/// separately, so exactly one of the two can fail.
 fn required_positive(
     absent: &'static str,
     non_positive: &'static str,
@@ -243,8 +230,7 @@ fn required_positive(
 
 impl CreateTournamentRequest {
     /// The service's inputs, once validation has run -- which is why every
-    /// `expect` here is unreachable for the same reason the Kotlin
-    /// controller's `requireNotNull`s are.
+    /// `expect` below is unreachable.
     fn to_fields(&self) -> TournamentFields<'_> {
         TournamentFields {
             name: self.name.as_deref().expect("validated as present"),
@@ -371,11 +357,10 @@ async fn lock(
     Ok(Json(RosterDto::from(snapshot)))
 }
 
-// `hasRole('ADMIN')` is enforced by `auth::authorize` for every `/api/admin/**`
-// path -- the `@PreAuthorize` on the controller and the URL matcher in one
-// place. Each handler still takes the `CurrentManager` its Kotlin
-// counterpart declares, so the identity a route needs stays visible at the
-// route. Oracle: `api/AdminTournamentController.kt`.
+// `Access::Admin` is enforced by `auth::authorize` for every `/api/admin/**`
+// path -- the admission check and the URL matcher live in one place. Each
+// handler still takes `CurrentManager` for the identity, so who a route
+// needs stays visible at the route.
 
 async fn admin_create(
     State(state): State<AppState>,

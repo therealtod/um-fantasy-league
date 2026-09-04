@@ -1,7 +1,5 @@
 //! Parses the source site's rendered timestamp, e.g. `"17 Aug 2026, 22:00 CEST"`.
 //!
-//! A direct port of `matchimport/ScrapedTimestamps.kt`.
-//!
 //! Pure and best-effort by design: **it returns `None` rather than failing.**
 //! The timestamp is rendered text in whatever timezone the source happened to
 //! display, abbreviated in a way that is genuinely ambiguous worldwide ("CST"
@@ -48,8 +46,8 @@ pub fn parse(raw: Option<&str>) -> Option<DateTime<Utc>> {
         return None;
     }
 
-    // Kotlin splits a trailing alphabetic abbreviation off with
-    // `^(.*?)[\s]+([A-Z]{2,5})$`; the same split without a regex engine.
+    // Splits a trailing alphabetic zone abbreviation off the text, without
+    // pulling in a regex engine for it.
     let (date_time_text, zone) = match split_trailing_zone(text) {
         Some((head, abbreviation)) if !MERIDIEMS.contains(&abbreviation) => {
             (head, Some(lookup_zone(abbreviation)?))

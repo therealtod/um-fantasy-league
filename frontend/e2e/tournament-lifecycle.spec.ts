@@ -8,11 +8,13 @@ import { BACKEND_URL, PLAYER_A_URL, PLAYER_B_URL } from '../playwright.config'
  * results, and the standings page — rendered by the real Vue app against the
  * real backend — names the winner.
  *
- * This is the browser-level counterpart to
- * `backend/src/test/kotlin/com/umfl/TournamentLifecycleIntegrationTest.kt`
- * and `src/stores/tournamentLifecycle.spec.ts`: those exercise the service
- * layer and the Pinia stores respectively; this one is the only one of the
- * three that actually renders a page and clicks a button.
+ * This is the browser-level counterpart to the backend's own service-level
+ * coverage of the same journey (`backend-rs/crates/umfl-server/tests/it/roster_flow.rs`,
+ * `match_admin.rs` and `standings.rs`, each driving `tournament::service`/
+ * `r#match::admin_service`/`standings::service` directly) and to
+ * `src/stores/tournamentLifecycle.spec.ts`, which exercises the Pinia stores;
+ * this one is the only one of the three that actually renders a page and
+ * clicks a button.
  *
  * Admin setup (tournament, hero/map pool, scoring, match results) goes
  * through the real Admin API via HTTP, exactly like `AdminDashboardView`'s
@@ -85,8 +87,8 @@ test.describe('tournament lifecycle', () => {
   /**
    * Records a one-game series. A match is a best-of-N, so the humans sit on the
    * match and the heroes sit on each game; side 0 of the games is played by side
-   * 0 of the series, which is the pairing AdminMatchService relies on — so the
-   * winner stays first in both lists.
+   * 0 of the series, which is the pairing `r#match::admin_service` relies on —
+   * so the winner stays first in both lists.
    */
   async function recordMatch(
     round: number,

@@ -1,8 +1,6 @@
 //! The match cache against the queries it stands in front of, on a real
 //! database.
 //!
-//! Oracle: `match/MatchResultCacheIntegrationTest.kt`.
-//!
 //! The unit tests inside `match/cache.rs` cover the caching mechanics with a
 //! stubbed loader. What needs Postgres is the one claim those cannot check:
 //! that `MatchResultCache::find_by_tournament_since` -- a reverse, a filter and
@@ -204,9 +202,9 @@ async fn deleting_a_match_reaches_the_very_next_read() {
 }
 
 /// Renaming a **board** through the admin API drops every cached list, because
-/// `mapName` is copied into an assembled match and no match write announces the
-/// change. This is `AdminMapService.update`'s `ReferenceDataRenamedEvent`, end
-/// to end.
+/// `mapName` is copied into an assembled match and no match write announces
+/// the change. This is `map::admin_service::update`'s cache invalidation,
+/// end to end.
 #[tokio::test]
 async fn renaming_a_board_reaches_the_very_next_read() {
     let app = TestApp::spawn().await;
@@ -249,10 +247,10 @@ async fn renaming_a_board_reaches_the_very_next_read() {
     );
 }
 
-/// The same staleness for a **hero**, whose admin service is not ported yet
-/// (PORTING.md §3b) -- so the rename is made here the way that service will,
-/// and this is what `AdminHeroService.update` has to keep passing once it
-/// lands: without the global invalidation the old name survives.
+/// The same staleness for a **hero**, isolated rather than driven through the
+/// real admin endpoint: the rename here is raw SQL plus a direct
+/// `invalidate_all()` call, pinning the mechanism `hero::admin_service::update`
+/// relies on without a rename actually crossing the wire.
 #[tokio::test]
 async fn a_hero_rename_needs_the_global_invalidation_to_be_seen() {
     let app = TestApp::spawn().await;
@@ -393,7 +391,7 @@ fn to_request(recorded: &Value) -> Value {
 /// This is the one assertion that cannot be made by inspection, because getting
 /// it wrong is not an error. `set transaction isolation level` is accepted only
 /// before a transaction's first query; issued later it is silently ignored and
-/// the transaction stays at READ COMMITTED (PORTING.md §7). Every statement
+/// the transaction stays at READ COMMITTED. Every statement
 /// still succeeds and every row still looks plausible -- they just come from
 /// several different snapshots -- so a regression here surfaces as a
 /// leaderboard nobody can quite reproduce, not as a failure.

@@ -1,11 +1,10 @@
 //! A tournament, a manager's entry into one, and the roster slots the entry
 //! owns.
 //!
-//! A direct port of `tournament/Tournament.kt` and `tournament/TournamentEntry.kt`,
-//! minus their persistence attributes -- Spring Data JDBC's `@Table`/`@Id`/
-//! `@MappedCollection` have no counterpart here, and the row mapping lives in
-//! `umfl-server` instead. These are also not wire types: the DTOs live with
-//! their feature in the server, per PORTING.md §3.
+//! Minus persistence attributes -- there is no ORM here, so no annotation of
+//! any kind ties these to a table, and the row mapping lives in `umfl-server`
+//! instead. These are also not wire types: the DTOs live with their feature
+//! in the server.
 //!
 //! Nothing here stores a roster's cost. It is the live sum of the slots'
 //! `tournament_heroes.cost`, so the two can never disagree and an unlocked roster
@@ -17,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 /// How heroes reach a match in this tournament.
 ///
-/// Serializes as the Kotlin constant name; `frontend/src/api/types.ts` declares
+/// Serializes as the constant name below; `frontend/src/api/types.ts` declares
 /// it as `'BANQUEST' | 'ARSENAL'`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -43,11 +42,8 @@ pub enum TournamentStatus {
 }
 
 impl TournamentStatus {
-    /// The Kotlin constant name.
-    ///
-    /// `TOURNAMENT_CLOSED`'s message interpolates the status directly, and
-    /// Kotlin renders an enum as its constant name -- so this string is
-    /// user-visible wire text, not a debug label.
+    /// `TOURNAMENT_CLOSED`'s message interpolates the status directly, so
+    /// this string is user-visible wire text, not a debug label.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Scheduled => "SCHEDULED",
@@ -149,7 +145,7 @@ impl TournamentEntry {
         self.status == EntryStatus::Locked
     }
 
-    /// Kotlin's `lock(at)`: commits the roster and stamps the moment.
+    /// Commits the roster and stamps the moment.
     pub fn lock(&mut self, at: DateTime<Utc>) {
         self.status = EntryStatus::Locked;
         self.locked_at = Some(at);
@@ -197,7 +193,7 @@ mod tests {
     /// `TOURNAMENT_CLOSED`'s message interpolates the status, so its rendering
     /// is wire text the frontend shows the user.
     #[test]
-    fn statuses_render_as_their_kotlin_constant_names() {
+    fn statuses_render_as_their_constant_names() {
         assert_eq!(
             TournamentStatus::RegistrationOpen.to_string(),
             "REGISTRATION_OPEN"

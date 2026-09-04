@@ -1,8 +1,5 @@
 //! Admin-only: turn a Tabletop League match URL into a reviewable draft.
 //!
-//! Oracle: `api/AdminMatchImportController.kt`, `matchimport/MatchImportService.kt`,
-//! `matchimport/MatchImportPreview.kt`, the import half of `api/AdminDtos.kt`.
-//!
 //! It sits beside `crate::r#match` rather than inside it because it does a
 //! categorically different thing: **this endpoint writes nothing.** It scrapes,
 //! resolves the source's hero and board names onto this league's rows, and
@@ -10,11 +7,10 @@
 //! record endpoint, which is what makes an imported match go through
 //! `umfl_domain::match_policy` exactly as a hand-typed one does.
 //!
-//! The preview types are one set of structs rather than the Kotlin's
-//! `MatchImportPreview` + `MatchImportPreviewDto` pair, which are field-for-field
-//! identical: the preview is a response shape, not a domain rule, so there is
-//! nothing for the second copy to protect. The JSON is unchanged --
-//! `frontend/src/api/types.ts` is the contract.
+//! The preview types are one set of structs, not a domain type plus a
+//! separate DTO: the preview is a response shape, not a domain rule, so
+//! there is nothing a second copy would protect. `frontend/src/api/types.ts`
+//! is the JSON contract.
 
 pub mod query;
 pub mod scraper;
@@ -66,7 +62,7 @@ pub struct ImportMatchRequest {
     pub source_url: Option<String>,
 }
 
-/// `@NotBlank`: fails on absent *and* on whitespace-only.
+/// Fails on absent *and* on whitespace-only.
 fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),

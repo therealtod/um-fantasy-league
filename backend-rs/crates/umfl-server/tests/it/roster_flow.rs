@@ -1,9 +1,7 @@
 //! The Roster Builder walkthrough, end to end against the database.
 //!
-//! Oracle: `tournament/RosterFlowIntegrationTest.kt`, ported near 1:1. It
-//! drives the service functions rather than the router, exactly as the Kotlin
-//! drove `TournamentService` rather than `TournamentController` -- the wire
-//! shape is `tournament_api.rs`'s subject.
+//! It drives the service functions rather than the router; the wire shape
+//! is `tournament_api.rs`'s subject.
 //!
 //! Heroes and tournaments are looked up by name: there is no slug any more, and
 //! the seed keys every reference row on its natural name for exactly this
@@ -21,9 +19,9 @@ use crate::harness::TestApp;
 /// The rule codes a 422 carried, in order.
 ///
 /// The service raises `ApiError::Domain(DomainError::RosterRule(_))`, whose
-/// violations have already been flattened to strings at the policy boundary --
-/// the boundary PORTING.md §5 puts there -- so a test that wants the codes
-/// reads them back the same way the frontend does.
+/// violations have already been flattened to strings at the policy boundary,
+/// so a test that wants the codes reads them back the same way the frontend
+/// does.
 fn rules(err: &ApiError) -> Vec<String> {
     match err {
         ApiError::Domain(e @ DomainError::RosterRule(_)) => {
@@ -363,9 +361,9 @@ async fn re_pricing_a_hero_re_prices_an_unlocked_roster() {
 /// silently dropped -- which is why `find_roster_heroes` exists alongside
 /// `find_by_ids`.
 ///
-/// The Kotlin closes with a cross-check against `StandingsQuery.rosters`, and
-/// so does this: both reads must report the same roster length and the same
-/// spend. That half is not decoration. The two paths reach cost by genuinely
+/// This closes with a cross-check against `standings::query::rosters`: both
+/// reads must report the same roster length and the same spend. That half is
+/// not decoration. The two paths reach cost by genuinely
 /// different SQL -- the roster read joins `tournament_heroes` through
 /// `find_roster_heroes`, while `standings::query::rosters` **left** joins it and
 /// leans on `unwrap_or(0)` for the missing row -- so a hero pulled from the pool

@@ -1,23 +1,18 @@
 //! Board reads: the catalogue, and one tournament's pool.
 //!
-//! Oracle: `map/GameMapRepository.kt` (the `CrudRepository` derived queries)
-//! and the read half of `map/MapPoolAdminRepository.kt`.
-//!
-//! The Kotlin keeps those in two classes because they were two *mechanisms* --
-//! Spring Data JDBC on `game_maps`, a hand-written `JdbcClient` on the
-//! composite-keyed `tournament_maps`. Here the split is by direction instead
-//! (PORTING.md §3), so both mechanisms' reads land in this file and both
-//! mechanisms' writes land in `writer.rs` and `pool_admin.rs`.
+//! The split here is by direction: the catalogue's reads and the pool's reads
+//! both land in this file, and their writes both land in `writer.rs` and
+//! `pool_admin.rs`.
 
 use sqlx::PgExecutor;
 
 use super::GameMap;
 
-/// `findAll()`.
+/// Every board in the catalogue.
 ///
-/// `order by id` where the Kotlin orders by nothing: Spring Data JDBC emits a
-/// bare `select` and takes whatever Postgres hands back, which is insertion
-/// order right up until the first `UPDATE` moves a row. Ordering by id makes
+/// `order by id` rather than an unordered `select`, which happens to come
+/// back in insertion order right up until the first `UPDATE` moves a row.
+/// Ordering by id makes
 /// that the *guarantee* rather than the observed behaviour, and it is the same
 /// order -- ids are a `bigserial`.
 pub async fn find_all(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<GameMap>> {

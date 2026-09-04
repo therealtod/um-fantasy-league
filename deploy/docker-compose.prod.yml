@@ -18,7 +18,7 @@ services:
   # db/seed, which is demo/dev fixture data, not something that belongs in the
   # real league's database. One-shot, run to completion before `backend`
   # starts; see db/Dockerfile for why this exists instead of the backend
-  # migrating itself the way the Kotlin jar used to.
+  # migrating itself.
   #
   # `${DB_URL}`/`${DB_USER}`/`${DB_PASSWORD}` are substituted from the same
   # `.env` this directory's `docker compose` already reads for

@@ -1,11 +1,9 @@
 //! `/actuator/health` and `/actuator/info`.
 //!
-//! Oracle: `application.yml`'s `management.endpoints.web.exposure.include:
-//! health,info` with `management.endpoint.health.show-details:
-//! when-authorized`. An anonymous caller -- which is what both compose
-//! healthchecks are -- therefore sees the status and **no `components` key**,
-//! so that is what this returns. `deploy/docker-compose.prod.yml` probes it
-//! with `wget -qO- http://localhost:8080/actuator/health`.
+//! An anonymous caller -- which is what both compose healthchecks are --
+//! sees the status and **no `components` key**, so that is what this
+//! returns. `deploy/docker-compose.prod.yml` probes it with `wget -qO-
+//! http://localhost:8080/actuator/health`.
 //!
 //! `groups` is Boot's own doing rather than anything in `application.yml`:
 //! `HealthEndpoint` always reports its registered group names, and Boot
@@ -20,11 +18,9 @@
 //! served: `exposure.include` is `health,info`, and the rule table denies
 //! everything else under `/actuator` anyway.
 //!
-//! Known deviation: Spring Boot Actuator answered with
-//! `application/vnd.spring-boot.actuator.v3+json`. This answers
-//! `application/json`. Nothing reads the media type -- the healthchecks are a
-//! `wget` and a `fetch(...).ok` -- and the vendor type is not part of the
-//! frontend contract.
+//! The response media type is plain `application/json`, not a vendor-specific
+//! one. Nothing reads the media type -- the healthchecks are a `wget` and a
+//! `fetch(...).ok` -- and a vendor type is not part of the frontend contract.
 
 use axum::extract::State;
 use axum::http::StatusCode;

@@ -1,9 +1,6 @@
 //! A tournament's scoring configuration: the rule sets an admin writes, which
 //! the leaderboard is folded against.
 //!
-//! Oracle: `api/AdminScoringController.kt`, the scoring block of
-//! `api/AdminDtos.kt`, and `scoring/AdminScoringService.kt`.
-//!
 //! Only the admin write side lives here. The arithmetic that *reads* a rule set
 //! is already pure and already ported -- [`umfl_domain::scoring_engine`],
 //! [`umfl_domain::match_metrics`] and
@@ -87,7 +84,7 @@ impl ScoringRuleSetDto {
             .map(ScoringCoefficientDto::from)
             .collect();
         // `sortedBy { it.sortOrder }`, and stable, so equal `sort_order`s keep
-        // the order the query returned them in (PORTING.md §8).
+        // the order the query returned them in.
         coefficients.sort_by_key(|c| c.sort_order);
 
         Self {
@@ -129,8 +126,7 @@ impl From<ScoringCoefficient> for ScoringCoefficientDto {
     }
 }
 
-/// `@NotBlank(message = "metric is required")` and
-/// `@NotNull(message = "coefficient is required")`.
+/// `metric` must be present and non-blank; `coefficient` must be present.
 ///
 /// Both are garde `custom` rules rather than built-ins, because the message is
 /// what the client renders and garde 0.23 cannot override a built-in rule's
@@ -149,8 +145,8 @@ pub struct ScoringCoefficientRequest {
 }
 
 impl ScoringCoefficientRequest {
-    /// Validation has already run, so both `requireNotNull`s the controller
-    /// makes are unreachable here for the same reason they are there.
+    /// Validation has already run before a handler calls this, so the
+    /// `.expect("validated as present")`s below are unreachable.
     fn to_input(&self) -> ScoringCoefficientInput {
         ScoringCoefficientInput {
             metric: self.metric.clone().expect("validated as present"),
@@ -182,7 +178,7 @@ pub struct UpdateScoringRuleSetRequest {
     pub coefficients: Option<Vec<ScoringCoefficientRequest>>,
 }
 
-/// `@NotBlank`: fails on absent *and* on whitespace-only.
+/// Fails on absent *and* on whitespace-only.
 fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> garde::Result {
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),
@@ -190,7 +186,7 @@ fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> gard
     }
 }
 
-/// `@NotNull`.
+/// Fails only on absent.
 fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Result {
     move |value, _| match value {
         Some(_) => Ok(()),
@@ -198,13 +194,9 @@ fn required<T>(message: &'static str) -> impl Fn(&Option<T>, &()) -> garde::Resu
     }
 }
 
-/// `@Size(min = 1, message = "at least one coefficient is required")`.
-///
-/// Bean Validation's `@Size` **ignores a null**, and there is no `@NotNull`
-/// beside it, so a request that omits `coefficients` entirely is valid and
-/// creates a rule set with none. That is a live behaviour of the Kotlin -- the
-/// controller reads it as `request.coefficients.orEmpty()` -- and porting it
-/// faithfully means the absent case passes here too.
+/// A request that omits `coefficients` entirely is deliberately valid and
+/// creates a rule set with none -- [`to_inputs`] reads an absent list as
+/// empty. Only a *present but empty* array is rejected, by this validator.
 fn at_least_one_coefficient(
     value: &Option<Vec<ScoringCoefficientRequest>>,
     _: &(),
@@ -243,10 +235,10 @@ pub fn routes() -> Router<AppState> {
         )
 }
 
-// `hasRole('ADMIN')` is enforced by `auth::authorize` for every `/api/admin/**`
-// path, which is the `@PreAuthorize` on the controller *and* the URL matcher in
-// one place. Each handler still takes the `CurrentManager` its Kotlin
-// counterpart declares, so the identity a route needs is visible at the route.
+// `Access::Admin` is enforced by `auth::authorize` for every `/api/admin/**`
+// path -- the admission check and the URL matcher live in one place. Each
+// handler still takes `CurrentManager` for the identity, so who a route
+// needs is visible at the route even though the check already happened.
 
 async fn list(
     State(state): State<AppState>,
@@ -293,9 +285,9 @@ async fn update(
     Ok(Json(ScoringRuleSetDto::from(result)))
 }
 
-/// Activation carries **no** warnings: the Kotlin builds this response with
-/// `ScoringRuleSetDto.from(ruleSet)`, whose `warnings` parameter defaults to
-/// empty. Recomputing them here would be an extra field on the wire.
+/// Activation carries **no** warnings: `ScoringRuleSetDto::from` defaults
+/// `warnings` to empty, and recomputing them here would be an extra field on
+/// the wire.
 async fn activate(
     State(state): State<AppState>,
     CurrentManager(_admin): CurrentManager,

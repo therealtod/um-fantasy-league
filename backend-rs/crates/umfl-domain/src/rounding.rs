@@ -1,4 +1,4 @@
-//! Half-up to 2dp, the way `ScoringEngine.round2` does it.
+//! Half-up to 2dp, rounding negative midpoints away from zero.
 //!
 //! Every number the leaderboard prints has been through this function, and the
 //! parity suite asserts the seed's board with exact `f64` equality
@@ -8,33 +8,33 @@
 use rust_decimal::{Decimal, RoundingStrategy, prelude::ToPrimitive};
 use std::str::FromStr;
 
-/// The Kotlin is `BigDecimal.valueOf(value).setScale(2, HALF_UP).toDouble()`.
+/// Rounds half up (away from zero) to 2 decimal places.
 ///
-/// Three things in that one line are load-bearing, and none of them survives an
-/// "obvious" simplification:
+/// Three things here are load-bearing, and none of them survives an "obvious"
+/// simplification:
 ///
-/// * `BigDecimal.valueOf(double)` is specified as `new BigDecimal(Double
-///   .toString(d))` -- the **shortest decimal string that round-trips**, not the
-///   exact binary expansion. `2.675` is really `2.67499999999999982...` as an
-///   `f64`, and the difference decides whether it rounds to `2.68` or `2.67`.
-///   Rust's `f64` `Display` is shortest-round-trip too, so the `format!` is what
-///   makes the two agree. `Decimal::from_f64_retain` takes the other reading and
-///   is wrong here.
-/// * `MidpointAwayFromZero` **is** `HALF_UP`. `MidpointNearestEven` is
-///   `HALF_EVEN`, which would send `0.125` to `0.12` and `-1.005` to `-1.00`.
+/// * The value is rounded from its **shortest decimal string that
+///   round-trips**, not its exact binary expansion. `2.675` is really
+///   `2.67499999999999982...` as an `f64`, and the difference decides whether
+///   it rounds to `2.68` or `2.67`. Rust's `f64` `Display` is shortest-round-trip,
+///   so the `format!` below is what gets the right decimal reading;
+///   `Decimal::from_f64_retain` takes the exact-binary reading and is wrong
+///   here.
+/// * `MidpointAwayFromZero` is deliberate: `MidpointNearestEven` would send
+///   `0.125` to `0.12` and `-1.005` to `-1.00`.
 /// * Negative midpoints go *away* from zero: `-1.005` is `-1.01`, not `-1.00`.
 ///
-/// `-0.0` comes back as `+0.0`, because `BigDecimal` has no signed zero and
-/// `doubleValue()` on a zero returns the positive one. `tests/round2_oracle.rs`
-/// pins that against the JDK rather than against reasoning.
+/// `-0.0` comes back as `+0.0` -- there is no meaningful signed zero for a
+/// point total. `tests/round2_oracle.rs` pins the rounding mode against the
+/// JDK's `BigDecimal` (a well-specified HALF_UP reference implementation)
+/// rather than against reasoning alone.
 ///
 /// # Panics
 ///
-/// On a value `Decimal` cannot represent: NaN, an infinity, or a magnitude past
-/// ~7.9e28. `BigDecimal.valueOf` throws `NumberFormatException` on the first
-/// two, so both runtimes answer 500 there; the third is unreachable from a
-/// `numeric(10,4)` coefficient times a health total, and a silent fall-through
-/// to an unrounded value would be far worse than a stack trace naming it.
+/// On a value `Decimal` cannot represent: NaN, an infinity, or a magnitude
+/// past ~7.9e28. The third is unreachable from a `numeric(10,4)` coefficient
+/// times a health total, and a silent fall-through to an unrounded value
+/// would be far worse than a panic naming it.
 pub fn round2(value: f64) -> f64 {
     Decimal::from_str(&format!("{value}"))
         .unwrap_or_else(|e| panic!("round2: {value} is not representable as a decimal: {e}"))
@@ -73,8 +73,8 @@ mod tests {
         assert!(round2(-0.001).is_sign_positive());
     }
 
-    /// `ScoringEngine.score` rounds each metric and then rounds their sum, so
-    /// round2 is idempotent on its own output by construction.
+    /// `scoring_engine::score` rounds each metric and then rounds their sum,
+    /// so round2 is idempotent on its own output by construction.
     #[test]
     fn is_idempotent() {
         for raw in [2.675, -1.005, 0.1 + 0.2, 79.745, -0.004] {

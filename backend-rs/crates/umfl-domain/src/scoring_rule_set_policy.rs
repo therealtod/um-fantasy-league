@@ -3,8 +3,6 @@
 //! generic 409 a `unique (rule_set_id, metric)` or format-CHECK failure would
 //! produce further down.
 //!
-//! A direct port of `scoring/ScoringRuleSetPolicy.kt`.
-//!
 //! It validates the *shape* of a metric name, never the *set* of legal names: a
 //! metric no extractor implements is a deliberate non-blocking warning
 //! ([`crate::match_metrics::unknown`]), not a rejection, and must stay one.
@@ -73,9 +71,8 @@ pub struct ScoringCoefficientInput {
 /// `V1__core_schema.sql`: `^[A-Z][A-Z0-9_]*$`.
 ///
 /// Hand-written rather than a regex because `umfl-domain` has no regex
-/// dependency and this is four lines. The Kotlin uses `Regex.matches`, which
-/// anchors both ends against the whole input -- so a trailing newline fails
-/// there too, and this loop reproduces that without the `$`-before-newline
+/// dependency and this is four lines. Anchors both ends against the whole
+/// input -- so a trailing newline fails too -- without the `$`-before-newline
 /// subtlety a partial-match API would introduce.
 fn is_well_formed(metric: &str) -> bool {
     let mut chars = metric.chars();
@@ -150,7 +147,6 @@ pub fn validate(coefficients: &[ScoringCoefficientInput]) -> Vec<ScoringViolatio
     violations
 }
 
-/// A near-1:1 port of `ScoringRuleSetPolicyTest`.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,8 +1,6 @@
 //! `tournament_heroes` writes -- the composite-keyed link table no aggregate
 //! maps.
 //!
-//! Oracle: `hero/HeroPoolAdminRepository.kt`.
-//!
 //! There is no separate "add to pool" and "re-price": the row's only non-key
 //! column is `cost`, so an upsert covers both -- a hero not yet in the pool
 //! gets added at the given cost, one already there gets re-priced.
@@ -31,10 +29,8 @@ pub async fn upsert_cost(
 }
 
 /// Same upsert as [`upsert_cost`], batched into a single statement via
-/// `unnest` so N additions cost one round trip instead of N -- the Kotlin
-/// builds a `values (:tournamentId, :heroId0, :cost0), ...` list by hand
-/// because `JdbcClient` has no array binding; `unnest` does the same job
-/// with a fixed statement.
+/// `unnest` so N additions cost one round trip instead of N, with a fixed
+/// statement shape regardless of batch size.
 pub async fn upsert_costs(
     db: impl PgExecutor<'_>,
     tournament_id: i64,

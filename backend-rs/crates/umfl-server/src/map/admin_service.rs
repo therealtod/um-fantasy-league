@@ -1,8 +1,5 @@
 //! Create and rename boards, and manage a tournament's board pool.
 //!
-//! Oracle: `map/AdminMapService.kt`. Every `@Transactional` method there is a
-//! `pool.begin()` here and nothing else is (PORTING.md §7).
-//!
 //! There is no pure policy behind this one -- a board is a name, and the only
 //! rules are a uniqueness check and the removal refusal below, both of which
 //! are questions for the database rather than arithmetic over data in hand.
@@ -52,17 +49,15 @@ pub async fn create(state: &AppState, name: &str) -> ApiResult<GameMap> {
 /// match was read, so every cached list still spells the old name.
 /// [`crate::r#match::MatchResultCache::invalidate_all`] drops them all.
 ///
-/// The Kotlin publishes `ReferenceDataRenamedEvent` for this, an event rather
-/// than a direct call so the rename gets the same two-phase treatment a match
-/// write gets. There is no event bus here, so both phases are explicit: once
+/// The rename gets the same two-phase treatment a match write gets: once
 /// inside the transaction, so a reader on this connection is not served the old
 /// name back, and once after the transaction ends -- committed *or* rolled
 /// back, since a rollback un-writes rows the cache may already hold.
 ///
 /// It is gated on the name actually **changing**: `image_url` and
 /// `tournament_heroes.cost` never reach an assembled match, so nothing else
-/// edited through this API can stale a cached copy. `AdminHeroService.update`
-/// carries the identical pair and is still to port (PORTING.md §3b).
+/// edited through this API can stale a cached copy. `hero::admin_service::update`
+/// carries the identical pair.
 pub async fn update(state: &AppState, map_id: i64, name: &str) -> ApiResult<GameMap> {
     let mut tx = state.pool.begin().await?;
     let existing = require_map(&mut tx, map_id).await?;
@@ -181,7 +176,7 @@ pub async fn remove_from_pool(state: &AppState, tournament_id: i64, map_id: i64)
 }
 
 /// The delete and the FK re-check as one fallible unit, so the caller's `match`
-/// covers both -- the Kotlin's `try { ... .also { ... } }`.
+/// covers both.
 async fn delete_and_check(
     conn: &mut PgConnection,
     tournament_id: i64,

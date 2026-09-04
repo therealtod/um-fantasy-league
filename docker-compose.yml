@@ -16,12 +16,12 @@ services:
       timeout: 5s
       retries: 10
 
-  # Applies db/migration and, since this stack runs the `dev` profile,
-  # db/seed -- the same two locations `spring.flyway.locations` adds for
-  # `dev`/`test` (see AGENTS.md). The Rust backend below doesn't carry a
-  # migration runner of its own (see db/Dockerfile), so this one-shot
-  # container is what makes a bare `docker compose up` produce a migrated,
-  # seeded database the way it always has.
+  # Applies db/migration and, since this stack is dev-shaped, db/seed too --
+  # see AGENTS.md on why which locations a Flyway run applies is decided by
+  # the invocation, not by the backend's own profile. The Rust backend below
+  # doesn't carry a migration runner of its own (see db/Dockerfile), so this
+  # one-shot container is what makes a bare `docker compose up` produce a
+  # migrated, seeded database.
   flyway:
     build:
       context: db

@@ -1,20 +1,14 @@
 //! The admin write path for match results, and the two admin reads beside it.
 //!
-//! Oracle: `match/AdminMatchService.kt` and the read halves of
-//! `api/AdminMatchController.kt`. Every `@Transactional` method there is a
-//! `pool.begin()` here and nothing else is (PORTING.md §7).
-//!
 //! Everything downstream -- standings, ticker, points -- is derived at read
 //! time from what this saves, so recording, correcting or retracting a match is
 //! the entire surface area; no total is ever recomputed and stored.
 //!
 //! Because this is the *only* writer of `tournament_matches` and its children,
-//! the announcement all three write methods make is a complete account of when
-//! that data changes. In Kotlin that announcement is a `StandingsUpdateEvent`
-//! with two listeners; here it is [`announce`], [`announce_completed`] and
-//! [`announce_committed`], and
-//! the phases are the same. **Keep announcing from any method added here that
-//! writes a match.**
+//! the announcement all three write methods make -- [`announce`],
+//! [`announce_completed`] and [`announce_committed`] -- is a complete account
+//! of when that data changes. **Keep announcing from any method added here
+//! that writes a match.**
 
 use sqlx::PgConnection;
 use std::collections::BTreeSet;
@@ -192,8 +186,7 @@ pub async fn delete(state: &AppState, tournament_id: i64, match_id: i64) -> ApiR
     Ok(())
 }
 
-/// The first half of the Kotlin's `StandingsUpdateEvent` pair: fires
-/// **immediately, inside the writing transaction**, so a reader on this
+/// Fires **immediately, inside the writing transaction**, so a reader on this
 /// connection is not served the list as it stood before the write.
 ///
 /// The standings SSE hub must **not** be signalled here. It listens to the same
@@ -214,13 +207,12 @@ fn announce_completed(state: &AppState, tournament_id: i64) {
 /// The standings push, and the reason it is a *third* call rather than a line
 /// inside [`announce_completed`]: it is **commit-only**.
 ///
-/// Kotlin gets the distinction from two listeners on one `StandingsUpdateEvent`
-/// -- `MatchResultCache`'s is `AFTER_COMPLETION`, `StandingsSseHub`'s is
-/// `AFTER_COMMIT`. Telling browsers "something changed" about a write that
-/// rolled back would be a lie, whereas a rollback un-writes rows the cache may
-/// already hold and so invalidates just as surely as a commit does. Hence the
-/// position: after the `outcome?`, which is the only place a rolled-back write
-/// has already returned.
+/// `MatchResultCache` invalidates on **either** commit or rollback -- a
+/// rollback un-writes rows the cache may already hold, so it invalidates just
+/// as surely as a commit does. `StandingsSseHub` invalidates on commit only:
+/// telling browsers "something changed" about a write that rolled back would
+/// be a lie. Hence this call's position: after the `outcome?`, which is the
+/// only place a rolled-back write has already returned.
 fn announce_committed(state: &AppState, tournament_id: i64) {
     state.standings_hub.notify(tournament_id);
 }
@@ -282,9 +274,10 @@ fn link_conflict_or(err: sqlx::Error, link: &str) -> ApiError {
 
 /// The match under correction or deletion, confirmed to be in this tournament.
 ///
-/// A bare header read: the Kotlin loads the whole write aggregate here, but the
-/// only things it goes on to use are the id and the tournament it belongs to --
-/// `correct` replaces every child collection wholesale and `delete` cascades.
+/// A bare header read rather than loading the whole write aggregate: the only
+/// things a caller goes on to use are the id and the tournament it belongs to
+/// -- `correct` replaces every child collection wholesale and `delete`
+/// cascades.
 async fn require_match(
     conn: &mut PgConnection,
     tournament_id: i64,
@@ -388,9 +381,8 @@ fn to_games(games: &[MatchGameInput]) -> Vec<MatchGameWrite> {
         .collect()
 }
 
-/// The Kotlin collects into a `Set`, which would drop an exactly-repeated ban.
-/// Nothing reaches here to drop: `MatchRule::DuplicateBan` has already rejected
-/// a hero struck twice, whatever the type or side.
+/// `MatchRule::DuplicateBan` has already rejected a hero struck twice,
+/// whatever the type or side, so there is no repeated ban left to drop here.
 fn to_bans(bans: &[MatchBanInput]) -> Vec<HeroBanWrite> {
     bans.iter()
         .map(|b| HeroBanWrite {
@@ -407,9 +399,9 @@ fn to_bans(bans: &[MatchBanInput]) -> Vec<HeroBanWrite> {
 /// participant's list position, the same ordinal `match_participants.side` is
 /// written from.
 ///
-/// The per-side `distinct()` is the Kotlin's and is load-bearing: a side that
-/// names the same hero twice is not a `DUPLICATE_PICK` across sides and would
-/// otherwise meet the `(match_id, side, hero_id)` primary key.
+/// The per-side de-duplication below is load-bearing: a side that names the
+/// same hero twice is not a `DUPLICATE_PICK` across sides and would otherwise
+/// meet the `(match_id, side, hero_id)` primary key.
 fn to_picks(participants: &[MatchParticipantInput]) -> Vec<HeroPickWrite> {
     let mut picks = Vec::new();
     for (side, participant) in participants.iter().enumerate() {

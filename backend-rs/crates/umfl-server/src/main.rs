@@ -1,9 +1,8 @@
 //! Entry point.
 //!
-//! `server.shutdown: graceful` with `spring.lifecycle.timeout-per-shutdown-phase: 30s`,
-//! reproduced: stop accepting, let in-flight requests finish, and give up after
-//! 30 seconds. `deploy/docker-compose.prod.yml` allows `stop_grace_period: 35s`,
-//! so the timeout has to stay inside that.
+//! Graceful shutdown: stop accepting, let in-flight requests finish, and give
+//! up after 30 seconds. `deploy/docker-compose.prod.yml` allows
+//! `stop_grace_period: 35s`, so the timeout has to stay inside that.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -29,9 +28,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(%addr, "Listening");
 
     // `into_make_service_with_connect_info` is what gives the rate limiter a
-    // peer address to key on -- the equivalent of `HttpServletRequest
-    // .getRemoteAddr()`, which a servlet container supplied for free. Without
-    // it every caller shares one bucket.
+    // peer address to key on. Without it every caller shares one bucket.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

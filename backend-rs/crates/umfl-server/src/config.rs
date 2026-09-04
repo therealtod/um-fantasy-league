@@ -1,9 +1,6 @@
 //! Deployment configuration, under the environment variable names the existing
 //! deployments already set.
 //!
-//! Oracle: `application.yml`, `application-dev.yml`, `application-prod.yml`,
-//! `RateLimitProperties.kt`, `ScraperProperties.kt`.
-//!
 //! Two rules from `AGENTS.md` shape this file:
 //!
 //! * **There are no `umfl.*` tunables.** Scoring weights are rows in
@@ -157,7 +154,7 @@ struct RawConfig {
     supabase_jwks_uri: String,
     frontend_origin: String,
     rate_limit_api_capacity: u64,
-    /// ISO-8601, as Spring's `Duration` binding accepts it (`PT1M`).
+    /// ISO-8601 duration format (`PT1M`).
     rate_limit_api_refill_period: String,
     rate_limit_api_max_tracked_ips: u64,
     /// Comma-separated CIDRs.
@@ -278,9 +275,9 @@ pub fn to_libpq_url(db_url: &str, user: &str, password: &str) -> Result<String, 
     Ok(format!("postgres://{user}:{password}@{rest}"))
 }
 
-/// The subset of ISO-8601 durations Spring's `Duration` binding is actually
-/// given here: `PT1M`, `PT30S`, `PT1H30M`. Days and anything calendar-shaped
-/// are rejected rather than guessed at.
+/// The subset of ISO-8601 durations actually accepted: `PT1M`, `PT30S`,
+/// `PT1H30M`. Days and anything calendar-shaped are rejected rather than
+/// guessed at.
 fn parse_iso8601_duration(text: &str) -> Result<Duration, ConfigError> {
     let bad = || ConfigError::Duration(text.to_owned());
     let body = text
@@ -474,7 +471,7 @@ mod tests {
     /// `Duration::from_secs_f64` panics outright both on a finite value too
     /// large to represent and on a non-finite one ("value is either too big or
     /// NaN"). `RATE_LIMIT_API_REFILL_PERIOD` is an operator-set env var, so an
-    /// absurd hour count -- the PORTING.md-cited `...999H` -- is one typo away.
+    /// absurd hour count -- like the `...999H` case below -- is one typo away.
     #[test]
     fn an_overflowing_or_non_finite_duration_is_rejected_not_panicked() {
         // The hazard, confirmed at the primitive `core::time` gave us, so a
@@ -490,7 +487,7 @@ mod tests {
         );
 
         // Finite (huge, but well under f64::MAX) and still overflows Duration
-        // once multiplied out -- the PORTING.md example.
+        // once multiplied out.
         assert!(parse_iso8601_duration("PT99999999999999999999999999999H").is_err());
         // A number literal past f64::MAX itself parses as `inf`, driving
         // `total` non-finite before it ever reaches the `Duration` conversion.

@@ -2,8 +2,6 @@
 //! read-through front for [`super::query`] exposing the same two methods the
 //! standings path used to call on it directly.
 //!
-//! Oracle: `match/MatchResultCache.kt`.
-//!
 //! The pressure this relieves is a burst, not a trickle. `GET /standings` is
 //! public and unauthenticated, and the SSE hub tells up to a few hundred tabs
 //! per tournament to refetch the instant an admin records a match -- each of
@@ -42,10 +40,9 @@
 //!
 //! # Why two invalidations, in two different phases
 //!
-//! The Kotlin listens to `StandingsUpdateEvent` twice, and both are reproduced
-//! at [`super::admin_service`]'s call sites rather than by an event bus:
 //! [`MatchResultCache::invalidate`] runs once *inside* the writing transaction
-//! and once after that transaction ends. Neither is sufficient alone:
+//! and once after that transaction ends, called explicitly from each of
+//! [`super::admin_service`]'s write methods. Neither is sufficient alone:
 //!
 //! - without the second, a reader that loads between the write and the commit
 //!   reads pre-write rows, stamps them with the already-bumped version, and
@@ -100,9 +97,8 @@ const MAX_LOAD_ATTEMPTS: usize = 3;
 /// Shared behind an [`Arc`] rather than cloned, both because the lists are read
 /// concurrently by every standings request and because `Arc::ptr_eq` is what
 /// makes the conditional removal below mean "drop the entry *I* just saw"
-/// -- identity, exactly as the Kotlin's `ConcurrentHashMap.remove(key, value)`
-/// does, and far cheaper than structurally comparing a few hundred assembled
-/// matches.
+/// -- identity, which is far cheaper than structurally comparing a few
+/// hundred assembled matches.
 struct Stamped {
     version: u64,
     matches: Arc<Vec<MatchResult>>,
@@ -154,16 +150,15 @@ impl MatchResultCache {
 
     /// The version-stamped read-through itself, with the loader passed in.
     ///
-    /// This is the seam the Kotlin got for free from constructor injection:
-    /// `MatchResultCacheTest` substitutes a counting `MatchResultQuery` to
-    /// assert that a burst collapses onto one load, that a load racing an
-    /// invalidation is discarded, and that an unceasing invalidator degrades to
-    /// a read-through. None of those are claims about SQL, and none of them
+    /// This is the seam that lets the unit tests below assert that a burst
+    /// collapses onto one load, that a load racing an invalidation is
+    /// discarded, and that an unceasing invalidator degrades to a
+    /// read-through. None of those are claims about SQL, and none of them
     /// should need Postgres to check.
     ///
-    /// A **parameter**, not a trait: PORTING.md §3 allows exactly one trait in
-    /// this crate and it is `ScraperClient`. Passing a rule's input in is the
-    /// same move `umfl-domain` makes everywhere else.
+    /// A **parameter**, not a trait: this crate allows exactly one trait and
+    /// it is `ScraperClient`. Passing a rule's input in is the same move
+    /// `umfl-domain` makes everywhere else.
     pub async fn get_or_load<F, Fut>(
         &self,
         tournament_id: i64,
@@ -314,13 +309,10 @@ pub fn slice_since(matches: &[MatchResult], since_match_id: i64, limit: usize) -
 
 /// The six assembly queries, under **one** snapshot.
 ///
-/// They used to run on a pooled connection in autocommit, so each took its own
-/// READ COMMITTED snapshot and a write committing between two of them could
-/// tear the assembled list -- a header whose games query then returned nothing,
-/// for instance. The Kotlin never had that gap: its loader ran inside
-/// `StandingsService`'s own REPEATABLE READ transaction. This is the port
-/// closing it, filed in PORTING.md §3b rather than smuggled into the standings
-/// commit because it is a change and not a port (PORTING.md §1).
+/// Run on a pooled connection in autocommit, each would take its own READ
+/// COMMITTED snapshot and a write committing between two of them could tear
+/// the assembled list -- a header whose games query then returned nothing,
+/// for instance. Running them inside one transaction here closes that gap.
 ///
 /// Opening a transaction here is only safe because the caller no longer holds
 /// one. `standings::service` reads this cache **before** it opens its own
@@ -359,10 +351,9 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    /// Oracle: `match/MatchResultCacheTest.kt`, whose stubbed `MatchResultQuery`
-    /// is [`MatchResultCache::get_or_load`]'s loader parameter here. No Postgres
-    /// -- every claim below is about the caching mechanics, not about SQL.
-    /// What genuinely needs a database is in `tests/it/match_cache.rs`.
+    /// No Postgres -- every claim below is about the caching mechanics, not
+    /// about SQL. What genuinely needs a database is in
+    /// `tests/it/match_cache.rs`.
     fn a_match(match_id: i64) -> MatchResult {
         MatchResult {
             match_id,

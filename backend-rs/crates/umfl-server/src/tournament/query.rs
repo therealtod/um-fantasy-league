@@ -1,13 +1,6 @@
-//! Tournament and entry reads.
-//!
-//! Oracle: `tournament/TournamentRepositories.kt` (the derived-query and
-//! `@Query` halves) and `tournament/TournamentEntryQuery.kt`.
-//!
-//! The Kotlin splits these across a Spring Data `CrudRepository` and a
-//! hand-written `JdbcClient` projection. Here they are all `query!` reads in the
-//! file the naming convention reserves for reads (PORTING.md §3); the *write*
-//! half of `TournamentEntryRepository.save` is `writer.rs`, which is the split
-//! the class names were carrying.
+//! Tournament and entry reads. All `query!` reads live in the file the naming
+//! convention reserves for reads; the *write* half of an entry aggregate is
+//! `writer.rs`.
 
 use indexmap::IndexMap;
 use sqlx::PgExecutor;
@@ -15,11 +8,10 @@ use umfl_domain::tournament::{
     EntrySlot, EntryStatus, Tournament, TournamentEntry, TournamentFormat, TournamentStatus,
 };
 
-/// `findAllByOrderByStartDateAsc`.
+/// Every tournament, ordered by start date.
 ///
-/// Ties are left to the database, exactly as Spring Data's derived query left
-/// them: adding an id tiebreak here would be a behaviour change smuggled into a
-/// port, and both runtimes read the same Postgres.
+/// Ties on `start_date` are left to the database rather than broken with an
+/// explicit id tiebreak.
 pub async fn find_all_ordered(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<Tournament>> {
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
@@ -183,11 +175,11 @@ pub async fn count_entries_per_tournament(
         .collect())
 }
 
-/// `findByTournamentIdAndManagerId`, loading the aggregate whole.
+/// The caller's entry for one tournament, loading the aggregate whole.
 ///
-/// Spring Data JDBC populated `slots` with a second query keyed on
-/// `entry_id`; so does this, and it keeps that query's `order by slot_index`
-/// because the list position **is** the slot index. See the `EntrySlot` doc in
+/// `slots` is populated with a second query keyed on `entry_id`, ordered by
+/// `slot_index` because the list position **is** the slot index. See the
+/// `EntrySlot` doc in
 /// `umfl-domain`: nothing may reorder this `Vec`.
 ///
 /// The one read here that takes a connection rather than an executor, because
@@ -272,12 +264,12 @@ pub async fn status_for(
 }
 
 // The three text columns below carry CHECK constraints naming exactly these
-// values, so an unknown one means the schema moved underneath the code. That is
-// a decode failure rather than a panic: `From<sqlx::Error>` renders it as the
-// 500 a Kotlin `valueOf` would also have produced, and says which column.
+// values, so an unknown one means the schema moved underneath the code. That
+// is a decode failure rather than a panic: `From<sqlx::Error>` renders it as
+// a 500 naming which column.
 
-/// The Kotlin constant name, which is what the column stores. The admin
-/// writer's counterpart to [`format_from_db`].
+/// The constant name the column stores. The admin writer's counterpart to
+/// [`format_from_db`].
 pub(crate) fn format_to_db(format: TournamentFormat) -> &'static str {
     match format {
         TournamentFormat::Banquest => "BANQUEST",
@@ -321,7 +313,7 @@ pub(crate) fn entry_status_from_db(raw: &str) -> sqlx::Result<EntryStatus> {
     }
 }
 
-/// The Kotlin constant name, which is what the column stores.
+/// The constant name the column stores.
 pub(crate) fn entry_status_to_db(status: EntryStatus) -> &'static str {
     match status {
         EntryStatus::Draft => "DRAFT",

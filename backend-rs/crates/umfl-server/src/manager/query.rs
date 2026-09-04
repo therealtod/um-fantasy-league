@@ -1,10 +1,7 @@
 //! Manager reads.
 //!
-//! Oracle: `manager/ManagerRepository.kt` -- `findById`, `findByHandle`,
-//! `findByAuthUserId`.
-//!
 //! Every function takes an executor rather than the pool, so it composes inside
-//! somebody's transaction or outside one. See PORTING.md §7.
+//! somebody's transaction or outside one.
 
 use sqlx::PgExecutor;
 use uuid::Uuid;

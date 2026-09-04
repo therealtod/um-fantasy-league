@@ -1,7 +1,5 @@
 //! Matches a source site's hero and board names onto this league's own rows.
 //!
-//! A direct port of `matchimport/NameResolver.kt`.
-//!
 //! Pure, like the policies -- the caller loads the catalogue and hands it over.
 //!
 //! **Exact match after normalisation, and nothing more.** There is deliberately
@@ -49,7 +47,6 @@ impl NameResolver {
     pub fn new(entries: impl IntoIterator<Item = (String, i64)>) -> Self {
         let mut by_normalised_name = IndexMap::new();
         for (name, id) in entries {
-            // Kotlin's `putIfAbsent`.
             by_normalised_name.entry(normalise(&name)).or_insert(id);
         }
         Self { by_normalised_name }
@@ -78,8 +75,7 @@ pub fn normalise(raw: &str) -> String {
         .to_lowercase()
         .replace('&', " and ")
         .replace('.', " ");
-    // Kotlin's `replace(Regex("""\s+"""), " ")` then `trim()`, without pulling
-    // in a regex engine for one collapse.
+    // Collapses runs of whitespace without pulling in a regex engine for it.
     lowered.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -171,9 +167,9 @@ mod tests {
         assert_eq!(colliding.resolve(Some("The Genie")), Some(10));
     }
 
-    /// Kotlin builds its alias map by calling `normalise` on both sides; this
-    /// table is written already-normalised so the lookup is one map hit. That
-    /// only stays correct if the literals really are what `normalise` produces.
+    /// `ALIASES` is written already-normalised so a lookup is one map hit
+    /// rather than a second pass through `normalise`. That only stays correct
+    /// if the literals really are what `normalise` produces.
     #[test]
     #[allow(non_snake_case)]
     fn ALIASES_ARE_PRE_NORMALISED() {

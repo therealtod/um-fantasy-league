@@ -2,7 +2,7 @@
 //! helpers those rules depend on.
 //!
 //! This crate has no `sqlx`, no `axum`, no `tokio` and no `reqwest`, and must
-//! not acquire them. See `PORTING.md`.
+//! not acquire them.
 
 pub mod error;
 pub mod match_result;

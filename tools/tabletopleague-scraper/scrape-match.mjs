@@ -5,7 +5,8 @@
  * carries several things the list page doesn't: the round/group name, the draft format,
  * a timezone-qualified timestamp, and — the reason this script exists — the full draft:
  * every pick in order and every ban, tagged `PRE_BAN` / `OPPONENT_BAN` / `SELF_BAN`
- * exactly like this repo's `HeroBan`/`HeroPick` (`backend/src/main/kotlin/com/umfl/match/TournamentMatch.kt`).
+ * exactly like this repo's `hero_bans`/`match_hero_picks` tables
+ * (`backend-rs/crates/umfl-domain/src/match_result.rs`'s `BanType`).
  * The list page shows none of that.
  *
  * Shares browser lifecycle, arg parsing, and URL helpers with `scrape.mjs` via `lib.mjs`

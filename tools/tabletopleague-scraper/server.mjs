@@ -6,9 +6,10 @@
  *
  * It exists as a separate Node process for one reason: tabletopleague.com is
  * client-rendered Next.js, so reading a match needs a real browser (see the
- * README's "Why a headless browser, not curl"). The Kotlin backend has no
- * headless browser and its runtime image is an Alpine JRE -- the wrong base for
- * Playwright -- so the browser lives here and the backend talks to it over HTTP.
+ * README's "Why a headless browser, not curl"). The backend has no headless
+ * browser, and running a real browser is a different deployment shape
+ * entirely from the backend's own runtime image -- so the browser lives
+ * here and the backend talks to it over HTTP.
  *
  * Docker is only how this reaches the VPS; it is a plain Node process and runs
  * the same way without a container:

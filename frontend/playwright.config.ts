@@ -12,10 +12,11 @@ const here = fileURLToPath(new URL('.', import.meta.url))
  * same backend. `Player A`/`Player B` in the spec map onto these ports.
  *
  * Neither the backend nor Postgres is started here — `global-setup.ts` just
- * checks the backend is already up (via `docker compose up -d db` +
- * `./gradlew :backend:bootRun`, or `docker compose up -d`, per AGENTS.md) and
- * fails fast with instructions if it isn't. Gradle's cold start is too slow
- * and stateful to reliably manage as a Playwright `webServer`.
+ * checks the backend is already up (via `docker compose up -d db flyway` +
+ * `cd backend-rs && cargo run -p umfl-server`, or `docker compose up -d`, per
+ * AGENTS.md) and fails fast with instructions if it isn't. A cold `cargo`
+ * build is too slow and stateful to reliably manage as a Playwright
+ * `webServer`.
  */
 export const PLAYER_A_URL = 'http://localhost:5273'
 export const PLAYER_B_URL = 'http://localhost:5274'

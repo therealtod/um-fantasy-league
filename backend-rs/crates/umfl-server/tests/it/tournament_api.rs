@@ -1,9 +1,5 @@
 //! The wire contract for `/api/me`, `/api/tournaments/**` and the hero pool.
 //!
-//! Oracle: `api/TournamentController.kt`, `api/HeroController.kt`,
-//! `api/MeController.kt` and the DTOs in `api/Dtos.kt`, checked against
-//! `frontend/src/api/types.ts`.
-//!
 //! `roster_flow.rs` owns the *rules*; this file owns the *shape* -- field names,
 //! status codes, and the fields `default-property-inclusion: non_null` omits.
 //! The unchanged Vue frontend working against this backend is the acceptance
@@ -109,9 +105,8 @@ async fn an_unknown_tournament_is_a_404_naming_it() {
     assert_eq!(body["instance"], "/api/tournaments/999999");
 }
 
-/// `handleTypeMismatch`'s message, which is the defect
-/// `GlobalExceptionHandlerMvcTest` was written for: before the base class went
-/// back in, an unparseable path variable answered 500.
+/// `handleTypeMismatch`'s message: before the base class went back in, an
+/// unparseable path variable answered 500.
 #[tokio::test]
 async fn an_unparseable_tournament_id_is_a_400_naming_the_variable() {
     let app = TestApp::spawn().await;
@@ -336,8 +331,8 @@ async fn a_broken_roster_rule_is_a_422_carrying_every_violation() {
     assert_eq!(rules, ["TOO_MANY_PICKS", "DUPLICATE_HERO"]);
 }
 
-/// `@NotNull(message = "heroIds is required")`, keyed by the **camelCase** name
-/// `FieldError.getField()` reported -- the name the client knows the field by.
+/// `heroIds` is required, and the field key is the **camelCase** name -- the
+/// name the client knows the field by.
 #[tokio::test]
 async fn a_missing_hero_ids_is_a_400_naming_the_field_the_way_the_client_does() {
     let app = TestApp::spawn().await;

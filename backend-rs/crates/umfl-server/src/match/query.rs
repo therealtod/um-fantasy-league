@@ -1,7 +1,5 @@
 //! Reads recorded matches back out as whole [`MatchResult`]s.
 //!
-//! Oracle: `match/MatchResultQuery.kt`.
-//!
 //! Six flat queries -- matches, participants, games, game-participants, bans,
 //! picks -- grouped in memory, rather than one join. A match has N participants
 //! each with their own draft, M games each with their own participants, and K
@@ -198,9 +196,8 @@ pub async fn find_by_tournament_since(
 /// Attaches participants (with their drafts), games (with their own
 /// participants) and bans to a page of match headers.
 ///
-/// Every map below is an [`IndexMap`], because Kotlin's `groupBy` is a
-/// `LinkedHashMap` and every one of these is iterated in the order the ordered
-/// query filled it (PORTING.md §4.2).
+/// Every map below is an [`IndexMap`], iterated in the order the ordered
+/// query filled it.
 async fn assemble(
     conn: &mut PgConnection,
     headers: Vec<MatchHeader>,
@@ -256,8 +253,8 @@ async fn assemble(
             });
     }
 
-    // Already `order by mg.match_id, mg.game_number`, which is the
-    // `sortedBy { it.gameNumber }` the Kotlin applies after grouping.
+    // Already `order by mg.match_id, mg.game_number`, so games come back
+    // grouped and sorted by game number within each match.
     let game_rows = sqlx::query!(
         "select mg.id, mg.match_id, mg.game_number, mg.map_id, gm.name as map_name
          from match_games mg

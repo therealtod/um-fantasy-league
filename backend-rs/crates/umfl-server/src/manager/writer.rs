@@ -1,9 +1,8 @@
 //! Manager writes.
 //!
-//! Oracle: `ManagerRepository.save` as `SupabaseAuthenticationConverter` uses
-//! it -- **the only place this application creates a manager.** Everything else
-//! about a league is written through the Admin API; a manager row appears when
-//! a new Supabase identity first presents a token, and never otherwise.
+//! **The only place this application creates a manager.** Everything else
+//! about a league is written through the Admin API; a manager row appears
+//! when a new Supabase identity first presents a token, and never otherwise.
 
 use sqlx::PgExecutor;
 use uuid::Uuid;
@@ -13,9 +12,7 @@ use super::Manager;
 /// Inserts a just-in-time provisioned manager.
 ///
 /// `is_admin` is deliberately not a parameter: a provisioned manager is never
-/// an admin, and the column is our own data set by hand. See
-/// `SupabaseAuthenticationConverterTest`'s "a JIT-provisioned manager is never
-/// an admin by default".
+/// an admin, and the column is our own data set by hand.
 ///
 /// A unique-violation here is expected rather than exceptional -- two
 /// concurrent first requests from the same new identity both miss the read and

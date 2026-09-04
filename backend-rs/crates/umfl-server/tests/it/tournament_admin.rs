@@ -1,9 +1,8 @@
 //! Tournament create/update/delete, through `/api/admin/tournaments`.
 //!
-//! Oracle: `tournament/AdminTournamentServiceIntegrationTest.kt`, driven
-//! over HTTP rather than against the service, so the DTO shape and status
-//! codes are checked by the same test that checks the rule -- see
-//! `map_admin.rs` for the same treatment of `AdminMapServiceIntegrationTest`.
+//! Driven over HTTP rather than against the service, so the DTO shape and
+//! status codes are checked by the same test that checks the rule -- see
+//! `map_admin.rs` for the same treatment.
 
 use serde_json::json;
 
@@ -239,11 +238,9 @@ async fn a_missing_start_date_is_a_400_naming_the_field() {
     );
 }
 
-/// PORTING.md deviation (a): `capacity`/`rosterSize`/`creditGrant` carry
-/// `@Positive` but no `@NotNull` in the Kotlin, which 500s there today. This
-/// is a 400 naming the field with Hibernate's own default `@NotNull`
-/// message, since no custom one was ever attached to the (absent)
-/// annotation.
+/// `capacity`/`rosterSize`/`creditGrant` are present-and-positive checks; an
+/// absent one is a 400 naming the field with the default "must not be null"
+/// message, since no custom message was written for that half of the check.
 #[tokio::test]
 async fn a_missing_capacity_is_a_400_not_a_500() {
     let app = TestApp::spawn().await;
