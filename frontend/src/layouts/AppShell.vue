@@ -22,6 +22,8 @@ function signIn() {
 
 const manager = computed(() => managerStore.manager)
 const title = computed(() => (route.meta.title as string | undefined) ?? 'UM Fantasy League')
+/** Lobby and standings opt in via route meta; every other page stays plain obsidian. */
+const hasBackground = computed(() => Boolean(route.meta.background))
 
 const nav = computed(() => {
   const baseNav = [
@@ -142,7 +144,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
         </div>
       </header>
 
-      <main class="min-w-0 flex-1 overflow-y-auto p-4 md:p-8">
+      <main
+        class="min-w-0 flex-1 overflow-y-auto p-4 md:p-8"
+        :class="{ 'page-bg-atmosphere': hasBackground }"
+      >
         <slot />
       </main>
     </div>

@@ -20,7 +20,7 @@ const router = createRouter({
       path: '/lobby',
       name: 'lobby',
       component: TournamentLobbyView,
-      meta: { title: 'Tournament Lobby', public: true },
+      meta: { title: 'Tournament Lobby', public: true, background: true },
     },
     {
       path: '/tournaments/:tournamentId/roster',
@@ -47,7 +47,7 @@ const router = createRouter({
       path: '/standings',
       name: 'standings',
       component: () => import('@/views/StandingsView.vue'),
-      meta: { title: 'Live Standings', public: true },
+      meta: { title: 'Live Standings', public: true, background: true },
     },
     {
       path: '/admin',
