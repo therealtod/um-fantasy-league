@@ -210,6 +210,31 @@ pub async fn lock_roster(
     Ok(snapshot)
 }
 
+/// Drop every entry that never locked in a roster.
+///
+/// Oracle: `TournamentService.purgeUnlockedEntries`. Called by
+/// `super::admin_service::update` whenever a tournament's status is saved as
+/// [`TournamentStatus::Live`]. Once live, `Tournament::accepts_roster_changes`
+/// is `false`, which makes `roster_policy::validate_lock`'s
+/// `RosterRule::TournamentClosed` rule reject locking forever after — so an
+/// entry still in [`EntryStatus::Draft`] at that point can never score a
+/// single point. Leaving it registered would only leave a dead zero row on
+/// the standings board, which is why this runs as part of the LIVE
+/// transition rather than being left to an admin to notice.
+/// `crate::standings::query::rosters` also only reads locked entries, as a
+/// second line of defense for the case this purge is ever skipped or fails.
+///
+/// `on delete cascade` on `entry_slots` takes care of any picks the entry
+/// held but never locked in.
+///
+/// Returns the number of entries purged.
+pub async fn purge_unlocked_entries(
+    db: impl PgExecutor<'_>,
+    tournament_id: i64,
+) -> sqlx::Result<u64> {
+    writer::delete_unlocked_entries(db, tournament_id).await
+}
+
 async fn require_my_entry(
     conn: &mut PgConnection,
     tournament_id: i64,

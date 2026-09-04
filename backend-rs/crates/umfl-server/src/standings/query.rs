@@ -13,11 +13,26 @@ use indexmap::IndexMap;
 use sqlx::PgExecutor;
 use umfl_domain::standings::{EntryRoster, RosterHero};
 
-/// Every entry in the tournament with its roster, ordered by entry then slot.
+/// Every **locked** entry in the tournament with its roster, ordered by entry
+/// then slot.
 ///
-/// Note the **left join** onto `entry_slots`: an entry with no picks yet is
-/// still an entry and still belongs on the board. An inner join silently drops
-/// it, and the pickless-entry case is asserted in `tests/it/standings.rs`.
+/// `where e.status = 'LOCKED'` is deliberate, not incidental: an entry that
+/// never locked in a roster can never score a point once its tournament goes
+/// live (see `umfl_domain::roster_policy::validate_lock`'s `TournamentClosed`
+/// rule), so it has nothing to show on the board.
+/// `crate::tournament::admin_service::update` already deletes these entries
+/// the moment a tournament is saved as LIVE
+/// (`crate::tournament::service::purge_unlocked_entries`); this filter is the
+/// second line of defense that invariant describes, in case that purge is
+/// ever skipped or fails -- not the only guard against an unlocked entry
+/// appearing here.
+///
+/// Note the **left join** onto `entry_slots` regardless: a locked entry is
+/// guaranteed a full roster by `RosterRule::IncompleteRoster`, but an inner
+/// join would silently drop any entry that reaches this query without one --
+/// exactly the case the filter above exists to guard against -- so this query
+/// never depends on that guarantee holding. The pickless-entry case is
+/// asserted in `tests/it/standings.rs`.
 ///
 /// `th.cost` is left-joined for the same reason it is not snapshotted onto
 /// `entry_slots`: the price is this tournament's, live. A hero that has since
@@ -46,7 +61,7 @@ pub async fn rosters(
                left join heroes h on h.id = es.hero_id
                left join tournament_heroes th
                    on th.tournament_id = e.tournament_id and th.hero_id = es.hero_id
-           where e.tournament_id = $1
+           where e.tournament_id = $1 and e.status = 'LOCKED'
            order by e.id, es.slot_index"#,
         tournament_id
     )

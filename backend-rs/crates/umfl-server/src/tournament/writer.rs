@@ -154,6 +154,27 @@ pub async fn update_entry(conn: &mut PgConnection, entry: &TournamentEntry) -> s
     Ok(())
 }
 
+/// Deletes every entry in the tournament that never locked in a roster.
+///
+/// Oracle: `TournamentService.purgeUnlockedEntries` — `entryRepository
+/// .findByTournamentId(tournamentId).filterNot { it.isLocked }` followed by
+/// `deleteAll`, folded here into one statement. `on delete cascade` on
+/// `entry_slots` (see `V1__core_schema.sql`) takes care of any picks the
+/// entry held but never locked in, exactly as Spring Data JDBC's cascading
+/// delete did.
+pub async fn delete_unlocked_entries(
+    db: impl PgExecutor<'_>,
+    tournament_id: i64,
+) -> sqlx::Result<u64> {
+    let result = sqlx::query!(
+        "delete from tournament_entries where tournament_id = $1 and status <> 'LOCKED'",
+        tournament_id
+    )
+    .execute(db)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 /// Writes the roster in list order, because the list index **is**
 /// `entry_slots.slot_index`.
 ///
