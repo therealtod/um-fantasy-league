@@ -1,6 +1,6 @@
 /**
  * Mirrors the DTOs defined across the backend's feature modules
- * (`backend-rs/crates/umfl-server/src/*/mod.rs`).
+ * (`backend-rs/crates/umfl-server/src/<feature>/mod.rs`).
  *
  * The backend serializes nullable fields with `skip_serializing_if =
  * "Option::is_none"`, so a nullable field is *absent* from the payload rather
