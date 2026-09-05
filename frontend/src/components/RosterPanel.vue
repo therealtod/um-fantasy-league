@@ -133,9 +133,17 @@ async function confirmLock() {
         >
           Roster Locked
         </p>
-        <RouterLink class="btn-ghost block w-full text-center" to="/standings">
+        <!-- No board exists before go-live — see RosterBuilderView's locked panel. -->
+        <RouterLink
+          v-if="roster.standingsOpen"
+          class="btn-ghost block w-full text-center"
+          to="/standings"
+        >
           View Standings
         </RouterLink>
+        <p v-else class="text-center font-mono text-[11px] text-ink-dim">
+          Standings open at go-live.
+        </p>
       </div>
     </div>
   </aside>

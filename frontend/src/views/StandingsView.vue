@@ -4,6 +4,7 @@ import { useManagerStore } from '@/stores/manager'
 import { useStandingsStore } from '@/stores/standings'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { MetricColumn } from '@/api/types'
+import { standingsAvailable } from '@/domain/tournamentStatus'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
 const standings = useStandingsStore()
@@ -11,9 +12,7 @@ const tournaments = useTournamentsStore()
 const managerStore = useManagerStore()
 
 /** Standings follow the live tournament; fall back to the first listed. */
-const options = computed(() =>
-  tournaments.tournaments.filter((t) => t.status === 'LIVE' || t.status === 'COMPLETED'),
-)
+const options = computed(() => tournaments.tournaments.filter((t) => standingsAvailable(t.status)))
 
 function defaultTournamentId() {
   return (tournaments.live[0] ?? options.value[0])?.id ?? null

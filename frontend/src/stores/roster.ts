@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { api, ApiError, describeError } from '@/api/client'
 import type { BudgetStatus, Hero, Roster, RosterViolation } from '@/api/types'
 import { budgetStatus as computeBudgetStatus } from '@/domain/rosterPolicy'
+import { standingsAvailable } from '@/domain/tournamentStatus'
 import { useHeroesStore } from './heroes'
 import { useTournamentsStore } from './tournaments'
 
@@ -22,6 +23,9 @@ export const useRosterStore = defineStore('roster', () => {
   const tournament = computed(() =>
     tournamentId.value === null ? null : tournamentsStore.byId(tournamentId.value),
   )
+
+  /** Whether the standings page would let this tournament be selected yet. */
+  const standingsOpen = computed(() => standingsAvailable(tournament.value?.status))
 
   const rosterSize = computed(() => roster.value?.rosterSize ?? tournament.value?.rosterSize ?? 3)
   /** The budget granted at registration; the entry's snapshot wins over the tournament's. */
@@ -180,6 +184,7 @@ export const useRosterStore = defineStore('roster', () => {
   return {
     tournamentId,
     tournament,
+    standingsOpen,
     roster,
     selectedIds,
     selected,

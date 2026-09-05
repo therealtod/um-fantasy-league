@@ -63,7 +63,7 @@ const guidanceState = computed(() => ({
 }))
 
 const stage = computed(() => rosterStage(guidanceState.value))
-const step = computed(() => nextStep(guidanceState.value))
+const step = computed(() => nextStep(guidanceState.value, rosterStore.standingsOpen))
 
 /** Server rule breaches as display lines, so a 422 lists every problem at once. */
 const violationMessages = computed(() =>
@@ -108,7 +108,7 @@ const lockedAt = computed(() => {
           </template>
         </p>
 
-        <RosterStepper class="mt-4" :stage="stage" />
+        <RosterStepper class="mt-4" :stage="stage" :standings-open="rosterStore.standingsOpen" />
 
         <div class="mt-4 flex flex-wrap items-end justify-between gap-4">
           <div class="min-w-0">
@@ -147,8 +147,16 @@ const lockedAt = computed(() => {
         <p class="mt-3 font-mono text-xs text-ink">
           {{ rosterStore.selected.map((hero) => hero.name).join(' · ') }}
         </p>
+        <!-- The standings page only lists LIVE/COMPLETED tournaments, so before
+             go-live there is no board to send anyone to — say when it opens
+             rather than offering a link into an empty state. -->
+        <p v-if="!rosterStore.standingsOpen" class="mt-3 font-mono text-xs text-ink-dim">
+          The standings board opens when the tournament goes live.
+        </p>
         <div class="mt-4 flex flex-wrap gap-3">
-          <RouterLink class="btn-primary" to="/standings">View Standings</RouterLink>
+          <RouterLink v-if="rosterStore.standingsOpen" class="btn-primary" to="/standings">
+            View Standings
+          </RouterLink>
           <RouterLink class="btn-ghost" to="/lobby">Back to Tournaments</RouterLink>
         </div>
       </div>

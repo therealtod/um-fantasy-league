@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { lockBlockedReason, nextStep, rosterStage, type RosterState } from './rosterGuidance'
+import {
+  finalStepLabel,
+  lockBlockedReason,
+  nextStep,
+  rosterStage,
+  type RosterState,
+} from './rosterGuidance'
 
 /** A registered, empty, in-budget entry — each test varies one thing off this. */
 function state(overrides: Partial<RosterState> = {}): RosterState {
@@ -80,7 +86,7 @@ describe('lockBlockedReason', () => {
 
 describe('nextStep', () => {
   it('explains what registering buys', () => {
-    const step = nextStep(state({ registered: false }))
+    const step = nextStep(state({ registered: false }), true)
 
     expect(step.title).toBe('Register to start drafting')
     expect(step.detail).toContain('10,000 CR')
@@ -88,30 +94,47 @@ describe('nextStep', () => {
   })
 
   it('counts down the picks and the budget left', () => {
-    const step = nextStep(state({ picked: 2, remaining: 1_500 }))
+    const step = nextStep(state({ picked: 2, remaining: 1_500 }), true)
 
     expect(step.title).toBe('Pick 1 more hero')
     expect(step.detail).toContain('1,500 CR')
   })
 
   it('leads with the overspend when a full roster is too expensive', () => {
-    const step = nextStep(state({ picked: 3, remaining: -2_800 }))
+    const step = nextStep(state({ picked: 3, remaining: -2_800 }), true)
 
     expect(step.title).toBe('You are 2,800 CR over budget')
     expect(step.detail).toContain('cheaper')
   })
 
   it('warns that an unlocked entry is dropped when prompting the lock', () => {
-    const step = nextStep(state({ picked: 3, remaining: 600 }))
+    const step = nextStep(state({ picked: 3, remaining: 600 }), true)
 
     expect(step.title).toBe('Lock in your roster')
     expect(step.detail).toContain('removed when the tournament goes live')
   })
 
-  it('points a locked entry at the standings', () => {
-    const step = nextStep(state({ locked: true, picked: 3 }))
+  it('points a locked entry at the standings once the board is open', () => {
+    const step = nextStep(state({ locked: true, picked: 3 }), true)
 
     expect(step.title).toContain('locked')
-    expect(step.detail).toContain('standings')
+    expect(step.detail).toContain('Follow them on the standings page')
+  })
+
+  // The standings page only lists LIVE/COMPLETED tournaments, so a manager who
+  // locks during registration would otherwise be sent to an empty state.
+  it('says when the board opens instead, while the tournament is pre-live', () => {
+    const step = nextStep(state({ locked: true, picked: 3 }), false)
+
+    expect(step.title).toContain('locked')
+    expect(step.detail).toContain('opens then')
+    expect(step.detail).not.toContain('Follow them on the standings page')
+  })
+})
+
+describe('finalStepLabel', () => {
+  it('names the board only when there is one to watch', () => {
+    expect(finalStepLabel(true)).toBe('Watch standings')
+    expect(finalStepLabel(false)).toBe('Await go-live')
   })
 })

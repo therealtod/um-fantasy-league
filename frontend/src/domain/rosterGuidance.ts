@@ -71,7 +71,17 @@ export function lockBlockedReason(state: RosterState): string | null {
   return null
 }
 
-export function nextStep(state: RosterState): NextStep {
+/**
+ * The last step's name. It is the one step whose wording depends on something
+ * outside the entry: `standingsAvailable` decides whether the standings page
+ * would even let this tournament be selected, so a locked entry waiting on a
+ * pre-live tournament is not sent to watch a board it cannot open.
+ */
+export function finalStepLabel(standingsOpen: boolean): string {
+  return standingsOpen ? 'Watch standings' : 'Await go-live'
+}
+
+export function nextStep(state: RosterState, standingsOpen: boolean): NextStep {
   switch (rosterStage(state)) {
     case 'REGISTER':
       return {
@@ -97,8 +107,9 @@ export function nextStep(state: RosterState): NextStep {
     case 'DONE':
       return {
         title: 'Your roster is locked — nothing more to do',
-        detail:
-          'Your heroes score points from real match results once the tournament goes live. Follow them on the standings page.',
+        detail: standingsOpen
+          ? 'Your heroes score points from real match results once the tournament goes live. Follow them on the standings page.'
+          : 'Your heroes score points from real match results once the tournament goes live. The standings board opens then — there is nothing to watch until it does.',
       }
   }
 }
