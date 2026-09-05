@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "insert into tournaments\n               (name, format, status, start_date, end_date, capacity, roster_size, credit_grant)\n           values ($1, $2, $3, $4, $5, $6, $7, $8)\n           returning id",
+  "query": "insert into tournaments\n               (name, format, status, start_date, end_date, capacity, roster_size, credit_grant,\n                current_round, swaps_per_round, swap_window_open)\n           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n           returning id",
   "describe": {
     "columns": [
       {
@@ -24,12 +24,15 @@
         "Date",
         "Int4",
         "Int4",
-        "Int4"
+        "Int4",
+        "Int4",
+        "Int4",
+        "Bool"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "19caa902ab0747f91ac1dc88ace388936d48578406a6324f91424ab6ff6eb622"
+  "hash": "9f53780f04923c7418a2f412fdddeca5197654fdb8852e4e5db83872b254aa09"
 }

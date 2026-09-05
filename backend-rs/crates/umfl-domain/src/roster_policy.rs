@@ -35,6 +35,18 @@ pub enum RosterRule {
 
     /// Combined cost is over the entry's credit grant.
     BudgetExceeded,
+
+    /// No swap window is open on this tournament, so a locked roster stays
+    /// locked. Also covers a COMPLETED tournament, whose results are final
+    /// whatever the window flag says.
+    SwapWindowClosed,
+
+    /// More heroes exchanged than the entry's remaining allowance permits.
+    SwapLimitExceeded,
+
+    /// This entry already submitted its swaps for the current round. A window
+    /// grants one submission, not a running budget to spend a click at a time.
+    AlreadySwappedThisRound,
 }
 
 impl RosterRule {
@@ -47,6 +59,9 @@ impl RosterRule {
             Self::DuplicateHero => "DUPLICATE_HERO",
             Self::UnknownHero => "UNKNOWN_HERO",
             Self::BudgetExceeded => "BUDGET_EXCEEDED",
+            Self::SwapWindowClosed => "SWAP_WINDOW_CLOSED",
+            Self::SwapLimitExceeded => "SWAP_LIMIT_EXCEEDED",
+            Self::AlreadySwappedThisRound => "ALREADY_SWAPPED_THIS_ROUND",
         }
     }
 }
@@ -133,18 +148,45 @@ pub fn validate_draft(
     entry_status: EntryStatus,
 ) -> Vec<RosterViolation> {
     let mut violations = mutability_violations(tournament, entry_status);
+    violations.extend(too_many_picks(picks, tournament));
+    violations.extend(duplicate_heroes(picks));
+    violations
+}
 
+/// More heroes than the roster holds. Shared by all three paths -- a draft, a
+/// lock and a swap are equally incapable of seating a fourth hero.
+fn too_many_picks(picks: &[RosterPick], tournament: &Tournament) -> Option<RosterViolation> {
     let selected = i32::try_from(picks.len()).unwrap_or(i32::MAX);
-    if selected > tournament.roster_size {
-        violations.push(RosterViolation::new(
+    (selected > tournament.roster_size).then(|| {
+        RosterViolation::new(
             RosterRule::TooManyPicks,
             format!(
                 "Selected {selected} heroes but the roster size is {}.",
                 tournament.roster_size
             ),
-        ));
-    }
+        )
+    })
+}
 
+/// Fewer heroes than the roster holds.
+///
+/// Deliberately *not* part of [`validate_draft`]: a half-filled draft is a
+/// scratchpad, not an error. It bites at commit time -- locking or swapping.
+fn incomplete_roster(picks: &[RosterPick], tournament: &Tournament) -> Option<RosterViolation> {
+    let selected = i32::try_from(picks.len()).unwrap_or(i32::MAX);
+    (selected < tournament.roster_size).then(|| {
+        RosterViolation::new(
+            RosterRule::IncompleteRoster,
+            format!(
+                "Roster needs {} heroes but only {selected} selected.",
+                tournament.roster_size
+            ),
+        )
+    })
+}
+
+/// The same hero taken twice.
+fn duplicate_heroes(picks: &[RosterPick]) -> Option<RosterViolation> {
     // `IndexMap` keeps encounter order, but the sort below is what actually
     // fixes the message.
     let mut counts: IndexMap<i64, usize> = IndexMap::new();
@@ -158,19 +200,17 @@ pub fn validate_draft(
         .collect();
     duplicates.sort();
 
-    if !duplicates.is_empty() {
+    (!duplicates.is_empty()).then(|| {
         let ids = duplicates
             .iter()
             .map(i64::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        violations.push(RosterViolation::new(
+        RosterViolation::new(
             RosterRule::DuplicateHero,
             format!("A hero may only be selected once (repeated ids: {ids})."),
-        ));
-    }
-
-    violations
+        )
+    })
 }
 
 /// Everything [`validate_draft`] checks, plus the rules that only bite at commit
@@ -184,19 +224,132 @@ pub fn validate_lock(
     entry: &TournamentEntry,
 ) -> Vec<RosterViolation> {
     let mut violations = validate_draft(picks, tournament, entry.status);
+    violations.extend(incomplete_roster(picks, tournament));
 
-    let selected = i32::try_from(picks.len()).unwrap_or(i32::MAX);
-    if selected < tournament.roster_size {
+    let budget = budget_status(picks, entry.credit_grant);
+    if budget.spent > budget.credit_grant {
         violations.push(RosterViolation::new(
-            RosterRule::IncompleteRoster,
+            RosterRule::BudgetExceeded,
             format!(
-                "Roster needs {} heroes but only {selected} selected.",
-                tournament.roster_size
+                "Roster costs {} credits, exceeding the {} grant by {}.",
+                budget.spent, budget.credit_grant, -budget.remaining
             ),
         ));
     }
 
-    let budget = budget_status(picks, entry.credit_grant);
+    violations
+}
+
+/// How many heroes this entry may still exchange.
+///
+/// Unused allowance carries over, which is the whole reason this is arithmetic
+/// over a count rather than a stored counter: a manager who sat out a window
+/// banks it by simply never having spent, and nothing has to notice that they
+/// did. Windows follow rounds, so round 1 offers nothing -- there is no result
+/// yet to react to -- and the Nth round has offered `N - 1` of them.
+///
+/// Never negative: an allowance that has somehow been overspent (a
+/// `swaps_per_round` an admin lowered after the fact) reads as 0 rather than as
+/// a debt the manager has to work off.
+///
+/// `frontend/src/domain/rosterPolicy.ts` mirrors this for the builder's
+/// counter. **Change one, change the other.**
+pub fn swap_allowance(swaps_per_round: i32, current_round: i32, swaps_used_total: i32) -> i32 {
+    let windows_offered = (current_round - 1).max(0);
+    (swaps_per_round.saturating_mul(windows_offered) - swaps_used_total).max(0)
+}
+
+/// The number of heroes that differ between the roster held and the roster
+/// proposed -- i.e. how much of the allowance this submission spends.
+///
+/// Counted as "heroes arriving", which for a same-size roster is also the
+/// number leaving. `validate_swap` reports `IncompleteRoster`/`TooManyPicks`
+/// when the sizes differ, so a lopsided count never reaches the limit check as
+/// the only complaint.
+fn heroes_changed(current_hero_ids: &[i64], proposed: &[RosterPick]) -> i32 {
+    let held: std::collections::HashSet<i64> = current_hero_ids.iter().copied().collect();
+    let arriving = proposed
+        .iter()
+        .filter(|p| !held.contains(&p.hero_id))
+        .count();
+    i32::try_from(arriving).unwrap_or(i32::MAX)
+}
+
+/// The rules for exchanging heroes on an already-locked roster, between rounds.
+///
+/// This is a third path beside [`validate_draft`] and [`validate_lock`], not a
+/// variation on either, and the difference that matters is
+/// [`Tournament::accepts_roster_changes`]: it is *false* exactly when a swap is
+/// legal, because a swap happens while the tournament is LIVE. So this function
+/// deliberately never consults it, and gates on
+/// [`Tournament::accepts_swaps`] -- the admin's open window -- instead.
+///
+/// A swap is an exchange rather than a re-draft, so the roster still has to
+/// come out at exactly `roster_size`, and it is still priced against the grant
+/// snapshotted on the *entry*. What is new is the allowance and the
+/// one-submission-per-window rule.
+///
+/// Every broken rule is reported, not just the first, exactly as in the other
+/// two.
+pub fn validate_swap(
+    current_hero_ids: &[i64],
+    proposed: &[RosterPick],
+    tournament: &Tournament,
+    entry: &TournamentEntry,
+    swaps_used_total: i32,
+    already_swapped_this_round: bool,
+) -> Vec<RosterViolation> {
+    let mut violations = Vec::new();
+
+    if !tournament.accepts_swaps() {
+        violations.push(RosterViolation::new(
+            RosterRule::SwapWindowClosed,
+            format!(
+                "{} is not accepting roster swaps right now.",
+                tournament.name
+            ),
+        ));
+    }
+
+    // An unlocked entry has no roster to swap *from*: it belongs on the
+    // ordinary draft-then-lock path, where its picks are still free to change.
+    if !entry.is_locked() {
+        violations.push(RosterViolation::new(
+            RosterRule::SwapWindowClosed,
+            "Lock your roster before swapping heroes.",
+        ));
+    }
+
+    if already_swapped_this_round {
+        violations.push(RosterViolation::new(
+            RosterRule::AlreadySwappedThisRound,
+            format!(
+                "You have already used your swap for round {}.",
+                tournament.current_round
+            ),
+        ));
+    }
+
+    // A swap is an exchange, not a re-draft: the roster comes out at exactly
+    // `roster_size`, so both size rules apply where a draft only gets one.
+    violations.extend(too_many_picks(proposed, tournament));
+    violations.extend(incomplete_roster(proposed, tournament));
+    violations.extend(duplicate_heroes(proposed));
+
+    let requested = heroes_changed(current_hero_ids, proposed);
+    let available = swap_allowance(
+        tournament.swaps_per_round,
+        tournament.current_round,
+        swaps_used_total,
+    );
+    if requested > available {
+        violations.push(RosterViolation::new(
+            RosterRule::SwapLimitExceeded,
+            format!("Swapping {requested} heroes, but you have {available} swaps available."),
+        ));
+    }
+
+    let budget = budget_status(proposed, entry.credit_grant);
     if budget.spent > budget.credit_grant {
         violations.push(RosterViolation::new(
             RosterRule::BudgetExceeded,
@@ -260,11 +413,26 @@ mod tests {
             capacity: 64,
             roster_size,
             credit_grant,
+            current_round: 1,
+            swaps_per_round: 0,
+            swap_window_open: false,
         }
     }
 
     fn tournament() -> Tournament {
         tournament_with(TournamentStatus::RegistrationOpen, 3, 10_000)
+    }
+
+    /// A LIVE tournament with an open swap window -- the only state in which a
+    /// swap is ever legal, so every `swap_validation` test starts here and
+    /// breaks one thing at a time.
+    fn swap_tournament(current_round: i32, swaps_per_round: i32) -> Tournament {
+        Tournament {
+            current_round,
+            swaps_per_round,
+            swap_window_open: true,
+            ..tournament_with(TournamentStatus::Live, 3, 10_000)
+        }
     }
 
     fn entry_with(status: EntryStatus, credit_grant: i32) -> TournamentEntry {
@@ -574,6 +742,363 @@ mod tests {
             assert!(
                 !validate_lock(&picks(&[2_000, 2_000, 2_000]), &five_hero_league, &entry())
                     .is_empty()
+            );
+        }
+    }
+
+    mod swap_allowance_arithmetic {
+        use super::*;
+
+        /// Windows follow rounds, so the first round offers none: there is no
+        /// result yet to react to.
+        #[test]
+        fn round_one_offers_nothing() {
+            assert_eq!(swap_allowance(2, 1, 0), 0);
+        }
+
+        #[test]
+        fn each_further_round_offers_another_window() {
+            assert_eq!(swap_allowance(2, 2, 0), 2);
+            assert_eq!(swap_allowance(2, 3, 0), 4);
+            assert_eq!(swap_allowance(2, 4, 0), 6);
+        }
+
+        /// The point of deriving this from a count rather than storing a
+        /// counter: sitting a window out banks it, with nothing having to
+        /// notice that it happened.
+        #[test]
+        fn unused_allowance_carries_over() {
+            // One per round, round 3, nothing spent: both windows are still
+            // there.
+            assert_eq!(swap_allowance(1, 3, 0), 2);
+            // One of them spent in round 2 leaves one.
+            assert_eq!(swap_allowance(1, 3, 1), 1);
+            assert_eq!(swap_allowance(1, 3, 2), 0);
+        }
+
+        #[test]
+        fn a_tournament_with_no_allowance_never_offers_one() {
+            assert_eq!(swap_allowance(0, 9, 0), 0);
+        }
+
+        /// An admin who lowers `swaps_per_round` after managers have already
+        /// spent must not leave them owing swaps back.
+        #[test]
+        fn an_overspent_allowance_reads_as_zero_not_a_debt() {
+            assert_eq!(swap_allowance(1, 2, 5), 0);
+        }
+    }
+
+    mod swap_validation {
+        use super::*;
+
+        /// The seeded Winter of Champions trio: 4100 + 3200 + 2100 = 9,400.
+        fn held() -> Vec<i64> {
+            vec![1, 2, 3]
+        }
+
+        fn locked() -> TournamentEntry {
+            entry_with(EntryStatus::Locked, 10_000)
+        }
+
+        /// Same three costs, but hero 3 replaced by hero 4 -- one exchange.
+        fn one_swap() -> Vec<RosterPick> {
+            vec![
+                RosterPick {
+                    hero_id: 1,
+                    cost: 4_100,
+                },
+                RosterPick {
+                    hero_id: 2,
+                    cost: 3_200,
+                },
+                RosterPick {
+                    hero_id: 4,
+                    cost: 2_100,
+                },
+            ]
+        }
+
+        #[test]
+        fn a_swap_within_the_allowance_and_the_budget_passes() {
+            let violations = validate_swap(
+                &held(),
+                &one_swap(),
+                &swap_tournament(2, 1),
+                &locked(),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), Vec::<RosterRule>::new());
+        }
+
+        /// Resubmitting the roster unchanged spends nothing, so it is legal
+        /// even with no allowance at all. The service treats it as a no-op.
+        #[test]
+        fn an_unchanged_roster_spends_nothing() {
+            let unchanged = picks(&[4_100, 3_200, 2_100]);
+            let violations = validate_swap(
+                &held(),
+                &unchanged,
+                &swap_tournament(2, 0),
+                &locked(),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), Vec::<RosterRule>::new());
+        }
+
+        #[test]
+        fn a_closed_window_refuses_the_swap() {
+            let shut = Tournament {
+                swap_window_open: false,
+                ..swap_tournament(2, 1)
+            };
+            let violations = validate_swap(&held(), &one_swap(), &shut, &locked(), 0, false);
+            assert_eq!(rules(&violations), vec![RosterRule::SwapWindowClosed]);
+        }
+
+        /// A finished tournament's results are final, so the flag alone is not
+        /// enough to reopen it.
+        #[test]
+        fn a_completed_tournament_refuses_even_with_the_window_open() {
+            let over = Tournament {
+                status: TournamentStatus::Completed,
+                ..swap_tournament(2, 1)
+            };
+            let violations = validate_swap(&held(), &one_swap(), &over, &locked(), 0, false);
+            assert_eq!(rules(&violations), vec![RosterRule::SwapWindowClosed]);
+        }
+
+        /// An unlocked entry has no committed roster to swap *from* -- it
+        /// belongs on the draft path, where its picks are still free anyway.
+        #[test]
+        fn an_unlocked_entry_is_sent_back_to_the_draft_path() {
+            let violations = validate_swap(
+                &held(),
+                &one_swap(),
+                &swap_tournament(2, 1),
+                &entry_with(EntryStatus::Draft, 10_000),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), vec![RosterRule::SwapWindowClosed]);
+        }
+
+        #[test]
+        fn a_window_grants_one_submission_not_a_running_budget() {
+            let violations = validate_swap(
+                &held(),
+                &one_swap(),
+                &swap_tournament(2, 2),
+                &locked(),
+                0,
+                true,
+            );
+            assert_eq!(
+                rules(&violations),
+                vec![RosterRule::AlreadySwappedThisRound]
+            );
+        }
+
+        #[test]
+        fn exchanging_more_heroes_than_the_allowance_is_refused() {
+            // Two heroes changed against an allowance of one.
+            let two_changed = vec![
+                RosterPick {
+                    hero_id: 1,
+                    cost: 4_100,
+                },
+                RosterPick {
+                    hero_id: 4,
+                    cost: 3_200,
+                },
+                RosterPick {
+                    hero_id: 5,
+                    cost: 2_100,
+                },
+            ];
+            let violations = validate_swap(
+                &held(),
+                &two_changed,
+                &swap_tournament(2, 1),
+                &locked(),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), vec![RosterRule::SwapLimitExceeded]);
+            assert_eq!(
+                violations[0].message,
+                "Swapping 2 heroes, but you have 1 swaps available."
+            );
+        }
+
+        /// Carry-over is not merely arithmetic in a helper -- the policy has to
+        /// actually spend it.
+        #[test]
+        fn a_carried_over_allowance_permits_a_bigger_exchange() {
+            let two_changed = vec![
+                RosterPick {
+                    hero_id: 1,
+                    cost: 4_100,
+                },
+                RosterPick {
+                    hero_id: 4,
+                    cost: 3_200,
+                },
+                RosterPick {
+                    hero_id: 5,
+                    cost: 2_100,
+                },
+            ];
+            // One per round, now in round 3, nothing spent: two banked.
+            let violations = validate_swap(
+                &held(),
+                &two_changed,
+                &swap_tournament(3, 1),
+                &locked(),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), Vec::<RosterRule>::new());
+        }
+
+        /// The budget is still the grant snapshotted on the entry, not the
+        /// tournament's current one -- the same rule `validate_lock` follows.
+        #[test]
+        fn the_budget_comes_from_the_entry_not_the_tournament() {
+            let generous_tournament = Tournament {
+                credit_grant: 100_000,
+                ..swap_tournament(2, 1)
+            };
+            let pricey = vec![
+                RosterPick {
+                    hero_id: 1,
+                    cost: 4_100,
+                },
+                RosterPick {
+                    hero_id: 2,
+                    cost: 3_200,
+                },
+                RosterPick {
+                    hero_id: 4,
+                    cost: 5_600,
+                },
+            ];
+            let violations = validate_swap(
+                &held(),
+                &pricey,
+                &generous_tournament,
+                &entry_with(EntryStatus::Locked, 10_000),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), vec![RosterRule::BudgetExceeded]);
+        }
+
+        /// A swap is an exchange, so unlike a draft it cannot leave the roster
+        /// short -- dropping a hero without replacing it is not a swap.
+        #[test]
+        fn a_swap_may_not_shrink_the_roster() {
+            let two_left = vec![
+                RosterPick {
+                    hero_id: 1,
+                    cost: 4_100,
+                },
+                RosterPick {
+                    hero_id: 2,
+                    cost: 3_200,
+                },
+            ];
+            let violations = validate_swap(
+                &held(),
+                &two_left,
+                &swap_tournament(2, 1),
+                &locked(),
+                0,
+                false,
+            );
+            assert_eq!(rules(&violations), vec![RosterRule::IncompleteRoster]);
+        }
+
+        #[test]
+        fn a_swap_may_not_grow_the_roster_or_repeat_a_hero() {
+            // Deliberately still inside the 10,000 grant, so `TooManyPicks` is
+            // the only thing wrong with it.
+            let four = picks(&[4_100, 3_200, 2_100, 500]);
+            assert_eq!(
+                rules(&validate_swap(
+                    &held(),
+                    &four,
+                    &swap_tournament(2, 4),
+                    &locked(),
+                    0,
+                    false
+                )),
+                vec![RosterRule::TooManyPicks]
+            );
+
+            let repeated = vec![
+                RosterPick {
+                    hero_id: 1,
+                    cost: 4_100,
+                },
+                RosterPick {
+                    hero_id: 4,
+                    cost: 3_200,
+                },
+                RosterPick {
+                    hero_id: 4,
+                    cost: 2_100,
+                },
+            ];
+            assert_eq!(
+                rules(&validate_swap(
+                    &held(),
+                    &repeated,
+                    &swap_tournament(2, 4),
+                    &locked(),
+                    0,
+                    false
+                )),
+                vec![RosterRule::DuplicateHero]
+            );
+        }
+
+        #[test]
+        fn every_broken_rule_is_reported_not_just_the_first() {
+            let shut_and_over_budget = Tournament {
+                swap_window_open: false,
+                ..swap_tournament(2, 0)
+            };
+            let pricey_pair = vec![
+                RosterPick {
+                    hero_id: 4,
+                    cost: 9_000,
+                },
+                RosterPick {
+                    hero_id: 5,
+                    cost: 8_000,
+                },
+            ];
+            let violations = validate_swap(
+                &held(),
+                &pricey_pair,
+                &shut_and_over_budget,
+                &locked(),
+                0,
+                true,
+            );
+
+            assert_eq!(
+                rules(&violations),
+                vec![
+                    RosterRule::SwapWindowClosed,
+                    RosterRule::AlreadySwappedThisRound,
+                    RosterRule::IncompleteRoster,
+                    RosterRule::SwapLimitExceeded,
+                    RosterRule::BudgetExceeded,
+                ]
             );
         }
     }

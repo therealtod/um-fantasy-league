@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select s.round, s.hero_out_id, s.hero_in_id\n           from roster_swaps s\n           join tournament_entries e on e.id = s.entry_id\n          where e.tournament_id = $1 and e.manager_id = $2\n          order by s.round, s.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "roster_swaps",
+            "name": "round"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hero_out_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "roster_swaps",
+            "name": "hero_out_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "hero_in_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "roster_swaps",
+            "name": "hero_in_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ee9d82243b6e01b3a244763fde78fffb2f268718a38b171665680ea8bb550912"
+}

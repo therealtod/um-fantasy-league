@@ -8,8 +8,9 @@
 //! fan-out, and impossible to get inconsistent with the ticker.
 
 use indexmap::IndexMap;
-use sqlx::PgExecutor;
 use umfl_domain::standings::{EntryRoster, RosterHero};
+
+use crate::tournament::query as tournament_query;
 
 /// Every **locked** entry in the tournament with its roster, ordered by entry
 /// then slot.
@@ -36,8 +37,13 @@ use umfl_domain::standings::{EntryRoster, RosterHero};
 /// `entry_slots`: the price is this tournament's, live. A hero that has since
 /// left the pool has no `tournament_heroes` row at all, so the joined cost is
 /// SQL NULL; `unwrap_or(0)` below reads that as 0 rather than crashing.
+/// Takes the connection rather than an executor because it is two statements
+/// -- the rosters, then the swap log -- and an `impl PgExecutor` is consumed by
+/// the first. The one caller passes `&mut *tx`, so both run inside the board's
+/// existing REPEATABLE READ snapshot; see `tournament::query::find_entry` for
+/// the same shape.
 pub async fn rosters(
-    db: impl PgExecutor<'_>,
+    conn: &mut sqlx::PgConnection,
     tournament_id: i64,
 ) -> sqlx::Result<Vec<EntryRoster>> {
     let rows = sqlx::query!(
@@ -62,7 +68,7 @@ pub async fn rosters(
            order by e.id, es.slot_index"#,
         tournament_id
     )
-    .fetch_all(db)
+    .fetch_all(&mut *conn)
     .await?;
 
     // An `IndexMap` preserves first-encounter order, and the query has
@@ -76,6 +82,7 @@ pub async fn rosters(
             display_name: row.display_name,
             credit_grant: row.credit_grant,
             heroes: Vec::new(),
+            swaps: Vec::new(),
         });
         // The hero id is the presence check: it is null for an entry with no
         // slots, and the slot's own columns are then null with it.
@@ -88,5 +95,17 @@ pub async fn rosters(
             });
         }
     }
+
+    // The swap log, in one query for the whole board rather than one per
+    // entry. `heroes` above is the roster held *now*; these are the exchanges
+    // that produced it, and the fold needs both to price a match against the
+    // roster its round was actually played with.
+    let mut swaps = tournament_query::swaps_by_entry_for_tournament(conn, tournament_id).await?;
+    for entry in by_entry.values_mut() {
+        if let Some(log) = swaps.shift_remove(&entry.entry_id) {
+            entry.swaps = log;
+        }
+    }
+
     Ok(by_entry.into_values().collect())
 }

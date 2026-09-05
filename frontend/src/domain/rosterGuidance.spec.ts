@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { lockBlockedReason, nextStep, rosterStage, type RosterState } from './rosterGuidance'
+import {
+  lockBlockedReason,
+  nextStep,
+  rosterStage,
+  swapBlockedReason,
+  type RosterState,
+} from './rosterGuidance'
 
 /** A registered, empty, in-budget entry — each test varies one thing off this. */
 function state(overrides: Partial<RosterState> = {}): RosterState {
@@ -10,6 +16,10 @@ function state(overrides: Partial<RosterState> = {}): RosterState {
     rosterSize: 3,
     remaining: 10_000,
     creditGrant: 10_000,
+    swapWindowOpen: false,
+    swapsAvailable: 0,
+    alreadySwappedThisRound: false,
+    swapsStaged: 0,
     ...overrides,
   }
 }
@@ -113,5 +123,95 @@ describe('nextStep', () => {
 
     expect(step.title).toContain('locked')
     expect(step.detail).toContain('standings')
+  })
+})
+
+/** A locked entry inside an open window with one swap to spend. */
+function inWindow(overrides: Partial<RosterState> = {}): RosterState {
+  return state({
+    locked: true,
+    picked: 3,
+    swapWindowOpen: true,
+    swapsAvailable: 1,
+    ...overrides,
+  })
+}
+
+describe('the swap stage', () => {
+  it('leaves a locked roster at DONE while no window is open', () => {
+    expect(rosterStage(state({ locked: true, picked: 3 }))).toBe('DONE')
+  })
+
+  it('moves to SWAP when a window opens on a locked roster', () => {
+    expect(rosterStage(inWindow())).toBe('SWAP')
+  })
+
+  it('falls back to DONE once the round\u2019s submission is spent', () => {
+    expect(rosterStage(inWindow({ alreadySwappedThisRound: true }))).toBe('DONE')
+  })
+
+  it('falls back to DONE when the allowance is exhausted', () => {
+    expect(rosterStage(inWindow({ swapsAvailable: 0 }))).toBe('DONE')
+  })
+
+  it('never reaches SWAP from an unlocked entry, however open the window', () => {
+    expect(rosterStage(inWindow({ locked: false, remaining: 4_000 }))).toBe('LOCK')
+  })
+
+  it('stops claiming there is nothing more to do', () => {
+    // The regression this stage exists for: DONE's copy is false the moment a
+    // window opens, and a manager reading it would sit out their swap.
+    expect(nextStep(inWindow()).title).not.toContain('nothing more to do')
+    expect(nextStep(inWindow()).title).toContain('window is open')
+  })
+
+  it('asks for a submission once something is staged', () => {
+    expect(nextStep(inWindow({ swapsStaged: 1 })).title).toBe('Submit 1 swap')
+    expect(nextStep(inWindow({ swapsStaged: 2, swapsAvailable: 2 })).title).toBe('Submit 2 swaps')
+  })
+
+  it('says a submission is final before it is made, not after', () => {
+    expect(nextStep(inWindow({ swapsStaged: 1 })).detail).toContain('one submission')
+  })
+})
+
+describe('swapBlockedReason', () => {
+  it('is null when a staged, in-budget exchange is ready to send', () => {
+    expect(swapBlockedReason(inWindow({ swapsStaged: 1 }))).toBeNull()
+  })
+
+  it('sends an unlocked entry back to the draft path', () => {
+    expect(swapBlockedReason(state({ locked: false }))).toContain('Lock your roster')
+  })
+
+  it('names the shut window ahead of anything else that is also wrong', () => {
+    const shut = inWindow({ swapWindowOpen: false, swapsStaged: 0, remaining: -500 })
+    expect(swapBlockedReason(shut)).toContain('window is closed')
+  })
+
+  it('reports the spent submission rather than the remaining allowance', () => {
+    const spent = inWindow({ alreadySwappedThisRound: true, swapsAvailable: 2 })
+    expect(swapBlockedReason(spent)).toContain('already submitted')
+  })
+
+  it('reports an exhausted allowance', () => {
+    expect(swapBlockedReason(inWindow({ swapsAvailable: 0 }))).toContain('no swaps left')
+  })
+
+  it('reports an over-budget exchange in credits', () => {
+    expect(swapBlockedReason(inWindow({ remaining: -1_500 }))).toContain('over budget')
+  })
+
+  it('insists the roster stays the size it was', () => {
+    expect(swapBlockedReason(inWindow({ picked: 2 }))).toContain('exchange')
+  })
+
+  it('asks for a staged change when nothing has been touched', () => {
+    expect(swapBlockedReason(inWindow({ swapsStaged: 0 }))).toContain('Choose a hero')
+  })
+
+  it('refuses more staged swaps than the allowance covers', () => {
+    const over = inWindow({ swapsAvailable: 1, swapsStaged: 2 })
+    expect(swapBlockedReason(over)).toBe('You have staged 2 swaps but only 1 swap available.')
   })
 })

@@ -86,7 +86,7 @@ pub async fn board(state: &AppState, tournament_id: i64) -> ApiResult<StandingsB
 
     let mut tx = snapshot(state).await?;
     let rules = resolve_rules(&mut tx, tournament_id).await?;
-    let rosters = query::rosters(&mut *tx, tournament_id).await?;
+    let rosters = query::rosters(&mut tx, tournament_id).await?;
     tx.commit().await?;
 
     Ok(fold::board(tournament_id, &matches, &rules, &rosters))

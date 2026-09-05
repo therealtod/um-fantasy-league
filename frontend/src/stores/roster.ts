@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api, ApiError, describeError } from '@/api/client'
 import type { BudgetStatus, Hero, Roster, RosterViolation } from '@/api/types'
-import { budgetStatus as computeBudgetStatus } from '@/domain/rosterPolicy'
+import { budgetStatus as computeBudgetStatus, heroesChanged } from '@/domain/rosterPolicy'
 import { useHeroesStore } from './heroes'
 import { useTournamentsStore } from './tournaments'
 
@@ -30,6 +30,39 @@ export const useRosterStore = defineStore('roster', () => {
   )
   const registered = computed(() => roster.value !== null)
   const locked = computed(() => roster.value?.locked ?? false)
+
+  const swapWindowOpen = computed(() => roster.value?.swapWindowOpen ?? false)
+  const swapsAvailable = computed(() => roster.value?.swapsAvailable ?? 0)
+  const alreadySwappedThisRound = computed(() => roster.value?.alreadySwappedThisRound ?? false)
+
+  /**
+   * Whether edits are being **staged** rather than saved on every click.
+   *
+   * This is the whole reason the swap path is not just `toggle` with a
+   * different endpoint. A draft PUTs the entire roster on each click, which is
+   * free because a draft can be re-saved forever; a window grants exactly one
+   * submission, so the first click would spend it and leave the manager with a
+   * half-made exchange. While this is true `toggle` mutates the selection and
+   * sends nothing, and `submitSwaps` is the single call that spends the round.
+   */
+  const staging = computed(
+    () =>
+      registered.value &&
+      locked.value &&
+      swapWindowOpen.value &&
+      swapsAvailable.value > 0 &&
+      !alreadySwappedThisRound.value,
+  )
+
+  /**
+   * How many heroes the staged selection would bring in — what a submission
+   * would cost. Counted against the roster the *server* last confirmed, not
+   * against an earlier staging step, so toggling a hero off and back on again
+   * costs nothing.
+   */
+  const swapsStaged = computed(() =>
+    heroesChanged(roster.value?.heroes.map((hero) => hero.id) ?? [], selectedIds.value),
+  )
 
   /** The selected heroes, resolved against the loaded pool, in slot order. */
   const selected = computed<Hero[]>(() =>
@@ -127,7 +160,10 @@ export const useRosterStore = defineStore('roster', () => {
    */
   async function toggle(heroId: number) {
     const id = tournamentId.value
-    if (id === null || locked.value || !registered.value) return
+    if (id === null || !registered.value) return
+    // A locked roster is immutable *except* inside an open window, and then
+    // only locally — see `staging`.
+    if (locked.value && !staging.value) return
 
     const previous = [...selectedIds.value]
     const next = isSelected(heroId)
@@ -142,6 +178,11 @@ export const useRosterStore = defineStore('roster', () => {
     selectedIds.value = next
     error.value = null
     violations.value = []
+
+    // Staged: the exchange is not sent until `submitSwaps`, so there is no
+    // request to roll back and nothing has been spent.
+    if (staging.value) return
+
     saving.value = true
     try {
       adopt(await api.setSlots(id, next))
@@ -156,6 +197,45 @@ export const useRosterStore = defineStore('roster', () => {
     } finally {
       saving.value = false
     }
+  }
+
+  /**
+   * Send the staged roster as this round's one exchange.
+   *
+   * The whole proposed roster goes up, not a list of pairs: the server derives
+   * the diff, so the two sides cannot disagree about what counts as one swap.
+   * A rejection restores the server's roster rather than leaving the staged
+   * selection in place — the violations say what was wrong, and the manager
+   * still has the submission, so the honest starting point is where they were.
+   */
+  async function submitSwaps() {
+    const id = tournamentId.value
+    if (id === null || !staging.value) return
+    saving.value = true
+    error.value = null
+    violations.value = []
+    try {
+      adopt(await api.swapRoster(id, selectedIds.value))
+      await tournamentsStore.load()
+    } catch (e) {
+      if (roster.value) selectedIds.value = roster.value.heroes.map((hero) => hero.id)
+      if (e instanceof ApiError) {
+        violations.value = e.violations
+        error.value = e.message
+      } else {
+        error.value = 'Could not submit swaps'
+      }
+    } finally {
+      saving.value = false
+    }
+  }
+
+  /** Abandon a staged exchange and go back to the roster the server holds. */
+  function discardSwaps() {
+    if (!roster.value) return
+    selectedIds.value = roster.value.heroes.map((hero) => hero.id)
+    error.value = null
+    violations.value = []
   }
 
   async function lock() {
@@ -194,12 +274,19 @@ export const useRosterStore = defineStore('roster', () => {
     budget,
     full,
     lockable,
+    swapWindowOpen,
+    swapsAvailable,
+    alreadySwappedThisRound,
+    staging,
+    swapsStaged,
     isSelected,
     select,
     load,
     register,
     toggle,
     lock,
+    submitSwaps,
+    discardSwaps,
     clearSession,
   }
 })

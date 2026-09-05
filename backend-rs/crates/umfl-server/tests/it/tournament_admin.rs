@@ -554,3 +554,175 @@ async fn admin_tournament_routes_reject_a_non_admin() {
 
     assert_eq!(response.status, 403, "{}", response.text());
 }
+
+// ---------------------------------------------------------------------------
+// Rounds and the swap window.
+//
+// The two are deliberately separate actions on separate routes: advancing is
+// what hands out the next window's allowance, opening is what lets anyone
+// spend it. An admin has to shut the window again before recording the round's
+// results, or a manager could read the ticker and buy the heroes that scored.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn advancing_the_round_moves_only_the_round() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let admin = admin(&app).await;
+
+    let before = app.get(&format!("/api/tournaments/{winter}")).await.json();
+    assert_eq!(
+        before["currentRound"], 1,
+        "a tournament starts in round one"
+    );
+    assert_eq!(before["swapWindowOpen"], false);
+
+    let response = app
+        .send_as(
+            "POST",
+            &format!("/api/admin/tournaments/{winter}/advance-round"),
+            admin,
+            None,
+        )
+        .await;
+
+    assert_eq!(response.status, 200, "{}", response.text());
+    let body = response.json();
+    assert_eq!(body["currentRound"], 2);
+    assert_eq!(
+        body["swapWindowOpen"], false,
+        "advancing offers the allowance; it does not open the window"
+    );
+
+    // Twice, to pin that the increment is per call rather than a set-to-two.
+    app.send_as(
+        "POST",
+        &format!("/api/admin/tournaments/{winter}/advance-round"),
+        admin,
+        None,
+    )
+    .await;
+    let reread = app.get(&format!("/api/tournaments/{winter}")).await.json();
+    assert_eq!(reread["currentRound"], 3);
+}
+
+#[tokio::test]
+async fn the_swap_window_opens_and_shuts_without_touching_the_round() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let admin = admin(&app).await;
+
+    for open in [true, false] {
+        let response = app
+            .send_as(
+                "PUT",
+                &format!("/api/admin/tournaments/{winter}/swap-window"),
+                admin,
+                Some(&json!({ "open": open })),
+            )
+            .await;
+
+        assert_eq!(response.status, 200, "{}", response.text());
+        let body = response.json();
+        assert_eq!(body["swapWindowOpen"], open);
+        assert_eq!(body["currentRound"], 1, "the window never moves the round");
+    }
+}
+
+#[tokio::test]
+async fn a_full_update_carries_the_round_and_the_window_rather_than_resetting_them() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let admin = admin(&app).await;
+
+    app.send_as(
+        "POST",
+        &format!("/api/admin/tournaments/{winter}/advance-round"),
+        admin,
+        None,
+    )
+    .await;
+    app.send_as(
+        "PUT",
+        &format!("/api/admin/tournaments/{winter}/swap-window"),
+        admin,
+        Some(&json!({ "open": true })),
+    )
+    .await;
+
+    // The update DTO carries neither field, and an update is a full replace --
+    // so an admin correcting a typo in the name must not send the tournament
+    // back to round one with the window shut underneath a manager mid-swap.
+    let mut body = valid_body("Winter of Champions");
+    body["status"] = json!("REGISTRATION_OPEN");
+    body["swapsPerRound"] = json!(2);
+
+    let response = app
+        .send_as(
+            "PUT",
+            &format!("/api/admin/tournaments/{winter}"),
+            admin,
+            Some(&body),
+        )
+        .await;
+
+    assert_eq!(response.status, 200, "{}", response.text());
+    let updated = response.json();
+    assert_eq!(updated["currentRound"], 2);
+    assert_eq!(updated["swapWindowOpen"], true);
+    assert_eq!(
+        updated["swapsPerRound"], 2,
+        "configuration, unlike state, does come off the form"
+    );
+
+    let reread = app.get(&format!("/api/tournaments/{winter}")).await.json();
+    assert_eq!(reread["currentRound"], 2);
+    assert_eq!(reread["swapWindowOpen"], true);
+    assert_eq!(reread["swapsPerRound"], 2);
+}
+
+#[tokio::test]
+async fn an_omitted_swaps_per_round_means_no_swaps_rather_than_a_400() {
+    let app = TestApp::spawn().await;
+
+    let response = app
+        .send_as(
+            "POST",
+            "/api/admin/tournaments",
+            admin(&app).await,
+            Some(&valid_body("Swapless Open")),
+        )
+        .await;
+
+    assert_eq!(response.status, 201, "{}", response.text());
+    let body = response.json();
+    assert_eq!(body["swapsPerRound"], 0);
+    assert_eq!(body["currentRound"], 1);
+    assert_eq!(body["swapWindowOpen"], false);
+}
+
+#[tokio::test]
+async fn a_negative_swaps_per_round_is_a_400_naming_the_field() {
+    let app = TestApp::spawn().await;
+
+    let mut body = valid_body("Negative Swaps Cup");
+    body["swapsPerRound"] = json!(-1);
+
+    let response = app
+        .send_as(
+            "POST",
+            "/api/admin/tournaments",
+            admin(&app).await,
+            Some(&body),
+        )
+        .await;
+
+    assert_eq!(response.status, 400, "{}", response.text());
+    assert!(
+        response.json()["fields"]
+            .get("swapsPerRound")
+            .is_some_and(|m| m.as_str().is_some_and(|m| m.contains("negative"))),
+        "{}",
+        response.text()
+    );
+}

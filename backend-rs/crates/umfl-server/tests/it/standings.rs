@@ -345,9 +345,14 @@ async fn an_entry_with_no_picks_still_appears_and_ties_share_a_rank() {
         .fetch_one(app.pool())
         .await
         .expect("insert a manager");
+        // LOCKED, but with no slots: `IncompleteRoster` means the pairing
+        // should be impossible, and the left join exists precisely so this
+        // query does not depend on that holding. DRAFT would not do -- the
+        // status filter would drop the row before the join was reached.
         sqlx::query!(
-            "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
-             values ($1, $2, 'DRAFT', 10000)",
+            "insert into tournament_entries
+                 (tournament_id, manager_id, status, credit_grant, locked_at)
+             values ($1, $2, 'LOCKED', 10000, now())",
             summer,
             manager_id
         )
@@ -392,9 +397,12 @@ async fn a_tournament_with_entries_but_no_matches_scores_everyone_zero() {
     let app = TestApp::spawn().await;
     let winter = app.tournament_id(WINTER).await;
     let manager = app.manager("NeonStrategist").await;
+    // LOCKED for the same reason as above: only a locked entry reaches the
+    // board, and this test is about a board with no *matches*, not no entries.
     sqlx::query!(
-        "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
-         values ($1, $2, 'DRAFT', 10000)",
+        "insert into tournament_entries
+             (tournament_id, manager_id, status, credit_grant, locked_at)
+         values ($1, $2, 'LOCKED', 10000, now())",
         winter,
         manager.id
     )
@@ -447,7 +455,8 @@ async fn the_roster_projection_carries_slot_order_and_live_prices() {
     let app = TestApp::spawn().await;
     let summer = app.tournament_id(SUMMER).await;
 
-    let rosters = umfl_server::standings::query::rosters(app.pool(), summer)
+    let mut conn = app.pool().acquire().await.expect("a connection");
+    let rosters = umfl_server::standings::query::rosters(&mut conn, summer)
         .await
         .expect("read the rosters");
 
@@ -1007,5 +1016,185 @@ async fn the_standings_routes_need_no_credential() {
     ] {
         let response = app.get(&path).await;
         assert_eq!(response.status, 200, "{path}: {}", response.text());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Round-scoped scoring.
+//
+// The fold walks each entry's *holdings* -- (hero, from_round, until_round)
+// intervals derived from the swap log -- rather than the roster it happens to
+// hold now. These tests drive that from the outside, by writing swap rows the
+// seed deliberately does not carry (see `db/seed/V5__demo_swap_config.sql`).
+//
+// *NeonStrategist* is the subject throughout: Alice, Robin Hood and Bigfoot,
+// of whom Bigfoot is the one with results in two different rounds (matches 6
+// and 10, rounds 2 and 3). Medusa is the counterpart -- a hero with a heavy
+// history of its own (rounds 2 and 3) that *NeonStrategist* never held.
+// ---------------------------------------------------------------------------
+
+/// Write a swap directly, the way an admin-driven window would have.
+async fn record_swap(
+    app: &TestApp,
+    tournament_id: i64,
+    handle: &str,
+    round: i32,
+    out: &str,
+    into: &str,
+) {
+    let (out_id, in_id) = (app.hero_id(out).await, app.hero_id(into).await);
+    sqlx::query!(
+        "insert into roster_swaps (entry_id, round, hero_out_id, hero_in_id)
+         select e.id, $3, $4, $5
+           from tournament_entries e
+           join managers m on m.id = e.manager_id
+          where e.tournament_id = $1 and m.handle = $2",
+        tournament_id,
+        handle,
+        round,
+        out_id,
+        in_id
+    )
+    .execute(app.pool())
+    .await
+    .expect("record a swap");
+
+    // The roster itself moves too: the log says what changed, `entry_slots`
+    // says what is held now, and the two are written together by
+    // `tournament::service::swap_roster`.
+    sqlx::query!(
+        "update entry_slots set hero_id = $4
+           from tournament_entries e
+           join managers m on m.id = e.manager_id
+          where entry_slots.entry_id = e.id
+            and e.tournament_id = $1 and m.handle = $2
+            and entry_slots.hero_id = $3",
+        tournament_id,
+        handle,
+        out_id,
+        in_id
+    )
+    .execute(app.pool())
+    .await
+    .expect("move the slot");
+}
+
+fn total_for(board: &Value, handle: &str) -> f64 {
+    board["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|r| r["handle"] == handle)
+        .unwrap_or_else(|| panic!("{handle} is on the board"))["totalPoints"]
+        .as_f64()
+        .expect("a total")
+}
+
+fn roster_of(board: &Value, handle: &str) -> Vec<String> {
+    let roster = board["rows"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .find(|r| r["handle"] == handle)
+        .unwrap_or_else(|| panic!("{handle} is on the board"))["roster"]
+        .clone();
+    strings(&roster)
+}
+
+#[tokio::test]
+async fn a_swap_after_the_last_played_round_moves_no_points_in_either_direction() {
+    let app = TestApp::spawn().await;
+    let summer = app.tournament_id(SUMMER).await;
+    let before = total_for(&summer_board(&app).await, "NeonStrategist");
+
+    // Round 4: every recorded match is behind it. Bigfoot leaves having
+    // already earned in rounds 2 and 3; Medusa arrives having already earned
+    // in rounds 2 and 3 for somebody else. Both halves of the invariant are
+    // being asserted by the one unchanged number -- a fold keyed off the
+    // current roster instead of the holdings would lose Bigfoot's history and
+    // gain Medusa's.
+    record_swap(&app, summer, "NeonStrategist", 4, "Bigfoot", "Medusa").await;
+
+    let after = summer_board(&app).await;
+    assert_eq!(total_for(&after, "NeonStrategist"), before);
+    assert!(
+        roster_of(&after, "NeonStrategist").contains(&"Medusa".to_owned()),
+        "the board still shows the roster held *now*, which is the swapped one"
+    );
+}
+
+#[tokio::test]
+async fn a_hero_stops_scoring_from_the_round_it_was_swapped_out_in() {
+    let app = TestApp::spawn().await;
+    let summer = app.tournament_id(SUMMER).await;
+    let untouched = total_for(&summer_board(&app).await, "NeonStrategist");
+
+    // King Arthur is the arriving hero throughout: he plays in rounds 1 and 2
+    // only, so from round 2 onwards he contributes nothing and every
+    // difference below is Bigfoot's loss alone.
+    record_swap(&app, summer, "NeonStrategist", 3, "Bigfoot", "King Arthur").await;
+    let out_at_three = total_for(&summer_board(&app).await, "NeonStrategist");
+
+    assert!(
+        out_at_three < untouched,
+        "leaving in round 3 forfeits round 3: {out_at_three} vs {untouched}"
+    );
+
+    // Move the same exchange one round earlier and a second round's worth of
+    // Bigfoot goes with it (match 6, round 2).
+    sqlx::query!("update roster_swaps set round = 2")
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let out_at_two = total_for(&summer_board(&app).await, "NeonStrategist");
+
+    assert!(
+        out_at_two < out_at_three,
+        "leaving a round earlier forfeits one more round: {out_at_two} vs {out_at_three}"
+    );
+}
+
+#[tokio::test]
+async fn a_hero_traded_away_and_bought_back_scores_only_in_the_rounds_it_was_held() {
+    let app = TestApp::spawn().await;
+    let summer = app.tournament_id(SUMMER).await;
+    let untouched = total_for(&summer_board(&app).await, "NeonStrategist");
+
+    // Out before round 2, back before round 3. Bigfoot's round-2 result
+    // (match 6) falls in the gap; his round-3 one (match 10) does not. This is
+    // the case an interval *list* exists for -- a single from/until pair per
+    // hero could not express it.
+    record_swap(&app, summer, "NeonStrategist", 2, "Bigfoot", "King Arthur").await;
+    record_swap(&app, summer, "NeonStrategist", 3, "King Arthur", "Bigfoot").await;
+
+    let after = summer_board(&app).await;
+    assert!(
+        total_for(&after, "NeonStrategist") < untouched,
+        "the round spent away is forfeited"
+    );
+    assert!(
+        roster_of(&after, "NeonStrategist").contains(&"Bigfoot".to_owned()),
+        "and the hero is back on the roster at the end of it"
+    );
+}
+
+#[tokio::test]
+async fn one_managers_swap_leaves_every_other_manager_alone() {
+    let app = TestApp::spawn().await;
+    let summer = app.tournament_id(SUMMER).await;
+    let before = summer_board(&app).await;
+
+    // *MythicMind* holds Bigfoot too. Points are per (manager, hero, round),
+    // so *NeonStrategist* letting him go says nothing about anyone else's
+    // holding of the same hero.
+    record_swap(&app, summer, "NeonStrategist", 2, "Bigfoot", "King Arthur").await;
+
+    let after = summer_board(&app).await;
+    for handle in ["MythicMind", "SherlockMain", "ArthurianLegend"] {
+        assert_eq!(
+            total_for(&after, handle),
+            total_for(&before, handle),
+            "{handle} was not part of that exchange"
+        );
     }
 }

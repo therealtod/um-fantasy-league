@@ -29,6 +29,7 @@ function blankForm(): CreateTournamentRequest {
     capacity: 64,
     rosterSize: 3,
     creditGrant: 10000,
+    swapsPerRound: 0,
   }
 }
 
@@ -65,6 +66,11 @@ function startEdit(tournament: Tournament) {
     capacity: tournament.capacity,
     rosterSize: tournament.rosterSize,
     creditGrant: tournament.creditGrant,
+    // `currentRound` and `swapWindowOpen` are deliberately absent: an update is
+    // a full replace, and the server carries those over from the row rather
+    // than taking them from this form. They move only through the two buttons
+    // on the list row below.
+    swapsPerRound: tournament.swapsPerRound,
   }
   showForm.value = true
 }
@@ -93,6 +99,29 @@ async function confirmDelete() {
   if (!result.ok) return
   await tournamentsStore.load() // Refresh the list
   cancelDelete()
+}
+
+/**
+ * Move a tournament into its next round, handing every manager their next
+ * window's worth of allowance. It does not open the window: shutting the window
+ * again before a round's results are recorded is what stops a manager reading
+ * the ticker and then buying the heroes that just scored, so the two are
+ * separate deliberate acts.
+ */
+async function advanceRound(tournament: Tournament) {
+  const result = await run(
+    () => api.admin.advanceRound(tournament.id),
+    'Failed to advance the round',
+  )
+  if (result.ok) await tournamentsStore.load()
+}
+
+async function toggleSwapWindow(tournament: Tournament) {
+  const result = await run(
+    () => api.admin.setSwapWindow(tournament.id, !tournament.swapWindowOpen),
+    'Failed to change the swap window',
+  )
+  if (result.ok) await tournamentsStore.load()
 }
 
 async function saveTournament() {
@@ -216,6 +245,21 @@ async function saveTournament() {
         </div>
 
         <div class="flex flex-col gap-2">
+          <label for="tournament-swaps" class="label-caps">Swaps Per Round</label>
+          <input
+            id="tournament-swaps"
+            v-model.number="form.swapsPerRound"
+            type="number"
+            min="0"
+            class="field-input"
+          />
+          <p class="font-mono text-[11px] text-ink-dim">
+            Heroes a manager may exchange each window. 0 switches swapping off. Unused windows carry
+            over.
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-2">
           <label for="tournament-credit" class="label-caps">Credit Grant *</label>
           <input
             id="tournament-credit"
@@ -271,9 +315,38 @@ async function saveTournament() {
             <span class="font-mono text-xs text-ink-dim">
               {{ tournament.enrolled }}/{{ tournament.capacity }}
             </span>
+            <span class="font-mono text-xs text-ink-dim">Round {{ tournament.currentRound }}</span>
+            <span
+              v-if="tournament.swapWindowOpen"
+              class="font-mono text-xs tracking-[0.1em] text-cyan uppercase"
+            >
+              Swap Window Open
+            </span>
           </div>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="btn-ghost px-4 py-2 text-xs"
+            :disabled="loading"
+            @click="advanceRound(tournament)"
+          >
+            Advance Round
+          </button>
+          <button
+            class="px-4 py-2 font-mono text-xs transition-opacity hover:opacity-85"
+            :class="
+              tournament.swapWindowOpen ? 'border border-cyan text-cyan' : 'btn-ghost'
+            "
+            :disabled="loading || tournament.swapsPerRound === 0"
+            :title="
+              tournament.swapsPerRound === 0
+                ? 'This tournament allows no swaps — set Swaps Per Round first.'
+                : undefined
+            "
+            @click="toggleSwapWindow(tournament)"
+          >
+            {{ tournament.swapWindowOpen ? 'Close Window' : 'Open Window' }}
+          </button>
           <button class="btn-ghost px-4 py-2 text-xs" @click="startEdit(tournament)">Edit</button>
           <button
             class="border border-magenta px-4 py-2 font-mono text-xs text-magenta transition-opacity hover:opacity-85"

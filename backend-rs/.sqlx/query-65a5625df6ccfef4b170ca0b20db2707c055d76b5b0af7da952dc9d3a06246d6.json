@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tournaments set current_round = current_round + 1 where id = $1\n         returning current_round",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "current_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournaments",
+            "name": "current_round"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "65a5625df6ccfef4b170ca0b20db2707c055d76b5b0af7da952dc9d3a06246d6"
+}

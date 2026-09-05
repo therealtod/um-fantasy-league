@@ -229,14 +229,14 @@ async fn an_empty_body_fails_validation_naming_exactly_the_required_fields() {
             method: "POST",
             uri: format!("/api/admin/tournaments/{winter}/matches"),
             manager_id: admin_id,
-            fields: &["round", "playedAt", "externalLink"],
+            fields: &["playedAt", "externalLink"],
         },
         Case {
             name: "correct match",
             method: "PUT",
             uri: format!("/api/admin/tournaments/{winter}/matches/{match_id}"),
             manager_id: admin_id,
-            fields: &["round", "playedAt", "externalLink"],
+            fields: &["playedAt", "externalLink"],
         },
         Case {
             name: "import match",

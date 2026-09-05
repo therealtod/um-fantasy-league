@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into roster_swaps (entry_id, round, hero_out_id, hero_in_id)\n         select e.id, $3, $4, $5\n           from tournament_entries e\n           join managers m on m.id = e.manager_id\n          where e.tournament_id = $1 and m.handle = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int4",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b649ad95554410eacd1df21ec478d336893fda7aa454f549cc217c0b482ea654"
+}

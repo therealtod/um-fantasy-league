@@ -55,6 +55,10 @@ async function draftAndLock(
       heroes: heroes.map((h) => ({ id: h.id, name: h.name, imageUrl: null, cost: h.cost })),
       budget: { spent, creditGrant: 10_000, remaining: 10_000 - spent, utilisation: spent / 10_000 },
       lockable: heroes.length === 3,
+      swapWindowOpen: false,
+      swapsAvailable: 0,
+      alreadySwappedThisRound: false,
+      swappable: false,
     }
   }
 

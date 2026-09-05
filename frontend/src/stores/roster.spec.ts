@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Roster, RosterViolation, Tournament } from '@/api/types'
 
 vi.mock('@/api/client', () => ({
-  api: { register: vi.fn(), myRoster: vi.fn(), setSlots: vi.fn(), lockRoster: vi.fn() },
+  api: {
+    register: vi.fn(),
+    myRoster: vi.fn(),
+    setSlots: vi.fn(),
+    lockRoster: vi.fn(),
+    swapRoster: vi.fn(),
+  },
   ApiError: class extends Error {
     constructor(
       readonly status: number,
@@ -38,6 +44,9 @@ function tournament(overrides: Partial<Tournament> = {}): Tournament {
     rosterSize: 2,
     creditGrant: 10_000,
     acceptsRegistration: true,
+    currentRound: 1,
+    swapsPerRound: 0,
+    swapWindowOpen: false,
     ...overrides,
   }
 }
@@ -56,6 +65,10 @@ function roster(heroIds: number[], overrides: Partial<Roster> = {}): Roster {
     heroes,
     budget: { spent, creditGrant: 10_000, remaining: 10_000 - spent, utilisation: spent / 10_000 },
     lockable: false,
+    swapWindowOpen: false,
+    swapsAvailable: 0,
+    alreadySwappedThisRound: false,
+    swappable: false,
     ...overrides,
   }
 }
@@ -326,6 +339,145 @@ describe('roster store', () => {
 
       seed(store, [1, 2], { locked: true })
       expect(store.lockable).toBe(false) // already locked
+    })
+  })
+
+  describe('the swap window', () => {
+    /** A locked entry inside an open window, holding heroes 1 and 2. */
+    function inWindow(store: ReturnType<typeof useRosterStore>, overrides: Partial<Roster> = {}) {
+      seed(store, [1, 2], {
+        locked: true,
+        status: 'LOCKED',
+        swapWindowOpen: true,
+        swapsAvailable: 1,
+        alreadySwappedThisRound: false,
+        ...overrides,
+      })
+      store.tournamentId = TOURNAMENT_ID
+    }
+
+    it('stages a change locally instead of spending the submission on the first click', async () => {
+      const store = useRosterStore()
+      inWindow(store)
+
+      await store.toggle(2)
+      await store.toggle(9)
+
+      expect(store.selectedIds).toEqual([1, 9])
+      expect(store.swapsStaged).toBe(1)
+      // The whole point: two clicks, still one submission left to make.
+      expect(api.setSlots).not.toHaveBeenCalled()
+      expect(api.swapRoster).not.toHaveBeenCalled()
+    })
+
+    it('charges nothing for staging a hero out and back in again', async () => {
+      const store = useRosterStore()
+      inWindow(store)
+
+      await store.toggle(2)
+      await store.toggle(2)
+
+      expect(store.swapsStaged).toBe(0)
+    })
+
+    it('still refuses to seat more heroes than the roster holds', async () => {
+      const store = useRosterStore()
+      inWindow(store)
+
+      await store.toggle(9)
+
+      expect(store.selectedIds).toEqual([1, 2])
+      expect(store.error).toContain('Drop one first')
+    })
+
+    it('submits the whole proposed roster once, and adopts the reply', async () => {
+      const store = useRosterStore()
+      inWindow(store)
+      vi.mocked(api.swapRoster).mockResolvedValueOnce(
+        roster([1, 9], {
+          locked: true,
+          status: 'LOCKED',
+          swapWindowOpen: true,
+          swapsAvailable: 0,
+          alreadySwappedThisRound: true,
+        }),
+      )
+
+      await store.toggle(2)
+      await store.toggle(9)
+      await store.submitSwaps()
+
+      expect(api.swapRoster).toHaveBeenCalledTimes(1)
+      expect(api.swapRoster).toHaveBeenCalledWith(TOURNAMENT_ID, [1, 9])
+      expect(store.selectedIds).toEqual([1, 9])
+      expect(store.alreadySwappedThisRound).toBe(true)
+      expect(store.staging).toBe(false)
+    })
+
+    it('returns to the server’s roster when a submission is refused', async () => {
+      const store = useRosterStore()
+      inWindow(store)
+      const violations: RosterViolation[] = [
+        { rule: 'BUDGET_EXCEEDED', message: 'Roster costs 11900 credits' },
+      ]
+      vi.mocked(api.swapRoster).mockRejectedValueOnce(
+        new ApiError(422, { detail: 'roster rule violated', violations }),
+      )
+
+      await store.toggle(2)
+      await store.toggle(9)
+      await store.submitSwaps()
+
+      expect(store.selectedIds).toEqual([1, 2])
+      expect(store.violations).toEqual(violations)
+      expect(store.error).toBe('roster rule violated')
+      // The submission was refused, so it was not spent: the window is still open.
+      expect(store.staging).toBe(true)
+    })
+
+    it('discards a staged exchange back to the roster the server holds', async () => {
+      const store = useRosterStore()
+      inWindow(store)
+
+      await store.toggle(2)
+      await store.toggle(9)
+      store.discardSwaps()
+
+      expect(store.selectedIds).toEqual([1, 2])
+      expect(store.swapsStaged).toBe(0)
+      expect(api.swapRoster).not.toHaveBeenCalled()
+    })
+
+    it('sends nothing when there is no window to submit into', async () => {
+      const store = useRosterStore()
+      inWindow(store, { swapWindowOpen: false })
+
+      await store.submitSwaps()
+
+      expect(api.swapRoster).not.toHaveBeenCalled()
+    })
+
+    it('leaves a locked roster immutable once the round’s submission is spent', async () => {
+      const store = useRosterStore()
+      inWindow(store, { alreadySwappedThisRound: true })
+
+      await store.toggle(2)
+
+      expect(store.staging).toBe(false)
+      expect(store.selectedIds).toEqual([1, 2])
+      expect(api.setSlots).not.toHaveBeenCalled()
+    })
+
+    it('never stages on an unlocked entry — a draft saves on every click', async () => {
+      const store = useRosterStore()
+      seed(store, [1], { swapWindowOpen: true, swapsAvailable: 2 })
+      store.tournamentId = TOURNAMENT_ID
+      vi.mocked(api.setSlots).mockResolvedValueOnce(roster([1, 2]))
+
+      await store.toggle(2)
+
+      expect(store.staging).toBe(false)
+      expect(api.setSlots).toHaveBeenCalledWith(TOURNAMENT_ID, [1, 2])
     })
   })
 })

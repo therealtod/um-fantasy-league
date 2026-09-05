@@ -28,6 +28,9 @@ const open: Tournament = {
   rosterSize: 3,
   creditGrant: 10_000,
   acceptsRegistration: true,
+  currentRound: 1,
+  swapsPerRound: 0,
+  swapWindowOpen: false,
   // myEntryStatus deliberately absent
 }
 

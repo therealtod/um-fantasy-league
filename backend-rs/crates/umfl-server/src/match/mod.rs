@@ -257,7 +257,12 @@ pub struct MatchBanRequest {
 #[derive(Debug, Deserialize, garde::Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordMatchRequest {
-    #[garde(custom(required_positive("round is required", "round must be positive")))]
+    /// Optional. Absent means the tournament's `current_round` when recording,
+    /// and the match's own existing round when correcting -- see
+    /// [`admin_service::record`] and [`admin_service::correct`]. Still has to
+    /// be positive when given.
+    #[serde(default)]
+    #[garde(custom(positive_if_present("round must be positive")))]
     pub round: Option<i32>,
     #[garde(custom(required("playedAt is required")))]
     #[serde(default, with = "umfl_domain::time::java_instant_opt")]
@@ -292,6 +297,15 @@ fn required_text(message: &'static str) -> impl Fn(&Option<String>, &()) -> gard
     move |value, _| match value {
         Some(text) if !text.trim().is_empty() => Ok(()),
         _ => Err(garde::Error::new(message)),
+    }
+}
+
+/// Positive when given, and content with being absent -- the caller supplies
+/// the default. Unlike [`required_positive`], absence is not an error here.
+fn positive_if_present(non_positive: &'static str) -> impl Fn(&Option<i32>, &()) -> garde::Result {
+    move |value, _| match value {
+        Some(n) if *n <= 0 => Err(garde::Error::new(non_positive)),
+        _ => Ok(()),
     }
 }
 
@@ -468,7 +482,7 @@ async fn record(
     let result = admin_service::record(
         &state,
         tournament_id,
-        request.round.expect("validated as present"),
+        request.round,
         request.played_at.expect("validated as present"),
         request
             .external_link
@@ -493,7 +507,7 @@ async fn correct(
         &state,
         tournament_id,
         match_id,
-        request.round.expect("validated as present"),
+        request.round,
         request.played_at.expect("validated as present"),
         request
             .external_link

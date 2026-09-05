@@ -32,6 +32,9 @@ const tournaments: Tournament[] = [
     rosterSize: 3,
     creditGrant: 10000,
     acceptsRegistration: true,
+    currentRound: 1,
+    swapsPerRound: 0,
+    swapWindowOpen: false,
   },
 ]
 
