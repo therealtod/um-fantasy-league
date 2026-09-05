@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tournament_entries\n             (tournament_id, manager_id, status, credit_grant, locked_at)\n         values ($1, $2, 'LOCKED', 10000, now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "54de8ed03d8b6c1bfb4e3628f2dd7dccc53da40aa1e43e7b0e2cf9d513b22fc0"
+}

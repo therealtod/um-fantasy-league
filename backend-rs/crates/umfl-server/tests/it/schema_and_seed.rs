@@ -596,7 +596,11 @@ fn the_two_flyway_locations_interleave_by_version() {
         .filter(|m| m.path.parent().is_some_and(|p| p.ends_with("seed")))
         .map(|m| m.version)
         .collect();
-    assert_eq!(vec![3], seeded, "the seed's version sits after the schema's");
+    assert_eq!(
+        vec![3],
+        seeded,
+        "the seed's version sits after the schema's"
+    );
 
     // The `prod` shape: same schema and reference data, no league data at all.
     let without_seed = crate::harness::migrate::plan(&root.join("migration"), None);

@@ -345,9 +345,13 @@ async fn an_entry_with_no_picks_still_appears_and_ties_share_a_rank() {
         .fetch_one(app.pool())
         .await
         .expect("insert a manager");
+        // LOCKED with no slots at all: `standings::query::rosters` filters to
+        // locked entries, and its left join onto `entry_slots` is what keeps
+        // one that reached the query without a roster on the board.
         sqlx::query!(
-            "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
-             values ($1, $2, 'DRAFT', 10000)",
+            "insert into tournament_entries
+                 (tournament_id, manager_id, status, credit_grant, locked_at)
+             values ($1, $2, 'LOCKED', 10000, now())",
             summer,
             manager_id
         )
@@ -392,9 +396,11 @@ async fn a_tournament_with_entries_but_no_matches_scores_everyone_zero() {
     let app = TestApp::spawn().await;
     let winter = app.tournament_id(WINTER).await;
     let manager = app.manager("NeonStrategist").await;
+    // Only LOCKED entries reach the board; see `standings::query::rosters`.
     sqlx::query!(
-        "insert into tournament_entries (tournament_id, manager_id, status, credit_grant)
-         values ($1, $2, 'DRAFT', 10000)",
+        "insert into tournament_entries
+             (tournament_id, manager_id, status, credit_grant, locked_at)
+         values ($1, $2, 'LOCKED', 10000, now())",
         winter,
         manager.id
     )
