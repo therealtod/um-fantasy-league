@@ -108,6 +108,14 @@ jobs:
             # a stale same-directory `docker-compose.yml` instead (which is
             # exactly what happened once already on this box).
             docker compose -f docker-compose.prod.yml pull backend flyway
+            # A migration file already applied to prod can still have its
+            # comments reworded later (it's happened), which changes the
+            # file's checksum without changing what it does. `flyway migrate`
+            # validates checksums first and refuses to run on a mismatch, so
+            # `repair` -- which recalculates the stored checksum to match the
+            # file the image actually carries -- runs ahead of every deploy.
+            # It's a no-op when nothing drifted, so this is safe unconditionally.
+            docker compose -f docker-compose.prod.yml run --rm flyway repair
             # `flyway` before `backend`: compose's own `depends_on:
             # condition: service_completed_successfully` already orders
             # them, but naming it first here means a freshly pulled image

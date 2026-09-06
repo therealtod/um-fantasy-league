@@ -724,9 +724,13 @@ query metadata is current, then `cargo test --workspace` (Testcontainers include
 GitHub-hosted runners have Docker preinstalled) on PRs and pushes to non-`master` branches.
 `.github/workflows/backend-deploy.yml` re-runs that test suite, then on a green push to `master`
 builds and pushes `ghcr.io/<owner>/umfl-backend-rs:{sha,latest}` from `backend-rs/Dockerfile` *and*
-`ghcr.io/<owner>/umfl-migrator:{sha,latest}` from `db/Dockerfile`, then SSHes into the VPS to pull and
-`up -d` `flyway` and `backend` (in that order, so a freshly pulled migrator image is what actually
-runs) against `deploy/docker-compose.prod.yml` — which the VPS keeps a copy of at `/opt/umfl`, alongside
+`ghcr.io/<owner>/umfl-migrator:{sha,latest}` from `db/Dockerfile`, then SSHes into the VPS to pull,
+run `flyway repair` (a no-op unless a committed migration file that was already applied to prod had
+its checksum change — e.g. a reworded comment — since `flyway migrate` validates checksums before it
+runs anything, and the deploy would otherwise start failing at that point rather than at the commit
+that reworded the comment), and `up -d` `flyway` and `backend` (in that order, so a freshly pulled
+migrator image is what actually runs) against `deploy/docker-compose.prod.yml` — which the VPS keeps
+a copy of at `/opt/umfl`, alongside
 a `.env` — modeled on `deploy/.env.example` — that is managed by hand on the box, never passed through
 CI. The `prod` profile there talks to Supabase Postgres directly (over the internet, not a compose
 network), so there is no `db` service in that compose file, unlike the root `docker-compose.yml` —
