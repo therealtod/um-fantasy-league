@@ -163,6 +163,45 @@ pub async fn lock_capacity_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Resu
     .await
 }
 
+/// Take a row lock on one manager's entry, returning its id.
+///
+/// [`super::service::swap_roster`] reads the swap log, decides against it and
+/// then writes to it. Unlike double registration — which
+/// `unique (tournament_id, manager_id)` refuses outright — the
+/// one-submission-per-round rule has no index standing behind it and cannot
+/// have one: a submission legitimately writes several rows sharing a round, so
+/// `(entry_id, round)` is not unique. Two requests for the same entry — a
+/// double-clicked submit is enough — would otherwise both read
+/// `swapped_in_round` as false and both write. That spends the allowance twice
+/// for one exchange and, worse, leaves a log that no longer replays to the
+/// roster: `EntryRoster::holdings` rewinds the duplicate pair into a phantom
+/// second holding, and the arriving hero scores twice on the board.
+///
+/// Locking the entry row gives every submission for that entry one queue to
+/// stand in, and costs nothing anywhere else: nothing on the standings or admin
+/// path writes a `tournament_entries` row a manager could be swapping on.
+///
+/// `None` when the caller has no entry here — [`super::service::swap_roster`]
+/// reports that from the load that follows.
+///
+/// **Must be called on the transaction**, not the pool: a lock taken on a
+/// pooled connection that is then returned is a lock released immediately.
+pub async fn lock_entry_by_manager(
+    db: impl PgExecutor<'_>,
+    tournament_id: i64,
+    manager_id: i64,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "select id from tournament_entries
+          where tournament_id = $1 and manager_id = $2
+          for update",
+        tournament_id,
+        manager_id
+    )
+    .fetch_optional(db)
+    .await
+}
+
 /// `countByTournamentId`.
 pub async fn count_entries(db: impl PgExecutor<'_>, tournament_id: i64) -> sqlx::Result<i64> {
     sqlx::query_scalar!(

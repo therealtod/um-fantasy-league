@@ -734,6 +734,98 @@ async fn a_second_submission_in_the_same_round_is_rejected() {
     );
 }
 
+/// A submission must decide the one-per-round rule *after* it has the entry,
+/// not before.
+///
+/// Nothing indexes "one submission per round" and nothing can: a submission
+/// legitimately writes several rows sharing a round, so `(entry_id, round)` is
+/// not unique. `swap_roster` therefore takes a row lock on the entry before it
+/// reads the log it is about to write to.
+///
+/// Left unserialised this is not merely a double-spent allowance. The log stops
+/// replaying to the roster, and `EntryRoster::holdings` rewinds the duplicate
+/// pair into a phantom second holding -- the arriving hero then scores twice on
+/// the board for one exchange, and nothing surfaces it until somebody doubts
+/// the standings.
+///
+/// The other submission is played by this test's own transaction rather than a
+/// second `swap_roster`: two real calls interleave at whatever points the
+/// runtime chooses, and would pass with the lock or without it. Holding the row
+/// and *then* writing the submission the queued call has to see is the same
+/// race with the timing decided here -- without the lock the call reads the log
+/// before this transaction commits and lands a second exchange.
+#[tokio::test]
+async fn a_second_submission_cannot_slip_past_on_a_read_taken_before_the_lock() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+    let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
+
+    // Stand where the winning submission stands: holding the entry row, with
+    // its own exchange not yet committed.
+    let mut winner = app.pool().begin().await.expect("begin");
+    let entry_id = sqlx::query_scalar!(
+        "select id from tournament_entries
+          where tournament_id = $1 and manager_id = $2
+          for update",
+        winter,
+        manager.id
+    )
+    .fetch_one(&mut *winner)
+    .await
+    .expect("hold the entry row");
+
+    let (state, mine) = (app.state.clone(), manager.clone());
+    let proposed = vec![picks[0], picks[1], beowulf];
+    let queued =
+        tokio::spawn(async move { service::swap_roster(&state, winter, &mine, &proposed).await });
+
+    // Two local statements stand between that call's `begin` and its lock, so
+    // this is three orders of magnitude more than it needs to be waiting there.
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    sqlx::query!(
+        "insert into roster_swaps (entry_id, round, hero_out_id, hero_in_id)
+         values ($1, 2, $2, $3)",
+        entry_id,
+        picks[2],
+        bigfoot
+    )
+    .execute(&mut *winner)
+    .await
+    .expect("record the winning exchange");
+    // The roster moves with the log, the way `swap_roster` writes the two
+    // together -- a log that did not agree with the slots is the corruption
+    // this test exists to keep out, not a fixture to build it from.
+    sqlx::query!(
+        "update entry_slots set hero_id = $3 where entry_id = $1 and hero_id = $2",
+        entry_id,
+        picks[2],
+        bigfoot
+    )
+    .execute(&mut *winner)
+    .await
+    .expect("move the slot");
+    winner.commit().await.expect("commit");
+
+    let err = queued
+        .await
+        .expect("the queued submission ran")
+        .expect_err("the round was spent while it waited");
+    assert_eq!(
+        rules(&err),
+        ["ALREADY_SWAPPED_THIS_ROUND", "SWAP_LIMIT_EXCEEDED"],
+        "both gates the winner shut: the round's submission and its allowance"
+    );
+
+    assert_eq!(
+        swap_log(&app, winter, manager.id).await,
+        [(2, picks[2], bigfoot)],
+        "one exchange, one row -- not the duplicate pair that scores a hero twice"
+    );
+}
+
 #[tokio::test]
 async fn an_unused_window_is_banked_and_spent_later() {
     let app = TestApp::spawn().await;

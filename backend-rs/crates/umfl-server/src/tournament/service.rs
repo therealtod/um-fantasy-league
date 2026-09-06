@@ -239,6 +239,11 @@ pub async fn swap_roster(
     let mut tx = state.pool.begin().await?;
 
     let tournament = require_tournament(&mut *tx, tournament_id).await?;
+    // Before anything is read: every rule below is decided against rows this
+    // transaction goes on to write, and the one-submission-per-round rule has
+    // no unique index behind it to catch a race the way double registration
+    // has one. See `query::lock_entry_by_manager`.
+    query::lock_entry_by_manager(&mut *tx, tournament_id, manager.id).await?;
     let mut entry = require_my_entry(&mut tx, tournament_id, manager).await?;
     let entry_id = entry.id.expect("a loaded entry has an id");
 
