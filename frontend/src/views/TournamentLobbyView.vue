@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useRosterStore } from '@/stores/roster'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { Tournament } from '@/api/types'
+import { swapInviteOpen } from '@/domain/tournamentStatus'
 import { formatCredits } from '@/lib/format'
 
 const router = useRouter()
@@ -85,8 +86,20 @@ function openStandings() {
       >
         <div class="flex flex-wrap items-start justify-between gap-6">
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3">
               <StatusBadge :status="tournament.status" />
+              <!--
+                Styled to match StatusBadge rather than extending it: that
+                component's prop is a TournamentStatus, and a swap window is not
+                one — it is orthogonal state that rides alongside LIVE.
+              -->
+              <span
+                v-if="swapInviteOpen(tournament)"
+                class="inline-flex items-center gap-1.5 border border-lime/50 bg-lime/10 px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.1em] text-lime uppercase"
+              >
+                <span class="size-1.5 animate-pulse bg-lime" aria-hidden="true" />
+                Swap Window
+              </span>
               <span class="label-caps">{{ tournament.format }}</span>
             </div>
 
@@ -94,6 +107,8 @@ function openStandings() {
 
             <div class="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 font-mono text-xs text-ink-dim">
               <span>{{ dateRange(tournament) }}</span>
+              <!-- `currentRound` defaults to 1 on every unstarted tournament, where it reads as noise. -->
+              <span v-if="tournament.status === 'LIVE'">Round {{ tournament.currentRound }}</span>
               <span>Roster size: {{ tournament.rosterSize }}</span>
             </div>
 
@@ -142,6 +157,19 @@ function openStandings() {
                 @click="openRoster(tournament)"
               >
                 Build Roster
+              </button>
+
+              <!--
+                Ahead of the LOCKED branch below: an open window is the one
+                thing on this card that expires, so it outranks spectating.
+                Standings stays one click away in the nav rail either way.
+              -->
+              <button
+                v-else-if="swapInviteOpen(tournament)"
+                class="btn-primary w-full"
+                @click="openRoster(tournament)"
+              >
+                Swap Heroes
               </button>
 
               <button
