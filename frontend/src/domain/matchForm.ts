@@ -80,9 +80,15 @@ export function blankSide(): SideForm {
   return { playerLabel: '', draftedHeroIds: [], bans: [] }
 }
 
-export function blankForm(): MatchForm {
+/**
+ * @param currentRound the tournament's own round, which a new match belongs to
+ *   by default. The server applies the same default when the field is omitted;
+ *   seeding it here means the admin sees the number they are about to save
+ *   rather than a blank they have to guess at.
+ */
+export function blankForm(currentRound = 1): MatchForm {
   return {
-    round: 1,
+    round: currentRound,
     playedAt: new Date().toISOString(),
     externalLink: '',
     sides: [blankSide(), blankSide()],
@@ -105,11 +111,15 @@ export function blankForm(): MatchForm {
  * union rather than the subtraction the old partial-draft model needed.
  *
  * `round` is never in a preview — the source site names its rounds rather than
- * numbering them — so it keeps the blank form's default for the admin to set.
+ * numbering them — so it keeps the blank form's default, which is the
+ * tournament's current round.
  * `playedAt` falls back the same way when the source's timezone was unreadable.
  */
-export function formFromPreview(preview: MatchImportPreviewDto): MatchForm {
-  const blank = blankForm()
+export function formFromPreview(
+  preview: MatchImportPreviewDto,
+  currentRound = 1,
+): MatchForm {
+  const blank = blankForm(currentRound)
 
   return {
     round: blank.round,

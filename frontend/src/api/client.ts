@@ -172,6 +172,20 @@ export const api = {
   lockRoster: (tournamentId: number): Promise<Roster> =>
     request(`/tournaments/${tournamentId}/entries/me/lock`, { method: 'POST' }),
 
+  /**
+   * Exchange heroes on a locked roster during an open swap window.
+   *
+   * Takes the **complete** proposed roster rather than a list of exchanges, the
+   * same shape `setSlots` uses: the server derives the diff, so the two sides
+   * cannot disagree about what counts as one swap. One call spends the window —
+   * there is no second submission for that round.
+   */
+  swapRoster: (tournamentId: number, heroIds: number[]): Promise<Roster> =>
+    request(`/tournaments/${tournamentId}/entries/me/swaps`, {
+      method: 'POST',
+      body: JSON.stringify({ heroIds }),
+    }),
+
   standings: (tournamentId: number): Promise<StandingsBoard> =>
     request(`/tournaments/${tournamentId}/standings`),
 
@@ -188,6 +202,20 @@ export const api = {
 
     deleteTournament: (id: number): Promise<void> =>
       request(`/admin/tournaments/${id}`, { method: 'DELETE' }),
+
+    /**
+     * Move the tournament into its next round, which is what hands every
+     * manager the next window's worth of allowance. It does not open the
+     * window — that is `setSwapWindow`, deliberately a separate decision.
+     */
+    advanceRound: (id: number): Promise<Tournament> =>
+      request(`/admin/tournaments/${id}/advance-round`, { method: 'POST' }),
+
+    setSwapWindow: (id: number, open: boolean): Promise<Tournament> =>
+      request(`/admin/tournaments/${id}/swap-window`, {
+        method: 'PUT',
+        body: JSON.stringify({ open }),
+      }),
 
     // Heroes
     listHeroes: (): Promise<HeroAdminDto[]> =>

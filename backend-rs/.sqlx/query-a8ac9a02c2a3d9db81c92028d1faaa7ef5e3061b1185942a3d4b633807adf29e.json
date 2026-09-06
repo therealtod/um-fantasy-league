@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "select id, name, format, status, start_date, end_date,\n                  capacity, roster_size, credit_grant\n           from tournaments where status = $1 order by start_date asc",
+  "query": "select id, name, format, status, start_date, end_date,\n                  capacity, roster_size, credit_grant,\n                  current_round, swaps_per_round, swap_window_open\n           from tournaments order by start_date asc",
   "describe": {
     "columns": [
       {
@@ -101,12 +101,43 @@
             "name": "credit_grant"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "current_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournaments",
+            "name": "current_round"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "swaps_per_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "tournaments",
+            "name": "swaps_per_round"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "swap_window_open",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "tournaments",
+            "name": "swap_window_open"
+          }
+        }
       }
     ],
     "parameters": {
-      "Left": [
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -117,8 +148,11 @@
       true,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "198f1716262cdf0ce3d2ec095f9213482028beca17733f40204f0b7f46675802"
+  "hash": "a8ac9a02c2a3d9db81c92028d1faaa7ef5e3061b1185942a3d4b633807adf29e"
 }

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into roster_swaps (entry_id, round, hero_out_id, hero_in_id)\n           select $1, $2, outs[i], ins[i]\n           from (select $3::bigint[] as outs, $4::bigint[] as ins) s,\n                generate_subscripts(s.outs, 1) as i",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Int8Array",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a69d6ad8a06aee91aa04c3a8c7ec075038b7bdfd4ebbc809b3aba195158f4ab8"
+}

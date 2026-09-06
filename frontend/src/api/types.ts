@@ -41,6 +41,21 @@ export interface Tournament {
   /** The budget each registrant is granted for their roster. */
   creditGrant: number
   acceptsRegistration: boolean
+  /**
+   * The round the tournament is *in*, moved only by an admin's "Advance round"
+   * action. Not the same as `StandingsBoard.currentRound`, which is the latest
+   * round with a recorded result — an admin advances into a round before any of
+   * its matches exist.
+   */
+  currentRound: number
+  /** Heroes a manager may exchange per swap window; 0 switches the mechanic off. */
+  swapsPerRound: number
+  /**
+   * Whether a swap window is open right now. Deliberately independent of
+   * `currentRound`: advancing offers the allowance, this lets anyone spend it,
+   * and an admin shuts it again before the round's results are recorded.
+   */
+  swapWindowOpen: boolean
   /** Absent, not null, when this manager has no entry — see the note at the top. */
   myEntryStatus?: EntryStatus | null
 }
@@ -63,6 +78,18 @@ export interface Roster {
   heroes: Hero[]
   budget: BudgetStatus
   lockable: boolean
+  /** Whether an admin has a swap window open on this tournament. */
+  swapWindowOpen: boolean
+  /**
+   * Heroes this entry may still exchange, unused windows included. Derived
+   * server-side from the swap log on every read; `rosterPolicy.swapAllowance`
+   * mirrors the arithmetic so the panel can count down as heroes are staged.
+   */
+  swapsAvailable: number
+  /** Whether this entry already spent its one submission for the current round. */
+  alreadySwappedThisRound: boolean
+  /** The swap counterpart to `lockable`: whether a swap would be accepted now. */
+  swappable: boolean
 }
 
 /**
@@ -159,6 +186,14 @@ export interface CreateTournamentRequest {
   capacity: number
   rosterSize: number
   creditGrant: number
+  /**
+   * Configuration, so it belongs on the form. `currentRound` and
+   * `swapWindowOpen` deliberately do **not**: an update is a full replace, and
+   * carrying operational state here would let an admin correcting a typo in the
+   * name send the tournament back to round one with the window shut underneath
+   * a manager mid-swap. Those move only through `advanceRound`/`setSwapWindow`.
+   */
+  swapsPerRound?: number
 }
 
 export type UpdateTournamentRequest = CreateTournamentRequest

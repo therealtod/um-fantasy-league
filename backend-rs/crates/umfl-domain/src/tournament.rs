@@ -68,6 +68,13 @@ impl std::fmt::Display for TournamentStatus {
 /// `credit_grant` is the budget every registrant receives. It is snapshotted
 /// onto the entry at registration, so retuning it later cannot disturb rosters
 /// that were already drafted against the old number.
+///
+/// The last three fields are the between-round swap mechanic.
+/// `current_round` is the round the tournament is *in*, moved only by an admin
+/// advancing it -- distinct from [`crate::standings::StandingsBoard`]'s
+/// `current_round`, which is the latest round with a recorded *result*. An
+/// admin advances into a round before any of its matches exist, so the two
+/// genuinely differ and are deliberately not merged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tournament {
     pub id: Option<i64>,
@@ -79,6 +86,16 @@ pub struct Tournament {
     pub capacity: i32,
     pub roster_size: i32,
     pub credit_grant: i32,
+    pub current_round: i32,
+    /// How many heroes a manager may exchange per swap window. 0 switches the
+    /// mechanic off for this tournament, which is what every tournament
+    /// predating it gets.
+    pub swaps_per_round: i32,
+    /// Whether a swap window is open right now. Deliberately independent of
+    /// [`Tournament::current_round`]: the window has to be shut again before
+    /// the round's results are recorded, or a manager could read the ticker and
+    /// then buy the heroes that just scored.
+    pub swap_window_open: bool,
 }
 
 impl Tournament {
@@ -88,11 +105,25 @@ impl Tournament {
     }
 
     /// Rosters freeze once the tournament goes live.
+    ///
+    /// This governs the *draft* path only. A between-round swap happens while
+    /// the tournament is LIVE and so is not a "roster change" in this sense --
+    /// [`crate::roster_policy::validate_swap`] deliberately does not consult
+    /// this, and gates on [`Tournament::accepts_swaps`] instead.
     pub fn accepts_roster_changes(&self) -> bool {
         matches!(
             self.status,
             TournamentStatus::Scheduled | TournamentStatus::RegistrationOpen
         )
+    }
+
+    /// Whether an admin has a swap window open on a tournament that can still
+    /// be played.
+    ///
+    /// A COMPLETED tournament is excluded whatever the flag says: its results
+    /// are final, so a swap could only rewrite a finished board.
+    pub fn accepts_swaps(&self) -> bool {
+        self.swap_window_open && self.status != TournamentStatus::Completed
     }
 }
 
@@ -167,6 +198,9 @@ mod tests {
             capacity: 64,
             roster_size: 3,
             credit_grant: 10_000,
+            current_round: 1,
+            swaps_per_round: 0,
+            swap_window_open: false,
         }
     }
 

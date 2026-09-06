@@ -52,6 +52,15 @@ const isInitialized = ref(false)
 const mapPool = ref<MapAdminDto[]>([])
 const heroPool = ref<Hero[]>([])
 
+/**
+ * The round a new match lands in unless the admin says otherwise — the
+ * tournament's own `currentRound`, which is what the server would default to on
+ * an omitted field anyway.
+ */
+const currentRound = computed(
+  () => tournamentsStore.byId(props.tournamentId ?? -1)?.currentRound ?? 1,
+)
+
 const form = ref<MatchForm>(matchForm.blankForm())
 
 const tournaments = computed(() => tournamentsStore.tournaments)
@@ -81,7 +90,9 @@ const playedAtLocal = computed({
 })
 
 function resetForm() {
-  form.value = props.prefill ? matchForm.formFromPreview(props.prefill) : matchForm.blankForm()
+  form.value = props.prefill
+    ? matchForm.formFromPreview(props.prefill, currentRound.value)
+    : matchForm.blankForm(currentRound.value)
 }
 
 async function loadMatchData() {

@@ -52,10 +52,14 @@ pub async fn get(state: &AppState, tournament_id: i64, match_id: i64) -> ApiResu
 }
 
 #[allow(clippy::too_many_arguments)]
+/// `round` is optional: an admin recording the round they are currently
+/// running should not have to restate its number on every match, so an absent
+/// one means the tournament's `current_round`. Passing it explicitly is still
+/// how a late result from an earlier round gets filed correctly.
 pub async fn record(
     state: &AppState,
     tournament_id: i64,
-    round: i32,
+    round: Option<i32>,
     played_at: chrono::DateTime<chrono::Utc>,
     external_link: &str,
     participants: &[MatchParticipantInput],
@@ -63,7 +67,8 @@ pub async fn record(
     bans: &[MatchBanInput],
 ) -> ApiResult<MatchResult> {
     let mut tx = state.pool.begin().await?;
-    require_tournament(&mut *tx, tournament_id).await?;
+    let tournament = require_tournament(&mut *tx, tournament_id).await?;
+    let round = round.unwrap_or(tournament.current_round);
     validate(&mut tx, tournament_id, participants, games, bans).await?;
 
     let link = external_link.trim();
@@ -118,11 +123,15 @@ pub async fn record(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// `round` is optional here too, but it defaults to the match's **own**
+/// existing round rather than the tournament's current one. A correction that
+/// silently relocated an old match into whatever round is running now would
+/// move its points between rounds -- and, with roster swaps, between managers.
 pub async fn correct(
     state: &AppState,
     tournament_id: i64,
     match_id: i64,
-    round: i32,
+    round: Option<i32>,
     played_at: chrono::DateTime<chrono::Utc>,
     external_link: &str,
     participants: &[MatchParticipantInput],
@@ -130,7 +139,8 @@ pub async fn correct(
     bans: &[MatchBanInput],
 ) -> ApiResult<MatchResult> {
     let mut tx = state.pool.begin().await?;
-    require_match(&mut tx, tournament_id, match_id).await?;
+    let existing_round = require_match(&mut tx, tournament_id, match_id).await?;
+    let round = round.unwrap_or(existing_round);
     validate(&mut tx, tournament_id, participants, games, bans).await?;
 
     let link = external_link.trim();
@@ -278,19 +288,22 @@ fn link_conflict_or(err: sqlx::Error, link: &str) -> ApiError {
 /// things a caller goes on to use are the id and the tournament it belongs to
 /// -- `correct` replaces every child collection wholesale and `delete`
 /// cascades.
+/// Returns the match's current round, which [`correct`] uses as the default
+/// when the request omits one. Callers that only need the existence check
+/// discard it.
 async fn require_match(
     conn: &mut PgConnection,
     tournament_id: i64,
     match_id: i64,
-) -> ApiResult<()> {
-    let owner = sqlx::query_scalar!(
-        "select tournament_id from tournament_matches where id = $1",
+) -> ApiResult<i32> {
+    let row = sqlx::query!(
+        "select tournament_id, round from tournament_matches where id = $1",
         match_id
     )
     .fetch_optional(conn)
     .await?;
-    match owner {
-        Some(owner) if owner == tournament_id => Ok(()),
+    match row {
+        Some(r) if r.tournament_id == tournament_id => Ok(r.round),
         _ => Err(not_found(tournament_id, match_id)),
     }
 }

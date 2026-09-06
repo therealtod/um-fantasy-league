@@ -3,21 +3,33 @@ import { computed } from 'vue'
 import { finalStepLabel, type RosterStage } from '@/domain/rosterGuidance'
 
 /**
- * The four steps of an entry, so a manager can see where they are and what is
- * still ahead of them. `stage` comes from `rosterStage()` and the last step's
+ * The steps of an entry, so a manager can see where they are and what is still
+ * ahead of them. `stage` comes from `rosterStage()` and the last entry step's
  * name from `finalStepLabel()` — this component decides nothing, it only
  * paints.
+ *
+ * `SWAP` is the one step that is not always on the board. It follows `DONE`
+ * rather than replacing it, because a locked roster genuinely is finished until
+ * an admin opens a window, and appears only while the stage says so — which
+ * keeps the decision in `rosterStage` where the rest of them live.
  */
 const props = defineProps<{ stage: RosterStage; standingsOpen: boolean }>()
 
 type StepState = 'done' | 'current' | 'todo'
 
-const steps = computed<{ stage: RosterStage; label: string }[]>(() => [
-  { stage: 'REGISTER', label: 'Register' },
-  { stage: 'PICK', label: 'Pick heroes' },
-  { stage: 'LOCK', label: 'Lock roster' },
-  { stage: 'DONE', label: finalStepLabel(props.standingsOpen) },
-])
+type Step = { stage: RosterStage; label: string }
+
+const SWAP_STEP: Step = { stage: 'SWAP', label: 'Swap heroes' }
+
+const steps = computed<Step[]>(() => {
+  const entry: Step[] = [
+    { stage: 'REGISTER', label: 'Register' },
+    { stage: 'PICK', label: 'Pick heroes' },
+    { stage: 'LOCK', label: 'Lock roster' },
+    { stage: 'DONE', label: finalStepLabel(props.standingsOpen) },
+  ]
+  return props.stage === 'SWAP' ? [...entry, SWAP_STEP] : entry
+})
 
 const STYLES: Record<StepState, string> = {
   done: 'border-lime/50 bg-lime/10 text-lime',
@@ -34,7 +46,7 @@ function stateOf(index: number): StepState {
 </script>
 
 <template>
-  <ol class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+  <ol class="grid grid-cols-2 gap-2" :class="steps.length === 5 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'">
     <li
       v-for="(step, index) in steps"
       :key="step.stage"

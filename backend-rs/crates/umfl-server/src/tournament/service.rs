@@ -30,6 +30,15 @@ pub struct RosterSnapshot {
     pub tournament: Tournament,
     pub heroes: Vec<HeroView>,
     pub budget: BudgetStatus,
+    /// Heroes this entry may still exchange, carry-over included. Derived from
+    /// the swap log on every read, never stored.
+    pub swaps_available: i32,
+    /// Whether this entry has already spent its one submission for the
+    /// tournament's current round.
+    pub already_swapped_this_round: bool,
+    /// Whether a swap would be accepted right now -- the swap counterpart to
+    /// the `lockable` flag, and what the builder's submit button reads.
+    pub swappable: bool,
 }
 
 pub async fn list_tournaments(
@@ -124,7 +133,7 @@ pub async fn register(
             .map_err(|e| entry_conflict(e, &tournament))?,
     );
 
-    let snapshot = snapshot(&mut *tx, entry, tournament).await?;
+    let snapshot = snapshot(&mut tx, entry, tournament).await?;
     tx.commit().await?;
     Ok(snapshot)
 }
@@ -143,7 +152,7 @@ pub async fn find_my_entry(
     let Some(entry) = query::find_entry(&mut conn, tournament_id, manager.id).await? else {
         return Ok(None);
     };
-    snapshot(&mut *conn, entry, tournament).await.map(Some)
+    snapshot(&mut conn, entry, tournament).await.map(Some)
 }
 
 /// Replace the roster selection.
@@ -176,7 +185,7 @@ pub async fn set_slots(
         .collect();
     writer::update_entry(&mut tx, &entry).await?;
 
-    let snapshot = snapshot(&mut *tx, entry, tournament).await?;
+    let snapshot = snapshot(&mut tx, entry, tournament).await?;
     tx.commit().await?;
     Ok(snapshot)
 }
@@ -201,7 +210,89 @@ pub async fn lock_roster(
     entry.lock(Utc::now());
     writer::update_entry(&mut tx, &entry).await?;
 
-    let snapshot = snapshot(&mut *tx, entry, tournament).await?;
+    let snapshot = snapshot(&mut tx, entry, tournament).await?;
+    tx.commit().await?;
+    Ok(snapshot)
+}
+
+/// Exchange heroes on a locked roster, during an open swap window.
+///
+/// Takes the **whole proposed roster** rather than a list of exchanges, and
+/// derives the difference here. The builder already stages a full list, and
+/// deriving the diff server-side is what stops the two sides disagreeing about
+/// what counts as a swap -- a client that sent exchanges could describe a
+/// three-hero shuffle as one move.
+///
+/// Writes the new slots and the log rows in one transaction: a roster that
+/// changed without a log row would be a hero whose past points silently moved
+/// with it, which is precisely what the log exists to prevent.
+///
+/// An unchanged roster is a no-op rather than an error -- it spends no
+/// allowance and writes nothing, so a manager who opens the builder, changes
+/// their mind and submits anyway keeps their window.
+pub async fn swap_roster(
+    state: &AppState,
+    tournament_id: i64,
+    manager: &Manager,
+    hero_ids: &[i64],
+) -> ApiResult<RosterSnapshot> {
+    let mut tx = state.pool.begin().await?;
+
+    let tournament = require_tournament(&mut *tx, tournament_id).await?;
+    // Before anything is read: every rule below is decided against rows this
+    // transaction goes on to write, and the one-submission-per-round rule has
+    // no unique index behind it to catch a race the way double registration
+    // has one. See `query::lock_entry_by_manager`.
+    query::lock_entry_by_manager(&mut *tx, tournament_id, manager.id).await?;
+    let mut entry = require_my_entry(&mut tx, tournament_id, manager).await?;
+    let entry_id = entry.id.expect("a loaded entry has an id");
+
+    let held = entry.hero_ids();
+    let picks = resolve_picks(&mut *tx, &tournament, hero_ids).await?;
+
+    let swaps_used = query::swap_count_for_entry(&mut *tx, entry_id).await?;
+    let swaps_used = i32::try_from(swaps_used).unwrap_or(i32::MAX);
+    let already_swapped =
+        query::swapped_in_round(&mut *tx, entry_id, tournament.current_round).await?;
+
+    let violations = roster_policy::validate_swap(
+        &held,
+        &picks,
+        &tournament,
+        &entry,
+        swaps_used,
+        already_swapped,
+    );
+    if !violations.is_empty() {
+        return Err(roster_rule(violations));
+    }
+
+    // Pair departures with arrivals positionally. The pairing is bookkeeping,
+    // not meaning: the policy has already established that both lists are the
+    // same length, and nothing downstream reads a swap as "this *particular*
+    // hero replaced that one" -- `holdings` only needs to know which hero left
+    // and which arrived in a given round.
+    let proposed: Vec<i64> = picks.iter().map(|p| p.hero_id).collect();
+    let departing: Vec<i64> = held
+        .iter()
+        .copied()
+        .filter(|id| !proposed.contains(id))
+        .collect();
+    let arriving: Vec<i64> = proposed
+        .iter()
+        .copied()
+        .filter(|id| !held.contains(id))
+        .collect();
+    let exchanges: Vec<(i64, i64)> = departing.into_iter().zip(arriving).collect();
+
+    entry.slots = picks
+        .iter()
+        .map(|p| EntrySlot { hero_id: p.hero_id })
+        .collect();
+    writer::update_entry(&mut tx, &entry).await?;
+    writer::insert_roster_swaps(&mut tx, entry_id, tournament.current_round, &exchanges).await?;
+
+    let snapshot = snapshot(&mut tx, entry, tournament).await?;
     tx.commit().await?;
     Ok(snapshot)
 }
@@ -312,7 +403,7 @@ async fn resolve_picks(
 }
 
 async fn snapshot(
-    db: impl PgExecutor<'_>,
+    conn: &mut PgConnection,
     entry: TournamentEntry,
     tournament: Tournament,
 ) -> ApiResult<RosterSnapshot> {
@@ -323,7 +414,7 @@ async fn snapshot(
     // roster must still be reported (at cost 0) even if the hero has since left
     // this tournament's pool.
     let by_id: IndexMap<i64, HeroView> =
-        hero_query::find_roster_heroes(db, tournament_id, &hero_ids)
+        hero_query::find_roster_heroes(&mut *conn, tournament_id, &hero_ids)
             .await?
             .into_iter()
             .map(|hero| (hero.id, hero))
@@ -344,7 +435,38 @@ async fn snapshot(
         .collect();
     let budget = roster_policy::budget_status(&picks, entry.credit_grant);
 
+    // The swap state every roster response carries, so the builder can render
+    // the window without a second round trip. Both numbers are counted off the
+    // log rather than stored -- see `query::swap_count_for_entry`.
+    let entry_id = entry.id.expect("a loaded entry has an id");
+    let swaps_used = query::swap_count_for_entry(&mut *conn, entry_id).await?;
+    let swaps_used = i32::try_from(swaps_used).unwrap_or(i32::MAX);
+    let already_swapped_this_round =
+        query::swapped_in_round(&mut *conn, entry_id, tournament.current_round).await?;
+    let swaps_available = roster_policy::swap_allowance(
+        tournament.swaps_per_round,
+        tournament.current_round,
+        swaps_used,
+    );
+    // `swappable` answers "would the button work", so it asks the policy the
+    // same question the endpoint will -- with the roster unchanged, which
+    // isolates the window/allowance rules from whatever the manager is about
+    // to stage. `lockable` is computed the same way, in `mod.rs`.
+    let swappable = roster_policy::validate_swap(
+        &hero_ids,
+        &picks,
+        &tournament,
+        &entry,
+        swaps_used,
+        already_swapped_this_round,
+    )
+    .is_empty()
+        && swaps_available > 0;
+
     Ok(RosterSnapshot {
+        swaps_available,
+        already_swapped_this_round,
+        swappable,
         entry,
         tournament,
         heroes,

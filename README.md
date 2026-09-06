@@ -259,14 +259,22 @@ by hero instead, so a hero drafted by both sides still scores once.
 Pure functions in `umfl-domain`, no `sqlx`, no I/O — see `roster_policy.rs`'s own `#[cfg(test)]`
 module.
 
-| Rule | Draft | Lock |
-|---|---|---|
-| Entry not already locked | ✅ | ✅ |
-| Tournament still accepts changes | ✅ | ✅ |
-| No duplicate heroes (`DUPLICATE_HERO`) | ✅ | ✅ |
-| No more than `rosterSize` picks (`TOO_MANY_PICKS`) | ✅ | ✅ |
-| Exactly `rosterSize` picks (`INCOMPLETE_ROSTER`) | — | ✅ |
-| Within the entry's credit grant (`BUDGET_EXCEEDED`) | — | ✅ |
+| Rule | Draft | Lock | Swap |
+|---|---|---|---|
+| Entry not already locked (`ENTRY_LOCKED`) | ✅ | ✅ | — |
+| Entry *already* locked (`SWAP_WINDOW_CLOSED`) | — | — | ✅ |
+| Tournament still accepts changes (`TOURNAMENT_CLOSED`) | ✅ | ✅ | — |
+| A swap window is open (`SWAP_WINDOW_CLOSED`) | — | — | ✅ |
+| No duplicate heroes (`DUPLICATE_HERO`) | ✅ | ✅ | ✅ |
+| No more than `rosterSize` picks (`TOO_MANY_PICKS`) | ✅ | ✅ | ✅ |
+| Exactly `rosterSize` picks (`INCOMPLETE_ROSTER`) | — | ✅ | ✅ |
+| Within the entry's credit grant (`BUDGET_EXCEEDED`) | — | ✅ | ✅ |
+| Within the remaining allowance (`SWAP_LIMIT_EXCEEDED`) | — | — | ✅ |
+| Not already submitted this round (`ALREADY_SWAPPED_THIS_ROUND`) | — | — | ✅ |
+
+The swap column is the mirror image of the other two in its first two rows, and deliberately so: a
+draft is editable *because* it is unlocked, and a swap is possible *because* it is locked. An
+unlocked entry belongs on the draft-then-lock path, where its picks are still free.
 
 `UNKNOWN_HERO` is raised earlier, in `tournament::service::resolve_picks`: a pick is priced by
 joining `tournament_heroes`, so a hero outside this tournament's pool never reaches the policy at all.
@@ -279,6 +287,33 @@ the grant on the *entry*.
 `utilisation`. There are no bands or thresholds: "how full is the bar" is the whole question the
 meter answers. `frontend/src/domain/rosterPolicy.ts` mirrors that arithmetic so the meter responds on
 click; the server recomputes it and rejects invalid locks with `422`.
+
+### Between-round swaps
+
+After a round, an admin may open a window in which each manager exchanges a limited number of heroes,
+provided the new roster still fits the grant on their entry. Three columns on `tournaments` drive it,
+and an admin moves each one deliberately:
+
+| Column | Moved by | Means |
+|---|---|---|
+| `current_round` | "Advance Round" | the round the tournament is *in* — hands out the next window's allowance |
+| `swap_window_open` | "Open/Close Window" | whether anyone may spend it |
+| `swaps_per_round` | the tournament form | how much each window is worth; `0` switches the mechanic off |
+
+Advancing does **not** open the window. Keeping them apart is what lets an admin shut the window
+before recording a round's results — otherwise a manager could read the ticker and then buy the
+heroes that had just scored.
+
+The allowance is derived, never stored:
+
+```
+available(entry) = swaps_per_round × (current_round − 1) − count(roster_swaps for that entry)
+```
+
+`current_round − 1` because a window *follows* a round: in round 1 there is nothing to react to.
+Unused windows carry over for free — skipping one banks nothing explicitly, it simply never spends.
+A window grants one **submission**, not a running budget, so the builder stages changes locally and
+`POST /entries/me/swaps` sends the whole proposed roster once.
 
 ---
 
@@ -343,8 +378,14 @@ is also no write path to maintain one — materialising points would push the fo
 SQL, duplicating it.
 
 The cost is negligible. `umfl_domain::standings::board` prices each `(hero, match)` pair exactly once
-and then folds it into every roster holding that hero, which is cheaper than the equivalent SQL
-join's fan-out, and at tournament scale (~50 matches) the whole fold is microseconds.
+and then folds it into every roster that held that hero **in the round the match was played**, which
+is cheaper than the equivalent SQL join's fan-out, and at tournament scale (~50 matches) the whole
+fold is microseconds.
+
+That qualifier is what between-round swaps buy. The fold walks each entry's *holdings* —
+`(hero, from_round, until_round)` intervals reconstructed from `roster_swaps` — rather than the
+roster it holds today, so a hero keeps the points it earned while you owned it and brings none of the
+points it earned for anybody else. See "Between-round swaps" above.
 
 Consequences worth knowing:
 
@@ -352,7 +393,8 @@ Consequences worth knowing:
   backend cannot know which columns exist until it has read `scoring_coefficients`.
 - Ranking is **standard competition ranking** (1, 2, 2, 4). On a finished tournament, two managers
   with overlapping rosters genuinely tie, so positional `index + 1` would lie.
-- `roundPoints` ("Last Rd") is the swing in `max(round)`.
+- `roundPoints` ("Last Rd") is the swing in `max(round)` — the latest round with a *result*, which is
+  not `tournaments.current_round`, the round an admin has advanced into.
 
 ---
 

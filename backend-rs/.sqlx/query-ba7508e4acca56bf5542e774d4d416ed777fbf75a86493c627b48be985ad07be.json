@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update entry_slots set hero_id = $3 where entry_id = $1 and hero_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ba7508e4acca56bf5542e774d4d416ed777fbf75a86493c627b48be985ad07be"
+}

@@ -60,6 +60,10 @@ const guidanceState = computed(() => ({
   rosterSize: rosterStore.rosterSize,
   remaining: rosterStore.budget.remaining,
   creditGrant: rosterStore.creditGrant,
+  swapWindowOpen: rosterStore.swapWindowOpen,
+  swapsAvailable: rosterStore.swapsAvailable,
+  alreadySwappedThisRound: rosterStore.alreadySwappedThisRound,
+  swapsStaged: rosterStore.swapsStaged,
 }))
 
 const stage = computed(() => rosterStage(guidanceState.value))
@@ -137,7 +141,10 @@ const lockedAt = computed(() => {
       </div>
 
       <!-- Locked: what happens now, and where to go -->
-      <div v-if="rosterStore.locked" class="panel mt-4 border-lime/50 p-5">
+      <div
+        v-if="rosterStore.locked && !rosterStore.staging"
+        class="panel mt-4 border-lime/50 p-5"
+      >
         <h3 class="headline text-base text-lime uppercase">Your roster is locked</h3>
         <p class="mt-2 font-mono text-xs leading-relaxed text-ink-dim">
           <template v-if="lockedAt">Locked {{ lockedAt }}. </template>
@@ -223,7 +230,7 @@ const lockedAt = computed(() => {
           :key="hero.id"
           :hero="hero"
           :selected="rosterStore.isSelected(hero.id)"
-          :disabled="!rosterStore.registered || rosterStore.locked"
+          :disabled="!rosterStore.registered || (rosterStore.locked && !rosterStore.staging)"
           @toggle="rosterStore.toggle"
         />
       </div>

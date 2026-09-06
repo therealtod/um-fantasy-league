@@ -23,6 +23,15 @@ pub struct TournamentFields<'a> {
     pub capacity: i32,
     pub roster_size: i32,
     pub credit_grant: i32,
+    /// How many heroes a manager may exchange per swap window. Configuration,
+    /// so it belongs on the form beside `roster_size` and `credit_grant`.
+    ///
+    /// `current_round` and `swap_window_open` deliberately do **not** appear
+    /// here: they are operational state, moved only by [`advance_round`] and
+    /// [`set_swap_window`]. An update is a full replace, so carrying them on
+    /// this struct would let an admin renaming a tournament reset it to round
+    /// one and shut an open window without meaning to.
+    pub swaps_per_round: i32,
 }
 
 pub async fn create(state: &AppState, fields: TournamentFields<'_>) -> ApiResult<Tournament> {
@@ -41,6 +50,12 @@ pub async fn create(state: &AppState, fields: TournamentFields<'_>) -> ApiResult
         capacity: fields.capacity,
         roster_size: fields.roster_size,
         credit_grant: fields.credit_grant,
+        // A new tournament starts in round one with the window shut. Both are
+        // the column defaults too; stating them here keeps the returned value
+        // equal to the row without a re-read.
+        current_round: 1,
+        swaps_per_round: fields.swaps_per_round,
+        swap_window_open: false,
     };
     let id = writer::insert_tournament(&mut *tx, &tournament).await?;
     tx.commit().await?;
@@ -68,7 +83,7 @@ pub async fn update(
     fields: TournamentFields<'_>,
 ) -> ApiResult<Tournament> {
     let mut tx = state.pool.begin().await?;
-    require_tournament(&mut *tx, tournament_id).await?;
+    let existing = require_tournament(&mut *tx, tournament_id).await?;
     let collision = query::find_by_name(&mut *tx, fields.name).await?;
     if collision.is_some_and(|other| other.id != Some(tournament_id)) {
         return Err(name_taken(fields.name).into());
@@ -84,6 +99,14 @@ pub async fn update(
         capacity: fields.capacity,
         roster_size: fields.roster_size,
         credit_grant: fields.credit_grant,
+        // Carried over from the loaded row, not taken from the request. The
+        // update is a full replace, so an admin correcting a typo in the name
+        // would otherwise send this tournament back to round one and shut an
+        // open swap window as a side effect. Only `advance_round` and
+        // `set_swap_window` move these.
+        current_round: existing.current_round,
+        swaps_per_round: fields.swaps_per_round,
+        swap_window_open: existing.swap_window_open,
     };
     writer::update_tournament(&mut *tx, &tournament).await?;
 
@@ -93,6 +116,45 @@ pub async fn update(
 
     tx.commit().await?;
     Ok(tournament)
+}
+
+/// Move the tournament into its next round.
+///
+/// This is what opens the possibility of a swap: the allowance is a function of
+/// `current_round`, so advancing is what hands every manager their next window
+/// (see [`umfl_domain::roster_policy::swap_allowance`]). It deliberately does
+/// **not** open the window itself -- that is [`set_swap_window`], a separate
+/// decision, because the window has to be shut again before the round's
+/// results are recorded or a manager could buy the heroes that just scored.
+///
+/// The increment happens in the database rather than by reading the value and
+/// adding one, so two admins clicking at once cannot both write the same
+/// round.
+pub async fn advance_round(state: &AppState, tournament_id: i64) -> ApiResult<Tournament> {
+    let mut tx = state.pool.begin().await?;
+    let tournament = require_tournament(&mut *tx, tournament_id).await?;
+    let current_round = writer::advance_current_round(&mut *tx, tournament_id).await?;
+    tx.commit().await?;
+    Ok(Tournament {
+        current_round,
+        ..tournament
+    })
+}
+
+/// Open or shut the swap window.
+pub async fn set_swap_window(
+    state: &AppState,
+    tournament_id: i64,
+    open: bool,
+) -> ApiResult<Tournament> {
+    let mut tx = state.pool.begin().await?;
+    let tournament = require_tournament(&mut *tx, tournament_id).await?;
+    writer::set_swap_window_open(&mut *tx, tournament_id, open).await?;
+    tx.commit().await?;
+    Ok(Tournament {
+        swap_window_open: open,
+        ..tournament
+    })
 }
 
 /// Delete a tournament and all its related data.

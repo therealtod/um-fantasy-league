@@ -49,6 +49,13 @@ pub struct TournamentDto {
     /// tournament.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub my_entry_status: Option<EntryStatus>,
+    /// The round the tournament is *in*. Not the same as the standings board's
+    /// `currentRound`, which is the latest round with a recorded result.
+    pub current_round: i32,
+    /// Heroes a manager may exchange per swap window; 0 switches the mechanic
+    /// off for this tournament.
+    pub swaps_per_round: i32,
+    pub swap_window_open: bool,
 }
 
 impl TournamentDto {
@@ -66,6 +73,9 @@ impl TournamentDto {
             credit_grant: tournament.credit_grant,
             accepts_registration: matches!(tournament.status, TournamentStatus::RegistrationOpen),
             my_entry_status,
+            current_round: tournament.current_round,
+            swaps_per_round: tournament.swaps_per_round,
+            swap_window_open: tournament.swap_window_open,
         }
     }
 }
@@ -115,6 +125,16 @@ pub struct RosterDto {
     /// True when `validate_lock` raises no violations for this roster — i.e.
     /// the lock button may enable.
     pub lockable: bool,
+    /// Whether an admin has a swap window open on this tournament.
+    pub swap_window_open: bool,
+    /// Heroes this manager may still exchange, unused windows included.
+    pub swaps_available: i32,
+    /// Whether this entry already spent its one submission for the current
+    /// round. A window grants one submission, not a running budget.
+    pub already_swapped_this_round: bool,
+    /// The swap counterpart to [`RosterDto::lockable`]: true when a swap would
+    /// be accepted right now, so the submit button may enable.
+    pub swappable: bool,
 }
 
 impl From<RosterSnapshot> for RosterDto {
@@ -144,6 +164,10 @@ impl From<RosterSnapshot> for RosterDto {
             heroes: snapshot.heroes.into_iter().map(HeroDto::from).collect(),
             budget: snapshot.budget.into(),
             lockable,
+            swap_window_open: snapshot.tournament.swap_window_open,
+            swaps_available: snapshot.swaps_available,
+            already_swapped_this_round: snapshot.already_swapped_this_round,
+            swappable: snapshot.swappable,
         }
     }
 }
@@ -194,6 +218,13 @@ pub struct CreateTournamentRequest {
     pub roster_size: Option<i32>,
     #[garde(custom(required_positive("must not be null", "creditGrant must be positive")))]
     pub credit_grant: Option<i32>,
+    /// Optional, and 0 when absent -- 0 means "this tournament does not use
+    /// swaps", which is what every tournament created before the mechanic
+    /// existed should be. Zero is therefore legal, so this cannot reuse
+    /// `required_positive`.
+    #[serde(default)]
+    #[garde(custom(non_negative("swapsPerRound must not be negative")))]
+    pub swaps_per_round: Option<i32>,
 }
 
 /// Full replace — every field is resubmitted, including `status`.
@@ -228,6 +259,15 @@ fn required_positive(
     }
 }
 
+/// Absent is fine; negative is not. Unlike [`required_positive`], zero is a
+/// meaningful value here rather than an unset one.
+fn non_negative(negative: &'static str) -> impl Fn(&Option<i32>, &()) -> garde::Result {
+    move |value, _| match value {
+        Some(n) if *n < 0 => Err(garde::Error::new(negative)),
+        _ => Ok(()),
+    }
+}
+
 impl CreateTournamentRequest {
     /// The service's inputs, once validation has run -- which is why every
     /// `expect` below is unreachable.
@@ -241,6 +281,11 @@ impl CreateTournamentRequest {
             capacity: self.capacity.expect("validated as present"),
             roster_size: self.roster_size.expect("validated as present"),
             credit_grant: self.credit_grant.expect("validated as present"),
+            // Absent means "no swaps", the same as an explicit 0. On an update
+            // -- a full replace like every other field here -- that does mean a
+            // client omitting it switches the mechanic off, which is why the
+            // admin form always sends it.
+            swaps_per_round: self.swaps_per_round.unwrap_or(0),
         }
     }
 }
@@ -253,10 +298,19 @@ pub fn routes() -> Router<AppState> {
         .route("/api/tournaments/{id}/entries/me", get(my_entry))
         .route("/api/tournaments/{id}/entries/me/slots", put(set_slots))
         .route("/api/tournaments/{id}/entries/me/lock", post(lock))
+        .route("/api/tournaments/{id}/entries/me/swaps", post(swap))
         .route("/api/admin/tournaments", post(admin_create))
         .route(
             "/api/admin/tournaments/{id}",
             put(admin_update).delete(admin_delete),
+        )
+        .route(
+            "/api/admin/tournaments/{id}/advance-round",
+            post(admin_advance_round),
+        )
+        .route(
+            "/api/admin/tournaments/{id}/swap-window",
+            put(admin_set_swap_window),
         )
 }
 
@@ -357,6 +411,23 @@ async fn lock(
     Ok(Json(RosterDto::from(snapshot)))
 }
 
+/// Exchange heroes on a locked roster during an open swap window.
+///
+/// Reuses [`SetSlotsRequest`]: the body is the whole proposed roster, not a
+/// list of exchanges, and the service derives the difference. The builder
+/// already holds a full list, and deriving the diff server-side is what keeps
+/// the two sides from disagreeing about what counts as one swap.
+async fn swap(
+    State(state): State<AppState>,
+    CurrentManager(manager): CurrentManager,
+    AppPath(id): AppPath<i64>,
+    ValidJson(request): ValidJson<SetSlotsRequest>,
+) -> ApiResult<Json<RosterDto>> {
+    let hero_ids = request.hero_ids.unwrap_or_default();
+    let snapshot = service::swap_roster(&state, id, &manager, &hero_ids).await?;
+    Ok(Json(RosterDto::from(snapshot)))
+}
+
 // `Access::Admin` is enforced by `auth::authorize` for every `/api/admin/**`
 // path -- the admission check and the URL matcher live in one place. Each
 // handler still takes `CurrentManager` for the identity, so who a route
@@ -381,6 +452,46 @@ async fn admin_update(
     ValidJson(request): ValidJson<UpdateTournamentRequest>,
 ) -> ApiResult<Json<TournamentDto>> {
     let tournament = admin_service::update(&state, id, request.to_fields()).await?;
+    let enrolled = service::enrolment_count(&state.pool, id).await?;
+    Ok(Json(TournamentDto::from(tournament, enrolled, None)))
+}
+
+/// Move the tournament into its next round, which is what grants every manager
+/// their next swap window's worth of allowance.
+///
+/// Takes no body: "the round is over" carries no parameters, and the increment
+/// happens in the database so two admins clicking at once cannot land on the
+/// same round.
+async fn admin_advance_round(
+    State(state): State<AppState>,
+    CurrentManager(_admin): CurrentManager,
+    AppPath(id): AppPath<i64>,
+) -> ApiResult<Json<TournamentDto>> {
+    let tournament = admin_service::advance_round(&state, id).await?;
+    let enrolled = service::enrolment_count(&state.pool, id).await?;
+    Ok(Json(TournamentDto::from(tournament, enrolled, None)))
+}
+
+#[derive(Debug, Deserialize, garde::Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSwapWindowRequest {
+    #[garde(custom(required("open is required")))]
+    pub open: Option<bool>,
+}
+
+/// Open or shut the swap window.
+///
+/// Separate from advancing the round on purpose: the window has to be shut
+/// again before that round's results are recorded, or a manager could read the
+/// ticker and then buy the heroes that just scored.
+async fn admin_set_swap_window(
+    State(state): State<AppState>,
+    CurrentManager(_admin): CurrentManager,
+    AppPath(id): AppPath<i64>,
+    ValidJson(request): ValidJson<SetSwapWindowRequest>,
+) -> ApiResult<Json<TournamentDto>> {
+    let open = request.open.expect("validated as present");
+    let tournament = admin_service::set_swap_window(&state, id, open).await?;
     let enrolled = service::enrolment_count(&state.pool, id).await?;
     Ok(Json(TournamentDto::from(tournament, enrolled, None)))
 }

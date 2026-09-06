@@ -4,6 +4,7 @@
 
 use indexmap::IndexMap;
 use sqlx::PgExecutor;
+use umfl_domain::standings::RosterSwap;
 use umfl_domain::tournament::{
     EntrySlot, EntryStatus, Tournament, TournamentEntry, TournamentFormat, TournamentStatus,
 };
@@ -15,7 +16,8 @@ use umfl_domain::tournament::{
 pub async fn find_all_ordered(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<Tournament>> {
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
-                  capacity, roster_size, credit_grant
+                  capacity, roster_size, credit_grant,
+                  current_round, swaps_per_round, swap_window_open
            from tournaments order by start_date asc"#
     )
     .fetch_all(db)
@@ -32,6 +34,9 @@ pub async fn find_all_ordered(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<Tourn
                 capacity: r.capacity,
                 roster_size: r.roster_size,
                 credit_grant: r.credit_grant,
+                current_round: r.current_round,
+                swaps_per_round: r.swaps_per_round,
+                swap_window_open: r.swap_window_open,
             })
         })
         .collect()
@@ -44,7 +49,8 @@ pub async fn find_by_status_ordered(
 ) -> sqlx::Result<Vec<Tournament>> {
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
-                  capacity, roster_size, credit_grant
+                  capacity, roster_size, credit_grant,
+                  current_round, swaps_per_round, swap_window_open
            from tournaments where status = $1 order by start_date asc"#,
         status.as_str()
     )
@@ -62,6 +68,9 @@ pub async fn find_by_status_ordered(
                 capacity: r.capacity,
                 roster_size: r.roster_size,
                 credit_grant: r.credit_grant,
+                current_round: r.current_round,
+                swaps_per_round: r.swaps_per_round,
+                swap_window_open: r.swap_window_open,
             })
         })
         .collect()
@@ -70,7 +79,8 @@ pub async fn find_by_status_ordered(
 pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option<Tournament>> {
     let Some(r) = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
-                  capacity, roster_size, credit_grant
+                  capacity, roster_size, credit_grant,
+                  current_round, swaps_per_round, swap_window_open
            from tournaments where id = $1"#,
         id
     )
@@ -89,6 +99,9 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
         capacity: r.capacity,
         roster_size: r.roster_size,
         credit_grant: r.credit_grant,
+        current_round: r.current_round,
+        swaps_per_round: r.swaps_per_round,
+        swap_window_open: r.swap_window_open,
     }))
 }
 
@@ -97,7 +110,8 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
 pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<Option<Tournament>> {
     let Some(r) = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
-                  capacity, roster_size, credit_grant
+                  capacity, roster_size, credit_grant,
+                  current_round, swaps_per_round, swap_window_open
            from tournaments where name = $1"#,
         name
     )
@@ -116,6 +130,9 @@ pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<O
         capacity: r.capacity,
         roster_size: r.roster_size,
         credit_grant: r.credit_grant,
+        current_round: r.current_round,
+        swaps_per_round: r.swaps_per_round,
+        swap_window_open: r.swap_window_open,
     }))
 }
 
@@ -141,6 +158,45 @@ pub async fn lock_capacity_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Resu
     sqlx::query_scalar!(
         "select capacity from tournaments where id = $1 for update",
         id
+    )
+    .fetch_optional(db)
+    .await
+}
+
+/// Take a row lock on one manager's entry, returning its id.
+///
+/// [`super::service::swap_roster`] reads the swap log, decides against it and
+/// then writes to it. Unlike double registration — which
+/// `unique (tournament_id, manager_id)` refuses outright — the
+/// one-submission-per-round rule has no index standing behind it and cannot
+/// have one: a submission legitimately writes several rows sharing a round, so
+/// `(entry_id, round)` is not unique. Two requests for the same entry — a
+/// double-clicked submit is enough — would otherwise both read
+/// `swapped_in_round` as false and both write. That spends the allowance twice
+/// for one exchange and, worse, leaves a log that no longer replays to the
+/// roster: `EntryRoster::holdings` rewinds the duplicate pair into a phantom
+/// second holding, and the arriving hero scores twice on the board.
+///
+/// Locking the entry row gives every submission for that entry one queue to
+/// stand in, and costs nothing anywhere else: nothing on the standings or admin
+/// path writes a `tournament_entries` row a manager could be swapping on.
+///
+/// `None` when the caller has no entry here — [`super::service::swap_roster`]
+/// reports that from the load that follows.
+///
+/// **Must be called on the transaction**, not the pool: a lock taken on a
+/// pooled connection that is then returned is a lock released immediately.
+pub async fn lock_entry_by_manager(
+    db: impl PgExecutor<'_>,
+    tournament_id: i64,
+    manager_id: i64,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "select id from tournament_entries
+          where tournament_id = $1 and manager_id = $2
+          for update",
+        tournament_id,
+        manager_id
     )
     .fetch_optional(db)
     .await
@@ -319,6 +375,87 @@ pub(crate) fn entry_status_to_db(status: EntryStatus) -> &'static str {
         EntryStatus::Draft => "DRAFT",
         EntryStatus::Locked => "LOCKED",
     }
+}
+
+// ---------------------------------------------------------------------------
+// Roster swaps.
+//
+// Nothing here stores an allowance or a "swaps used" counter. Both numbers the
+// feature needs are counted off the log at read time, for the same reason a
+// points total is: a stored counter is a cache, and this one would have to be
+// invalidated by an admin retuning `swaps_per_round` with a bare UPDATE, which
+// announces nothing.
+// ---------------------------------------------------------------------------
+
+/// How many exchanges this entry has ever made.
+///
+/// The subtrahend in [`umfl_domain::roster_policy::swap_allowance`]. Counting
+/// every round rather than the current one is what makes an unused window carry
+/// over with nothing having to record that it went unused.
+pub async fn swap_count_for_entry(db: impl PgExecutor<'_>, entry_id: i64) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"select count(*) as "count!" from roster_swaps where entry_id = $1"#,
+        entry_id
+    )
+    .fetch_one(db)
+    .await
+}
+
+/// Whether this entry already submitted its swaps for the given round.
+///
+/// A window grants one submission, not a budget to spend a click at a time, so
+/// this is the gate behind `ALREADY_SWAPPED_THIS_ROUND`. An `exists` rather
+/// than a count: the question is boolean and the answer stops at the first row.
+pub async fn swapped_in_round(
+    db: impl PgExecutor<'_>,
+    entry_id: i64,
+    round: i32,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(
+        r#"select exists(
+               select 1 from roster_swaps where entry_id = $1 and round = $2
+           ) as "exists!""#,
+        entry_id,
+        round
+    )
+    .fetch_one(db)
+    .await
+}
+
+/// Every entry's swap log for one tournament, keyed by entry id.
+///
+/// One query for the whole board rather than one per row: the standings fold
+/// needs this beside `rosters`, and a per-entry query there would reintroduce
+/// exactly the N+1 the read/write split exists to avoid.
+///
+/// Ordered by `(round, id)` because the replay in
+/// [`umfl_domain::standings::EntryRoster::holdings`] walks it both ways --
+/// two exchanges in the same round must be undone in the reverse of the order
+/// they were made.
+pub async fn swaps_by_entry_for_tournament(
+    db: impl PgExecutor<'_>,
+    tournament_id: i64,
+) -> sqlx::Result<IndexMap<i64, Vec<RosterSwap>>> {
+    let rows = sqlx::query!(
+        r#"select s.entry_id, s.round, s.hero_out_id, s.hero_in_id
+           from roster_swaps s
+               join tournament_entries e on e.id = s.entry_id
+           where e.tournament_id = $1
+           order by s.entry_id, s.round, s.id"#,
+        tournament_id
+    )
+    .fetch_all(db)
+    .await?;
+
+    let mut by_entry: IndexMap<i64, Vec<RosterSwap>> = IndexMap::new();
+    for row in rows {
+        by_entry.entry(row.entry_id).or_default().push(RosterSwap {
+            round: row.round,
+            hero_out_id: row.hero_out_id,
+            hero_in_id: row.hero_in_id,
+        });
+    }
+    Ok(by_entry)
 }
 
 fn decode(message: String) -> sqlx::Error {

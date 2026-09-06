@@ -243,6 +243,27 @@ Admin API below; nothing outside that surface writes reference data or results.
   so a complete invalidation signal; a total would depend on coefficients and costs that are retuned
   with a bare UPDATE and announce nothing. So the rules, rosters and prices behind a board stay read
   live on every request, and only a *match* can ever be a write behind.
+- **A swap is an event, and the allowance is derived from it.** `roster_swaps` is a log of
+  exchanges — one row per hero traded, in the same category as a recorded match — never a counter.
+  Both numbers the mechanic needs come out of it: the allowance is
+  `swaps_per_round × (current_round − 1) − count(*)`, which is why an unused window carries over for
+  free (skipping banks nothing explicitly, it simply never spends), and "one submission per round"
+  is `exists(… where round = current_round)`. Do not add a `swaps_used` column; it would be the same
+  cache-with-no-invalidation-signal that "Nothing writes points" rules out.
+- **Points stay in the round they were earned in.** `umfl_domain::standings::board` folds over each
+  entry's *holdings* — `(hero, from_round, until_round)` intervals reconstructed from the swap log by
+  `EntryRoster::holdings` — not over the roster it holds now. Without that, swapping a hero out would
+  delete the points it scored while you owned it and swapping one in would hand you points it scored
+  for somebody else. A hero traded away and re-acquired yields *two* holdings, which is why the
+  representation is an interval list rather than a pair of columns. `StandingsRow.roster` and `spent`
+  still read the current roster: those describe what the manager holds today, which is what the
+  leaderboard should show.
+- **`tournaments.current_round` and `StandingsBoard.current_round` are different numbers.** The
+  column is the round an admin has advanced the tournament *into*; the board's is
+  `max(tournament_matches.round)`, the latest round with a result. Conflating them would make
+  `roundPoints` read 0 for everyone the moment an admin advances. `swap_window_open` is likewise
+  **not** coupled to advancing: the window has to be shut again before a round's results are
+  recorded, or a manager could read the ticker and then buy the heroes that just scored.
 - **There are no `umfl.*` configuration properties.** Scoring weights are rows in
   `scoring_coefficients`, the budget is `tournaments.credit_grant` — both retuned with an UPDATE. Don't
   reintroduce a tunables block. There are exactly two exceptions, and both are *infrastructure* rather

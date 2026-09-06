@@ -42,7 +42,9 @@ vi.mock('@/api/client', () => ({
 }))
 
 vi.mock('@/stores/tournaments', () => ({
-  useTournamentsStore: () => ({ tournaments: [] }),
+  // `byId` is what the wizard reads the tournament's `currentRound` off, to
+  // seed a new match's round the way the server would default it.
+  useTournamentsStore: () => ({ tournaments: [], byId: () => undefined }),
 }))
 
 const mapPool: MapAdminDto[] = [{ id: 5, name: 'Center Square' }]

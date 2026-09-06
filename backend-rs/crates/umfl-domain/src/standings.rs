@@ -34,12 +34,47 @@ pub struct RosterHero {
     pub cost: i32,
 }
 
+/// One hero exchanged for another, in one round, by one entry.
+///
+/// A row of `roster_swaps`, ordered by `(round, id)` -- two swaps in the same
+/// round still have to be replayed in the order they were made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RosterSwap {
+    pub round: i32,
+    pub hero_out_id: i64,
+    pub hero_in_id: i64,
+}
+
+/// A stretch of rounds over which one entry held one hero.
+///
+/// `until_round` is exclusive and `None` while the hero is still held. A hero
+/// traded away and later re-acquired yields *two* holdings rather than one
+/// widened span, which is why this is a list rather than a pair of columns on
+/// [`RosterHero`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Holding {
+    pub hero_id: i64,
+    pub from_round: i32,
+    pub until_round: Option<i32>,
+}
+
+impl Holding {
+    /// Whether this holding covers the round a match was played in.
+    fn covers(&self, round: i32) -> bool {
+        round >= self.from_round && self.until_round.is_none_or(|until| round < until)
+    }
+}
+
 /// One entry's roster, as the leaderboard needs it. Points are added by
 /// [`board`].
 ///
 /// An entry with no picks yet is still an entry and still belongs on the board,
 /// which is why the query behind this is a **left** join onto `entry_slots` and
 /// why `heroes` may legitimately be empty.
+///
+/// `heroes` is the roster held **now**; `swaps` is how it got that way. The two
+/// together are what let [`board`] price a match against the roster its round
+/// was actually played with -- see [`EntryRoster::holdings`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryRoster {
     pub entry_id: i64,
@@ -48,13 +83,72 @@ pub struct EntryRoster {
     pub display_name: String,
     pub credit_grant: i32,
     pub heroes: Vec<RosterHero>,
+    /// This entry's exchanges, ascending by `(round, id)`. Empty for an entry
+    /// that never swapped, which is every entry in a tournament that does not
+    /// use the mechanic -- and then [`EntryRoster::holdings`] degenerates to
+    /// "held everything from round 1", i.e. exactly the old behaviour.
+    pub swaps: Vec<RosterSwap>,
 }
 
 impl EntryRoster {
     /// Derived from the slots rather than materialised, exactly like every
     /// other number here.
+    ///
+    /// This is the *current* roster's cost, which is what the leaderboard shows
+    /// beside the manager -- not a per-round figure.
     pub fn spent(&self) -> i32 {
         self.heroes.iter().map(|h| h.cost).sum()
+    }
+
+    /// Which heroes this entry held, and over which rounds.
+    ///
+    /// Only the current roster is stored, so the history is reconstructed in
+    /// two passes: undo every swap newest-first to recover the roster as it
+    /// stood at the start, then replay them oldest-first, closing the outgoing
+    /// hero's holding at that round and opening the incoming hero's there.
+    ///
+    /// This is why a swap must be recorded as an event rather than as a counter
+    /// -- the log is not bookkeeping about an allowance, it is the only thing
+    /// that can answer "who owned this hero in round 2".
+    pub fn holdings(&self) -> Vec<Holding> {
+        // Undo, newest first, to recover the opening roster.
+        let mut opening: Vec<i64> = self.heroes.iter().map(|h| h.hero_id).collect();
+        for swap in self.swaps.iter().rev() {
+            match opening.iter().position(|&id| id == swap.hero_in_id) {
+                Some(index) => opening[index] = swap.hero_out_id,
+                // The incoming hero is not on the roster at this point in the
+                // rewind, so a later swap already traded it away and has been
+                // undone above. Its predecessor still returns: the log is the
+                // record, and dropping it here would shorten the history.
+                None => opening.push(swap.hero_out_id),
+            }
+        }
+
+        let mut holdings: Vec<Holding> = opening
+            .into_iter()
+            .map(|hero_id| Holding {
+                hero_id,
+                from_round: 1,
+                until_round: None,
+            })
+            .collect();
+
+        // Replay, oldest first.
+        for swap in &self.swaps {
+            if let Some(open) = holdings
+                .iter_mut()
+                .find(|h| h.hero_id == swap.hero_out_id && h.until_round.is_none())
+            {
+                open.until_round = Some(swap.round);
+            }
+            holdings.push(Holding {
+                hero_id: swap.hero_in_id,
+                from_round: swap.round,
+                until_round: None,
+            });
+        }
+
+        holdings
     }
 }
 
@@ -185,11 +279,20 @@ pub fn board(
                 .collect();
             let mut round_points = 0.0;
 
-            for hero in &entry.heroes {
-                let Some(appearances) = appearances_by_hero.get(&hero.hero_id) else {
+            // Holdings, not the current roster: a hero scores for this manager
+            // only in the rounds they actually held it. Without that gate a
+            // between-round swap rewrites history in both directions -- the
+            // departing hero's past points vanish and the arriving hero's
+            // arrive backdated. An entry that never swapped has one holding per
+            // hero, open from round 1, so this is the old fold exactly.
+            for holding in entry.holdings() {
+                let Some(appearances) = appearances_by_hero.get(&holding.hero_id) else {
                     continue;
                 };
                 for appearance in appearances {
+                    if !holding.covers(appearance.round) {
+                        continue;
+                    }
                     for (metric, points) in &appearance.breakdown {
                         *totals.entry(metric.clone()).or_insert(0.0) += points;
                         if appearance.round == current_round {
@@ -555,6 +658,29 @@ mod tests {
                     cost: *cost,
                 })
                 .collect(),
+            swaps: Vec::new(),
+        }
+    }
+
+    /// The same roster, plus the exchanges that produced it. `heroes` is always
+    /// the roster held *now*, so a test that swaps must state the end state
+    /// here and let [`EntryRoster::holdings`] rebuild the rest.
+    fn roster_with_swaps(
+        entry_id: i64,
+        handle: &str,
+        heroes: &[(i64, &str, i32)],
+        swaps: &[(i32, i64, i64)],
+    ) -> EntryRoster {
+        EntryRoster {
+            swaps: swaps
+                .iter()
+                .map(|&(round, hero_out_id, hero_in_id)| RosterSwap {
+                    round,
+                    hero_out_id,
+                    hero_in_id,
+                })
+                .collect(),
+            ..roster(entry_id, handle, heroes)
         }
     }
 
@@ -923,5 +1049,184 @@ mod tests {
         assert_eq!(json["playedAt"], "2026-06-06T11:00:00Z");
         assert_eq!(json["games"][0]["sides"][0]["isWinner"], true);
         assert_eq!(json["draftedUnplayedHeroNames"][0], "Alice");
+    }
+
+    // -- holdings -----------------------------------------------------------
+
+    /// Sorted, so a test states which heroes were held over which rounds
+    /// without depending on the order the replay happens to produce.
+    fn spans(entry: &EntryRoster) -> Vec<(i64, i32, Option<i32>)> {
+        let mut spans: Vec<(i64, i32, Option<i32>)> = entry
+            .holdings()
+            .into_iter()
+            .map(|h| (h.hero_id, h.from_round, h.until_round))
+            .collect();
+        spans.sort();
+        spans
+    }
+
+    #[test]
+    fn an_entry_that_never_swapped_holds_everything_from_round_one() {
+        let entry = roster(
+            1,
+            "ArthurianLegend",
+            &[(7, "Bigfoot", 2500), (9, "Alice", 1200)],
+        );
+        assert_eq!(spans(&entry), vec![(7, 1, None), (9, 1, None)]);
+    }
+
+    #[test]
+    fn a_swap_closes_the_departing_hero_and_opens_the_arriving_one() {
+        // Held 7 and 9 from the start; traded 7 away for 11 in round 3.
+        let entry = roster_with_swaps(
+            1,
+            "ArthurianLegend",
+            &[(11, "Beowulf", 2400), (9, "Alice", 1200)],
+            &[(3, 7, 11)],
+        );
+        assert_eq!(
+            spans(&entry),
+            vec![(7, 1, Some(3)), (9, 1, None), (11, 3, None)]
+        );
+    }
+
+    /// The case an interval list exists for: one hero, two disjoint spells, and
+    /// a gap in the middle it must not score in.
+    #[test]
+    fn a_hero_traded_away_and_bought_back_yields_two_holdings() {
+        let entry = roster_with_swaps(
+            1,
+            "ArthurianLegend",
+            &[(7, "Bigfoot", 2500)],
+            &[(2, 7, 11), (4, 11, 7)],
+        );
+        assert_eq!(
+            spans(&entry),
+            vec![(7, 1, Some(2)), (7, 4, None), (11, 2, Some(4))]
+        );
+    }
+
+    #[test]
+    fn holdings_cover_exactly_the_rounds_they_span() {
+        let holding = Holding {
+            hero_id: 7,
+            from_round: 2,
+            until_round: Some(4),
+        };
+        assert!(!holding.covers(1));
+        assert!(holding.covers(2));
+        assert!(holding.covers(3));
+        // Exclusive: round 4 is the round the hero left in.
+        assert!(!holding.covers(4));
+
+        let still_held = Holding {
+            hero_id: 7,
+            from_round: 2,
+            until_round: None,
+        };
+        assert!(still_held.covers(99));
+    }
+
+    // -- round-scoped scoring -----------------------------------------------
+
+    /// `one_game_match` scores Bigfoot 19.25 under `standard()`. Copies of it
+    /// in other rounds let a test say which round a manager was holding him.
+    fn match_in_round(match_id: i64, round: i32) -> MatchResult {
+        MatchResult {
+            match_id,
+            round,
+            ..one_game_match()
+        }
+    }
+
+    /// The rule the whole feature turns on: trading a hero away does not
+    /// unwind what he already earned.
+    #[test]
+    fn points_stay_in_the_round_they_were_earned_in() {
+        let matches = [
+            match_in_round(1, 1),
+            match_in_round(2, 2),
+            match_in_round(3, 3),
+        ];
+
+        // Held Bigfoot for rounds 1 and 2, then traded him for Beowulf in
+        // round 3. Beowulf loses his game, so he brings a different number.
+        let swapper = roster_with_swaps(1, "Swapper", &[(11, "Beowulf", 2400)], &[(3, 7, 11)]);
+        // The same three matches, held throughout, for comparison.
+        let stayer = roster(2, "Stayer", &[(7, "Bigfoot", 2500)]);
+
+        let board = board(1, &matches, &standard(), &[swapper, stayer]);
+        let by_handle: IndexMap<&str, &StandingsRow> = board
+            .rows
+            .iter()
+            .map(|row| (row.handle.as_str(), row))
+            .collect();
+
+        // Bigfoot wins his game in all three rounds, at 10.0 a win. Counting
+        // wins rather than totals keeps the assertion on the one hero whose
+        // ownership actually moved.
+        assert_eq!(
+            by_handle["Stayer"].breakdown["WIN"], 30.0,
+            "held the winner for all three rounds"
+        );
+        assert_eq!(
+            by_handle["Swapper"].breakdown["WIN"], 20.0,
+            "rounds 1 and 2 survive the trade; round 3 belongs to whoever holds him then"
+        );
+    }
+
+    /// The other direction: buying a hero does not backdate what he scored for
+    /// somebody else.
+    #[test]
+    fn an_arriving_hero_brings_no_history_with_him() {
+        let matches = [match_in_round(1, 1), match_in_round(2, 2)];
+
+        // Picked Bigfoot up only in round 2, so only round 2 counts. The hero
+        // traded away (99) appears in no match, so nothing but Bigfoot moves
+        // the total.
+        let latecomer = roster_with_swaps(1, "Latecomer", &[(7, "Bigfoot", 2500)], &[(2, 99, 7)]);
+        let board = board(1, &matches, &standard(), &[latecomer]);
+
+        assert_eq!(
+            board.rows[0].total_points, 19.25,
+            "one match's worth, not two -- round 1 was somebody else's"
+        );
+    }
+
+    /// A hero out of the roster during the gap scores nothing for that round,
+    /// even though the manager owns him at both ends of it.
+    #[test]
+    fn the_gap_between_two_holdings_scores_nothing() {
+        let matches = [
+            match_in_round(1, 1),
+            match_in_round(2, 2),
+            match_in_round(3, 3),
+        ];
+
+        let round_trip = roster_with_swaps(
+            1,
+            "RoundTrip",
+            &[(7, "Bigfoot", 2500)],
+            &[(2, 7, 9), (3, 9, 7)],
+        );
+        let board = board(1, &matches, &standard(), &[round_trip]);
+
+        // Rounds 1 and 3 only: Alice (9) is drafted-but-unplayed in this
+        // fixture and scores an appearance, so compare against Bigfoot's own
+        // contribution rather than the flat total.
+        assert_eq!(board.rows[0].breakdown["WIN"], 20.0, "two wins, not three");
+    }
+
+    /// An entry that never swapped must fold exactly as it did before the
+    /// mechanic existed -- which is every entry in a tournament not using it.
+    #[test]
+    fn an_unswapped_roster_scores_what_it_always_did() {
+        let matches = [match_in_round(1, 1), match_in_round(2, 2)];
+        let plain = roster(1, "ArthurianLegend", &[(7, "Bigfoot", 2500)]);
+
+        assert_eq!(
+            board(1, &matches, &standard(), &[plain]).rows[0].total_points,
+            38.50
+        );
     }
 }

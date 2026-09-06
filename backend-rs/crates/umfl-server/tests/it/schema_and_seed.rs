@@ -569,16 +569,18 @@ async fn match_ids_ascend_with_played_at_which_is_what_makes_the_id_a_safe_polli
 
 /// The one assertion here that is about the *runner* rather than the seed.
 ///
-/// Flyway orders by version **across** locations. This pins the interleaving
-/// that produces. Migrations are periodically squashed back to a `V1`
-/// baseline (see `AGENTS.md`), so this currently has nothing to interleave --
-/// `db/migration` is just `V1__core_schema.sql` and `V2__reference_data.sql`,
-/// and `db/seed` is a single `V3__demo_fixtures.sql` sitting after both. The
-/// assertion still earns its place: a *future* seed addition that depends on
-/// a migration added after the current baseline (the way `V6__demo_draft_picks.sql`
-/// and `V8__demo_ban_sides.sql` once did) gets its own version rather than an
-/// edit to `V3`, and this is what would catch that version landing on the
-/// wrong side of the schema it depends on.
+/// Flyway orders by version **across** locations, and this pins the
+/// interleaving that produces. Since the last squash back to a `V1` baseline
+/// (see `AGENTS.md`) that is `V1`/`V2` from `db/migration`, then `V3` from
+/// `db/seed`, then `V4__roster_swaps.sql` back in `db/migration`, then `V5`
+/// in the seed again -- exactly the alternation this test exists for.
+///
+/// `V5__demo_swap_config.sql` is why it is not merely decorative: it configures
+/// the swap columns `V4` adds, so it has to sort *after* a migration that
+/// postdates the seed's own `V3`. Writing that configuration into `V3` instead
+/// would both invert the dependency and change an applied file's checksum. This
+/// is the assertion that catches a seed addition landing on the wrong side of
+/// the schema it depends on.
 #[test]
 fn the_two_flyway_locations_interleave_by_version() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -589,7 +591,7 @@ fn the_two_flyway_locations_interleave_by_version() {
     let plan = crate::harness::migrate::plan(&root.join("migration"), Some(&root.join("seed")));
 
     let versions: Vec<u32> = plan.iter().map(|m| m.version).collect();
-    assert_eq!(vec![1, 2, 3], versions);
+    assert_eq!(vec![1, 2, 3, 4, 5], versions);
 
     let seeded: Vec<u32> = plan
         .iter()
@@ -597,15 +599,15 @@ fn the_two_flyway_locations_interleave_by_version() {
         .map(|m| m.version)
         .collect();
     assert_eq!(
-        vec![3],
+        vec![3, 5],
         seeded,
-        "the seed's version sits after the schema's"
+        "each seed file sits after the schema it configures"
     );
 
     // The `prod` shape: same schema and reference data, no league data at all.
     let without_seed = crate::harness::migrate::plan(&root.join("migration"), None);
     assert_eq!(
-        vec![1, 2],
+        vec![1, 2, 4],
         without_seed.iter().map(|m| m.version).collect::<Vec<_>>()
     );
 }

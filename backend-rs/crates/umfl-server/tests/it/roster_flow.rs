@@ -11,8 +11,9 @@ use umfl_domain::DomainError;
 use umfl_domain::tournament::EntryStatus;
 use umfl_server::error::ApiError;
 use umfl_server::hero::{HeroFilter, HeroSort, query as hero_query};
+use umfl_server::manager::Manager;
 use umfl_server::standings::query as standings_query;
-use umfl_server::tournament::{query, service};
+use umfl_server::tournament::{admin_service as tournament_admin_service, query, service};
 
 use crate::harness::TestApp;
 
@@ -416,7 +417,8 @@ async fn a_hero_pulled_from_the_pool_after_locking_is_kept_at_cost_zero() {
     // so agreement here means the two queries agree about the *pulled* hero
     // costing 0 rather than vanishing -- a dropped slot would read as a
     // shorter roster and a smaller spend, and would quietly move the board.
-    let board_rosters = standings_query::rosters(app.pool(), winter).await.unwrap();
+    let mut conn = app.pool().acquire().await.unwrap();
+    let board_rosters = standings_query::rosters(&mut conn, winter).await.unwrap();
     let mine = board_rosters
         .iter()
         .find(|r| r.manager_id == manager.id)
@@ -495,4 +497,403 @@ async fn search(app: &TestApp, tournament_id: i64, term: &str) -> Vec<String> {
     .collect();
     names.sort();
     names
+}
+
+// ---------------------------------------------------------------------------
+// Between-round swaps.
+//
+// Winter of Champions is the fixture for these: `db/seed/V5__demo_swap_config
+// .sql` gives it one swap per round, and it starts in round 1 with the window
+// shut, which is exactly the state an admin drives forward from.
+//
+// Every test locks a roster costing 8_200 of the 10_000 grant (3400 + 2900 +
+// 1900), leaving 1_800 of headroom -- enough to trade up a little, not enough
+// to reach Medusa at 5_600. That gap is what makes the budget case a swap the
+// manager can plausibly *want* rather than an obvious over-reach.
+// ---------------------------------------------------------------------------
+
+/// Register, draft and lock, then leave the tournament in `round`, with the
+/// window open or shut. Returns the locked roster's hero ids in slot order.
+async fn locked_at_round(
+    app: &TestApp,
+    winter: i64,
+    manager: &Manager,
+    round: i32,
+    window_open: bool,
+) -> Vec<i64> {
+    service::register(&app.state, winter, manager)
+        .await
+        .unwrap();
+    let picks = app
+        .hero_ids(&["Sherlock Holmes", "Yennenga", "Sinbad"])
+        .await;
+    service::set_slots(&app.state, winter, manager, &picks)
+        .await
+        .unwrap();
+    service::lock_roster(&app.state, winter, manager)
+        .await
+        .unwrap();
+
+    for _ in 1..round {
+        tournament_admin_service::advance_round(&app.state, winter)
+            .await
+            .unwrap();
+    }
+    if window_open {
+        tournament_admin_service::set_swap_window(&app.state, winter, true)
+            .await
+            .unwrap();
+    }
+    picks
+}
+
+async fn swap_log(app: &TestApp, winter: i64, manager_id: i64) -> Vec<(i32, i64, i64)> {
+    sqlx::query!(
+        "select s.round, s.hero_out_id, s.hero_in_id
+           from roster_swaps s
+           join tournament_entries e on e.id = s.entry_id
+          where e.tournament_id = $1 and e.manager_id = $2
+          order by s.round, s.id",
+        winter,
+        manager_id
+    )
+    .fetch_all(app.pool())
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| (r.round, r.hero_out_id, r.hero_in_id))
+    .collect()
+}
+
+#[tokio::test]
+async fn a_swap_is_refused_while_the_window_is_shut() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    // Round 2 with the window shut: the allowance is there to spend, so the
+    // only thing standing in the way is the window itself.
+    let picks = locked_at_round(&app, winter, &manager, 2, false).await;
+
+    let beowulf = app.hero_id("Beowulf").await;
+    let proposed = vec![picks[0], picks[1], beowulf];
+
+    let err = service::swap_roster(&app.state, winter, &manager, &proposed)
+        .await
+        .expect_err("the window is shut");
+
+    assert_eq!(rules(&err), ["SWAP_WINDOW_CLOSED"]);
+}
+
+#[tokio::test]
+async fn a_swap_is_refused_before_the_roster_is_locked() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    service::register(&app.state, winter, &manager)
+        .await
+        .unwrap();
+    let picks = app
+        .hero_ids(&["Sherlock Holmes", "Yennenga", "Sinbad"])
+        .await;
+    service::set_slots(&app.state, winter, &manager, &picks)
+        .await
+        .unwrap();
+    tournament_admin_service::advance_round(&app.state, winter)
+        .await
+        .unwrap();
+    tournament_admin_service::set_swap_window(&app.state, winter, true)
+        .await
+        .unwrap();
+
+    let beowulf = app.hero_id("Beowulf").await;
+    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
+        .await
+        .expect_err("an unlocked entry belongs on the draft path");
+
+    assert_eq!(rules(&err), ["SWAP_WINDOW_CLOSED"]);
+}
+
+#[tokio::test]
+async fn round_one_offers_no_allowance_at_all() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    // Window open, but still in round 1: a window follows a round, and there
+    // has not been one yet.
+    let picks = locked_at_round(&app, winter, &manager, 1, true).await;
+
+    let beowulf = app.hero_id("Beowulf").await;
+    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
+        .await
+        .expect_err("nothing has happened to react to");
+
+    assert_eq!(rules(&err), ["SWAP_LIMIT_EXCEEDED"]);
+}
+
+#[tokio::test]
+async fn swapping_more_heroes_than_the_allowance_permits_is_rejected() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+
+    let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
+    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], beowulf, bigfoot])
+        .await
+        .expect_err("two heroes on a one-swap allowance");
+
+    assert_eq!(rules(&err), ["SWAP_LIMIT_EXCEEDED"]);
+    assert!(
+        swap_log(&app, winter, manager.id).await.is_empty(),
+        "a rejected swap writes nothing"
+    );
+}
+
+#[tokio::test]
+async fn a_swap_that_breaks_the_budget_is_rejected() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+
+    // Sinbad (1900) out, Medusa (5600) in: 3400 + 2900 + 5600 = 11_900, which
+    // is 1_900 past the grant.
+    let medusa = app.hero_id("Medusa").await;
+    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], medusa])
+        .await
+        .expect_err("11_900 does not fit in 10_000");
+
+    assert_eq!(rules(&err), ["BUDGET_EXCEEDED"]);
+}
+
+#[tokio::test]
+async fn a_successful_swap_rewrites_the_slots_and_records_the_exchange() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+    let (sinbad, beowulf) = (picks[2], app.hero_id("Beowulf").await);
+
+    let snapshot =
+        service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
+            .await
+            .expect("one hero, one swap, within budget");
+
+    assert_eq!(snapshot.entry.hero_ids(), [picks[0], picks[1], beowulf]);
+    assert_eq!(
+        snapshot.budget.spent, 8_700,
+        "3400 + 2900 + 2400 at Winter prices"
+    );
+    assert_eq!(
+        snapshot.entry.status,
+        EntryStatus::Locked,
+        "a swap does not unlock"
+    );
+    assert_eq!(snapshot.swaps_available, 0, "the round's one swap is spent");
+    assert!(snapshot.already_swapped_this_round);
+    assert!(!snapshot.swappable);
+
+    assert_eq!(
+        swap_log(&app, winter, manager.id).await,
+        [(2, sinbad, beowulf)],
+        "the log names who left, who arrived, and in which round"
+    );
+
+    let mut conn = app.pool().acquire().await.unwrap();
+    let reloaded = query::find_entry(&mut conn, winter, manager.id)
+        .await
+        .unwrap()
+        .expect("the entry survives");
+    assert_eq!(reloaded.hero_ids(), [picks[0], picks[1], beowulf]);
+}
+
+#[tokio::test]
+async fn a_second_submission_in_the_same_round_is_rejected() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 3, true).await;
+    let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
+
+    // Round 3 with one swap per round banks an allowance of two, so the second
+    // submission is refused by the one-submission rule rather than by running
+    // out of swaps -- which is the distinction being pinned here.
+    service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
+        .await
+        .expect("the first submission lands");
+
+    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], bigfoot, beowulf])
+        .await
+        .expect_err("one submission per round");
+
+    assert_eq!(rules(&err), ["ALREADY_SWAPPED_THIS_ROUND"]);
+    assert_eq!(
+        swap_log(&app, winter, manager.id).await.len(),
+        1,
+        "the refused second submission left the first one alone"
+    );
+}
+
+/// A submission must decide the one-per-round rule *after* it has the entry,
+/// not before.
+///
+/// Nothing indexes "one submission per round" and nothing can: a submission
+/// legitimately writes several rows sharing a round, so `(entry_id, round)` is
+/// not unique. `swap_roster` therefore takes a row lock on the entry before it
+/// reads the log it is about to write to.
+///
+/// Left unserialised this is not merely a double-spent allowance. The log stops
+/// replaying to the roster, and `EntryRoster::holdings` rewinds the duplicate
+/// pair into a phantom second holding -- the arriving hero then scores twice on
+/// the board for one exchange, and nothing surfaces it until somebody doubts
+/// the standings.
+///
+/// The other submission is played by this test's own transaction rather than a
+/// second `swap_roster`: two real calls interleave at whatever points the
+/// runtime chooses, and would pass with the lock or without it. Holding the row
+/// and *then* writing the submission the queued call has to see is the same
+/// race with the timing decided here -- without the lock the call reads the log
+/// before this transaction commits and lands a second exchange.
+#[tokio::test]
+async fn a_second_submission_cannot_slip_past_on_a_read_taken_before_the_lock() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+    let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
+
+    // Stand where the winning submission stands: holding the entry row, with
+    // its own exchange not yet committed.
+    let mut winner = app.pool().begin().await.expect("begin");
+    let entry_id = sqlx::query_scalar!(
+        "select id from tournament_entries
+          where tournament_id = $1 and manager_id = $2
+          for update",
+        winter,
+        manager.id
+    )
+    .fetch_one(&mut *winner)
+    .await
+    .expect("hold the entry row");
+
+    let (state, mine) = (app.state.clone(), manager.clone());
+    let proposed = vec![picks[0], picks[1], beowulf];
+    let queued =
+        tokio::spawn(async move { service::swap_roster(&state, winter, &mine, &proposed).await });
+
+    // Two local statements stand between that call's `begin` and its lock, so
+    // this is three orders of magnitude more than it needs to be waiting there.
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    sqlx::query!(
+        "insert into roster_swaps (entry_id, round, hero_out_id, hero_in_id)
+         values ($1, 2, $2, $3)",
+        entry_id,
+        picks[2],
+        bigfoot
+    )
+    .execute(&mut *winner)
+    .await
+    .expect("record the winning exchange");
+    // The roster moves with the log, the way `swap_roster` writes the two
+    // together -- a log that did not agree with the slots is the corruption
+    // this test exists to keep out, not a fixture to build it from.
+    sqlx::query!(
+        "update entry_slots set hero_id = $3 where entry_id = $1 and hero_id = $2",
+        entry_id,
+        picks[2],
+        bigfoot
+    )
+    .execute(&mut *winner)
+    .await
+    .expect("move the slot");
+    winner.commit().await.expect("commit");
+
+    let err = queued
+        .await
+        .expect("the queued submission ran")
+        .expect_err("the round was spent while it waited");
+    assert_eq!(
+        rules(&err),
+        ["ALREADY_SWAPPED_THIS_ROUND", "SWAP_LIMIT_EXCEEDED"],
+        "both gates the winner shut: the round's submission and its allowance"
+    );
+
+    assert_eq!(
+        swap_log(&app, winter, manager.id).await,
+        [(2, picks[2], bigfoot)],
+        "one exchange, one row -- not the duplicate pair that scores a hero twice"
+    );
+}
+
+#[tokio::test]
+async fn an_unused_window_is_banked_and_spent_later() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    // Two windows offered (rounds 2 and 3), neither spent.
+    let picks = locked_at_round(&app, winter, &manager, 3, true).await;
+    let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
+
+    let snapshot =
+        service::swap_roster(&app.state, winter, &manager, &[picks[0], beowulf, bigfoot])
+            .await
+            .expect("both banked swaps spent in one submission");
+
+    assert_eq!(snapshot.swaps_available, 0);
+    assert_eq!(
+        swap_log(&app, winter, manager.id).await.len(),
+        2,
+        "one row per hero exchanged, both stamped with the round they were spent in"
+    );
+    assert!(
+        swap_log(&app, winter, manager.id)
+            .await
+            .iter()
+            .all(|(round, _, _)| *round == 3)
+    );
+}
+
+#[tokio::test]
+async fn submitting_an_unchanged_roster_spends_nothing() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+
+    let snapshot = service::swap_roster(&app.state, winter, &manager, &picks)
+        .await
+        .expect("changing nothing breaks no rule");
+
+    assert_eq!(snapshot.entry.hero_ids(), picks);
+    assert_eq!(
+        snapshot.swaps_available, 1,
+        "an exchange of nothing costs nothing"
+    );
+    assert!(
+        swap_log(&app, winter, manager.id).await.is_empty(),
+        "and records nothing, so the window is still there to use"
+    );
+}
+
+#[tokio::test]
+async fn a_swap_still_cannot_reach_a_hero_outside_the_pool() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_at_round(&app, winter, &manager, 2, true).await;
+
+    // Resolved against the pool by `resolve_picks`, exactly as a draft is --
+    // the swap path gains no back door into the wider hero catalogue.
+    let outsider = app.hero_id("Nikola Tesla").await;
+    let err = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], picks[1], outsider],
+    )
+    .await
+    .expect_err("Nikola Tesla is not in Winter's pool");
+
+    assert_eq!(rules(&err), ["UNKNOWN_HERO"]);
 }

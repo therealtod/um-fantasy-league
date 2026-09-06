@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update roster_swaps set round = 2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "87b0b158bfe2fae61fc5f7184106a4187a9b35708ca68a2f2017b709bdd6a088"
+}
