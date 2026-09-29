@@ -70,17 +70,20 @@ insert into tournaments (name, format, status, start_date, end_date,
 -- Sun Wukong 5600 + Beowulf 2400 + Sinbad 1900 = 9,900, but Sun Wukong 5600 +
 -- Medusa 5100 + King Arthur 4500 = 15,200.
 --
--- Summer and Winter both carry all twelve heroes, but at deliberately
+-- Summer and Winter both carry all twelve core heroes, but at deliberately
 -- different prices for King Arthur, Medusa and Sun Wukong: cost is per
--- tournament, and the seed should prove that rather than assert it. Spring of
--- Myths carries a narrower eight-hero pool, so "not in this tournament's pool"
--- is a reachable UNKNOWN_HERO case.
+-- tournament, and the seed should prove that rather than assert it. Summer
+-- also prices the five heroes its Bo3 decider (match 13) only drafted or
+-- banned -- a real event's pool holds every hero that appears in its results,
+-- drafted and struck included, and nobody's roster holds these five, so they
+-- move no leaderboard total. Spring of Myths carries a narrower eight-hero
+-- pool, so "not in this tournament's pool" is a reachable UNKNOWN_HERO case.
 -- ---------------------------------------------------------------------------
 
 insert into tournament_heroes (tournament_id, hero_id, cost)
 select t.id, h.id, v.cost
 from (values
-    -- Summer of Legends -- all twelve
+    -- Summer of Legends -- all twelve core heroes
     ('Summer of Legends',   'Alice',           4100),
     ('Summer of Legends',   'King Arthur',     4500),
     ('Summer of Legends',   'Robin Hood',      3200),
@@ -93,6 +96,12 @@ from (values
     ('Summer of Legends',   'Yennenga',        2900),
     ('Summer of Legends',   'Beowulf',         2400),
     ('Summer of Legends',   'Sinbad',          1900),
+    -- ... plus the five match 13 drafts or bans without fielding
+    ('Summer of Legends',   'Bruce Lee',       3600),
+    ('Summer of Legends',   'Deadpool',        4200),
+    ('Summer of Legends',   'Invisible Man',   3000),
+    ('Summer of Legends',   'Tomoe Gozen',     3900),
+    ('Summer of Legends',   'Nikola Tesla',    4400),
     -- Winter of Champions -- all twelve, three re-priced
     ('Winter of Champions', 'Alice',           4100),
     ('Winter of Champions', 'King Arthur',     4700),
@@ -166,7 +175,7 @@ from scoring_rule_sets rs
 -- Summer of Legends: the recorded results. Thirteen matches over three
 -- rounds, eight players who each play three matches -- plus a Bo3 decider
 -- (match 13) shared by Rina Okafor and Dmitri Kovac, their fourth match
--- apiece; every one of the twelve pooled heroes is played at least twice.
+-- apiece; every one of the twelve core heroes is played at least twice.
 --
 -- Match ids are given explicitly, which is the one place this file does not
 -- key off a natural column: `tournament_matches` has none, and the game/
@@ -182,11 +191,14 @@ from scoring_rule_sets rs
 -- `entry_slots` comment below already calls them out as "on nobody's roster",
 -- so every point this match generates -- game results AND its bans -- lands
 -- on zero fantasy totals, leaving every existing standings assertion exact.
--- Its three bans (Bruce Lee, Deadpool, Invisible Man) are outside Summer of
--- Legends' own `tournament_heroes` pool for the same reason -- nothing in the
--- schema requires a banned or played hero to be pool-priced, only that maps
--- come from `tournament_maps` (see `MatchRule::UnknownHero`, which
--- validates against `heroes`, never `tournament_heroes`). `external_link` is
+-- Its three bans (Bruce Lee, Deadpool, Invisible Man) are on nobody's roster
+-- for the same reason. They are priced into Summer of Legends' pool like every
+-- other hero its results name -- the schema would not insist (only maps must
+-- come from `tournament_maps`; `MatchRule::UnknownHero` validates against
+-- `heroes`, never `tournament_heroes`), but a real event's results never name
+-- a hero outside its pool, and
+-- `every_recorded_hero_was_in_the_tournaments_own_pool` holds the seed to
+-- that. `external_link` is
 -- required (`V1__core_schema.sql`); match 13 carries a real one, and every
 -- other match gets the same synthetic `urn:umfl:match:<id>` placeholder a
 -- hand-typed match with no page anywhere gets.
@@ -334,8 +346,8 @@ from match_game_participants mgp
 -- roster either, so these two rows demonstrate the metric without moving a
 -- single seeded leaderboard total. Neither is among match 13's bans (Bruce
 -- Lee, Deadpool, Invisible Man), which would make the pick a
--- `BANNED_HERO_DRAFTED` violation, and like those bans neither needs to be in
--- the tournament's priced pool.
+-- `BANNED_HERO_DRAFTED` violation, and like those bans both are in the
+-- tournament's priced pool while sitting on nobody's roster.
 insert into match_hero_picks (match_id, side, hero_id)
 select 13, v.side, h.id
 from (values

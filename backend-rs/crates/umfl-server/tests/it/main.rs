@@ -14,6 +14,7 @@ mod harness;
 
 mod actuator;
 mod hero_admin;
+mod hero_stats;
 mod map_admin;
 mod match_admin;
 mod match_cache;

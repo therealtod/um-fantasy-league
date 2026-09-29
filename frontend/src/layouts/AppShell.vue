@@ -22,13 +22,14 @@ function signIn() {
 
 const manager = computed(() => managerStore.manager)
 const title = computed(() => (route.meta.title as string | undefined) ?? 'UM Fantasy League')
-/** Lobby and standings opt in via route meta; every other page stays plain obsidian. */
+/** Lobby, standings and hero performance opt in via route meta; every other page stays plain obsidian. */
 const hasBackground = computed(() => Boolean(route.meta.background))
 
 const nav = computed(() => {
   const baseNav = [
     { to: '/lobby', label: 'Lobby' },
     { to: '/standings', label: 'Standings' },
+    { to: '/heroes', label: 'Heroes' },
   ]
   if (manager.value?.isAdmin) {
     baseNav.push({ to: '/admin', label: 'Admin' })

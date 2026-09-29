@@ -9,3 +9,11 @@ export function formatCredits(value: number): string {
   const sign = value < 0 ? '-' : ''
   return `${sign}${CREDITS_FORMATTER.format(Math.abs(value))} CR`
 }
+
+/**
+ * A point value as the standings screens print it: one decimal, and an explicit `+` on a gain so
+ * a column of mixed gains and penalties reads at a glance. Zero stays unsigned.
+ */
+export function formatPoints(value: number): string {
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}`
+}

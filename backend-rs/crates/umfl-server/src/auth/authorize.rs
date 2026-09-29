@@ -78,9 +78,10 @@ pub fn rules() -> &'static [Rule] {
                 pattern: "/actuator/info",
                 access: Access::Permit,
             },
-            // Viewing tournaments, hero pools and standings needs no account --
-            // only entering a tournament and drafting a roster does. GET only:
-            // `POST /api/tournaments` falls through to `/api/**` below.
+            // Viewing tournaments, hero pools, standings and hero performance
+            // needs no account -- only entering a tournament and drafting a
+            // roster does. GET only: `POST /api/tournaments` falls through to
+            // `/api/**` below.
             Rule {
                 method: Some(Method::GET),
                 pattern: "/api/tournaments/*/heroes",
@@ -109,6 +110,11 @@ pub fn rules() -> &'static [Rule] {
             Rule {
                 method: Some(Method::GET),
                 pattern: "/api/tournaments/*/matches",
+                access: Access::Permit,
+            },
+            Rule {
+                method: Some(Method::GET),
+                pattern: "/api/tournaments/*/hero-stats",
                 access: Access::Permit,
             },
             // Must precede `/api/**` -- first match wins.

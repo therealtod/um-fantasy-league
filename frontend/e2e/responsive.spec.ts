@@ -9,7 +9,7 @@ import { PLAYER_A_URL } from '../playwright.config'
  * e2e suite, needs a live backend — see `global-setup.ts`.
  */
 
-const ROUTES = ['/lobby', '/standings', '/admin', '/login']
+const ROUTES = ['/lobby', '/standings', '/heroes', '/admin', '/login']
 
 test.describe('responsive layout', () => {
   test('no route scrolls horizontally on a phone viewport', async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe('responsive layout', () => {
         await page.goto(`${PLAYER_A_URL}${route}`)
         await page.waitForLoadState('load')
         // Idleness is what we want — an overflow comes from rendered data — but
-        // /standings holds an SSE connection open for live results, so the
+        // /standings and /heroes hold an SSE connection open for live results, so the
         // network never goes idle there and an unbounded wait times out the test
         // before it measures anything. Give it a bounded chance, then measure
         // either way: by the time this expires the view has long since painted.

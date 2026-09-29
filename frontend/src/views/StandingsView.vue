@@ -6,6 +6,7 @@ import { useTournamentsStore } from '@/stores/tournaments'
 import type { MetricColumn } from '@/api/types'
 import { standingsAvailable } from '@/domain/tournamentStatus'
 import ErrorBanner from '@/components/ErrorBanner.vue'
+import { formatPoints as points } from '@/lib/format'
 
 const standings = useStandingsStore()
 const tournaments = useTournamentsStore()
@@ -36,10 +37,6 @@ watch(
 function onTournamentChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   if (value) start(Number(value))
-}
-
-function points(value: number) {
-  return `${value > 0 ? '+' : ''}${value.toFixed(1)}`
 }
 
 const isMe = (managerId: number) => managerStore.manager?.id === managerId

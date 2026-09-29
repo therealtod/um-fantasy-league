@@ -125,6 +125,32 @@ export interface StandingsBoard {
   rows: StandingsRow[]
 }
 
+/** One hero's place in one hero-performance table. */
+export interface HeroRankRow {
+  rank: number
+  heroId: number
+  heroName: string
+  imageUrl?: string
+  /** This tournament's price: every row is a pool hero. */
+  cost: number
+  points: number
+}
+
+/** One scoring criterion's table, ranking every hero on that metric alone. */
+export interface HeroCategory extends MetricColumn {
+  rows: HeroRankRow[]
+}
+
+export interface HeroStatsBoard {
+  tournamentId: number
+  ruleSetName: string
+  currentRound: number
+  /** Every hero ranked by total points across all criteria. */
+  overall: HeroRankRow[]
+  /** One per scored metric, in the rule set's column order. */
+  categories: HeroCategory[]
+}
+
 export interface TickerGameSide {
   /** Free text. Absent when the result was recorded unattributed — render a fallback. */
   playerLabel?: string

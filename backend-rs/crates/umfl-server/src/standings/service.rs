@@ -12,11 +12,13 @@
 //! changing a roster is visible on the very next request.
 
 use sqlx::{PgConnection, Postgres, Transaction};
+use umfl_domain::hero_stats::{self, HeroStatsBoard, PoolHero};
 use umfl_domain::scoring_engine::ScoringRules;
 use umfl_domain::standings as fold;
 use umfl_domain::standings::{StandingsBoard, TickerEntry};
 
 use crate::error::ApiResult;
+use crate::hero::query::{self as hero_query, HeroFilter};
 use crate::scoring::query as scoring_query;
 use crate::state::AppState;
 
@@ -116,6 +118,35 @@ pub async fn ticker(
     tx.commit().await?;
 
     Ok(fold::ticker(&matches, &rules))
+}
+
+/// How every hero in the tournament is scoring, one table per criterion.
+///
+/// The same shape as [`board`] with the pool in place of the rosters, and the
+/// same two orderings for the same reasons: the cache read runs before
+/// [`snapshot`] opens a connection (the pool self-deadlock documented there),
+/// and the rules and pool are read under one REPEATABLE READ snapshot.
+pub async fn hero_stats(state: &AppState, tournament_id: i64) -> ApiResult<HeroStatsBoard> {
+    let matches = state
+        .match_cache
+        .find_by_tournament(&state.pool, tournament_id)
+        .await?;
+
+    let mut tx = snapshot(state).await?;
+    let rules = resolve_rules(&mut tx, tournament_id).await?;
+    let pool = hero_query::find_by_tournament(&mut *tx, tournament_id, &HeroFilter::default())
+        .await?
+        .into_iter()
+        .map(|hero| PoolHero {
+            hero_id: hero.id,
+            name: hero.name,
+            image_url: hero.image_url,
+            cost: hero.cost,
+        })
+        .collect::<Vec<_>>();
+    tx.commit().await?;
+
+    Ok(hero_stats::board(tournament_id, &matches, &rules, &pool))
 }
 
 /// `BEGIN`, then the isolation level as the **very next statement**.

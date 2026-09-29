@@ -151,7 +151,7 @@ body.
 (`crates/umfl-server/src/auth/authorize.rs`)'s `rules()` table, an ordered list of
 `(method, ant-style path pattern, access)` rows that `authorize` walks first-match-wins. It allowlists
 the read-only GETs that viewing a tournament needs — nobody needs an account to browse tournaments,
-hero pools, standings or match history, only to enter and draft — and everything else under `/api/**`
+hero pools, standings, hero performance or match history, only to enter and draft — and everything else under `/api/**`
 is `Access::Authenticated`, with a trailing `/**` → `Access::Deny` backstop. Keep it in step with
 `authorize_rules` in `tests/it/security.rs`, which asserts it from the outside. The two credential
 paths (`auth::dev`, `auth::supabase`) differ only in how a credential is *verified*, never in which
@@ -371,9 +371,23 @@ gained, and names the never-fielded picks separately.
 
 `umfl_domain::standings::board` returns a `StandingsBoard` that carries its own `MetricColumn`
 definitions — the backend cannot know the columns until it reads `scoring_coefficients`. Ranking is
-standard competition ranking (1, 2, 2, 4), computed by the private `rank()` in the same module. The
+standard competition ranking (1, 2, 2, 4), computed by `competition_rank()` in the same module. The
 ticker's polling key is **`sinceMatchId`** (monotonic `bigserial`), never `playedAt`: parallel tables
 in a round share a timestamp.
+
+`GET /api/tournaments/{id}/hero-stats` is the same fold input grouped per **hero** instead of per
+holding: `umfl_domain::hero_stats::board` prices every `hero_contexts()` entry once, exactly as the
+leaderboard does, and returns an `overall` table plus one ranked table per scored metric (the same
+columns, via the shared `metric_columns()`, and the same `competition_rank()`). A hero's points there
+are what it earned whoever held it, so no roster or swap log is read — only the cached match list,
+the active rules and the pool, under the same cache-before-snapshot ordering as the leaderboard's
+`standings::service::board`. Its hero set is **exactly the pool** — the tables exist to inform a draft, and only a pool hero
+can be drafted — so an unfielded pool hero ranks on 0 and a hero a result names from outside the pool
+(one dropped after it scored, say) is not listed at all. The seed holds itself to the same standard:
+`every_recorded_hero_was_in_the_tournaments_own_pool` checks that every hero a result names — played,
+drafted *or* banned — is priced in that tournament's pool, which is why Summer also prices the five
+heroes match 13 only drafted or struck. Nothing is stored, and the frontend refreshes it off the existing standings stream rather than a
+second one.
 
 `GET /api/tournaments/{id}/standings/stream` is an SSE endpoint (`standings::sse::StandingsSseHub`)
 that pushes a bare "something changed" event after `r#match::admin_service::record`/`correct`/`delete`
@@ -460,7 +474,8 @@ serializes nullable response fields with `skip_serializing_if = "Option::is_none
 field is *absent* on the wire, not `null`; templates need a `?? '—'` fallback (e.g. `mapName`).
 
 Stores: `auth` (Supabase session), `manager`, `heroes` (keyed by tournament — cost is
-tournament-scoped), `tournaments`, `roster`, `standings`. `roster` keeps an optimistic `selectedIds`
+tournament-scoped), `tournaments`, `roster`, `standings`, `heroStats` (the per-hero tables, loaded and
+refreshed exactly like `standings` and off the same `/standings/stream` signal). `roster` keeps an optimistic `selectedIds`
 and rolls it back if the server rejects. `standings` loads once via `load(id)`, then opens the
 `/standings/stream` SSE connection (`src/api/sseClient.ts`) and calls `refresh()` every time the
 backend signals that a match was written. `refresh()` always refetches the full ticker head from
@@ -487,7 +502,7 @@ it posts to. The wizard and each of its section components import it as `matchFo
 `matchForm.` call site marks a rule and anything without one is rendering. Tests split the same way — `matchForm.spec.ts` is data-in/data-out
 and owns every rule, `MatchResultWizard.spec.ts` mounts only to pin the wiring between the two.
 
-Routes: `/lobby`, `/standings` and `/login` are public; `/tournaments/:tournamentId/roster` requires
+Routes: `/lobby`, `/standings`, `/heroes` (`HeroStatsView.vue`) and `/login` are public; `/tournaments/:tournamentId/roster` requires
 a session plus a `beforeEnter` guard that bounces to the lobby unless the manager has an entry or
 the tournament accepts registration. `/admin` (`AdminDashboardView.vue`) has a `beforeEnter` guard
 that bounces non-admins to the lobby, and `AppShell.vue` only renders the nav link when
@@ -724,7 +739,9 @@ preview's `draftedHeroIds` in raw would drop every hero that side lost to a ban 
 ## Deliberately not built
 
 A Hero Encyclopedia / Stats Lab (third-party sites already publish Unmatched stats — `heroes` is only
-`(id, name, image_url)` on purpose).
+`(id, name, image_url)` on purpose). `/heroes` is not that: it ranks heroes by *this league's fantasy
+points* in one tournament, derived from the same results and rules as the leaderboard. General game
+statistics — win rates across all play, matchup tables, lore — stay out.
 
 ## CI/CD
 

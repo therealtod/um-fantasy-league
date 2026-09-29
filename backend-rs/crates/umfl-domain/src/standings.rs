@@ -327,23 +327,40 @@ pub fn board(
         tournament_id,
         rule_set_name: rules.name.clone(),
         current_round,
-        metrics: rules
-            .scored_metrics()
-            .iter()
-            .map(|metric| MetricColumn {
-                metric: metric.clone(),
-                label: match_metrics::label(metric),
-                coefficient: rules
-                    .coefficient_of(metric)
-                    .try_into()
-                    .expect("a numeric(10,4) coefficient always fits an f64"),
-            })
-            .collect(),
+        metrics: metric_columns(rules),
         rows: rank(unranked),
     }
 }
 
-/// Standard competition ranking (1, 2, 2, 4).
+/// The rule set's scored metrics as display columns, in the rule set's own
+/// order. Shared with [`crate::hero_stats`], whose tables are these columns.
+pub(crate) fn metric_columns(rules: &ScoringRules) -> Vec<MetricColumn> {
+    rules
+        .scored_metrics()
+        .iter()
+        .map(|metric| MetricColumn {
+            metric: metric.clone(),
+            label: match_metrics::label(metric),
+            coefficient: rules
+                .coefficient_of(metric)
+                .try_into()
+                .expect("a numeric(10,4) coefficient always fits an f64"),
+        })
+        .collect()
+}
+
+/// The manager leaderboard's ranking: by total, ties broken on the handle.
+fn rank(mut rows: Vec<StandingsRow>) -> Vec<StandingsRow> {
+    competition_rank(
+        &mut rows,
+        |row| row.total_points,
+        |row| &row.handle,
+        |row, rank| row.rank = rank,
+    );
+    rows
+}
+
+/// Standard competition ranking (1, 2, 2, 4), descending by `points`.
 ///
 /// Ties are ordinary on a finished tournament -- two managers who drafted
 /// overlapping rosters can genuinely land on the same total -- so a positional
@@ -351,27 +368,33 @@ pub fn board(
 ///
 /// The comparison is exact `!=` on `f64` with **no epsilon**: every total has
 /// already been through [`round2`], and an epsilon would manufacture ties
-/// that don't actually exist. The sort is stable for the same reason the
-/// ticker's is.
-fn rank(mut rows: Vec<StandingsRow>) -> Vec<StandingsRow> {
+/// that don't actually exist. `tiebreak` is a byte-order comparison that only
+/// orders rows *within* a tie, so two requests never disagree about who is
+/// listed first; it never splits a rank. The sort is stable for the same
+/// reason the ticker's is.
+pub(crate) fn competition_rank<T>(
+    rows: &mut [T],
+    points: impl Fn(&T) -> f64,
+    tiebreak: impl Fn(&T) -> &str,
+    mut set_rank: impl FnMut(&mut T, i32),
+) {
     rows.sort_by(|a, b| {
-        b.total_points
-            .partial_cmp(&a.total_points)
+        points(b)
+            .partial_cmp(&points(a))
             .expect("totals are finite: every one has been through round2")
-            // Byte-order comparison on the handle as a deterministic tiebreak.
-            .then_with(|| a.handle.cmp(&b.handle))
+            .then_with(|| tiebreak(a).cmp(tiebreak(b)))
     });
 
     let mut current_rank = 0;
     let mut previous_points: Option<f64> = None;
     for (index, row) in rows.iter_mut().enumerate() {
-        if previous_points != Some(row.total_points) {
+        let row_points = points(row);
+        if previous_points != Some(row_points) {
             current_rank = index as i32 + 1;
-            previous_points = Some(row.total_points);
+            previous_points = Some(row_points);
         }
-        row.rank = current_rank;
+        set_rank(row, current_rank);
     }
-    rows
 }
 
 /// The newest recorded matches, as the Standings ticker renders them.

@@ -11,6 +11,7 @@ import type {
   HeroAdminDto,
   HeroPoolEntryRequest,
   HeroSort,
+  HeroStatsBoard,
   ImportMatchRequest,
   MatchImportPreviewDto,
   Manager,
@@ -191,6 +192,9 @@ export const api = {
 
   matches: (tournamentId: number, sinceMatchId = 0, limit = 25): Promise<TickerEntry[]> =>
     request(`/tournaments/${tournamentId}/matches${queryString({ sinceMatchId, limit })}`),
+
+  heroStats: (tournamentId: number): Promise<HeroStatsBoard> =>
+    request(`/tournaments/${tournamentId}/hero-stats`),
 
   admin: {
     // Tournaments

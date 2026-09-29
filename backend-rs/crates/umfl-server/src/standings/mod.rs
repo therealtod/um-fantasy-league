@@ -19,6 +19,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
+use umfl_domain::hero_stats::HeroStatsBoard;
 use umfl_domain::standings::{StandingsBoard, TickerEntry};
 
 use crate::error::ApiResult;
@@ -32,6 +33,19 @@ pub fn routes() -> Router<AppState> {
         .route("/api/tournaments/{id}/standings", get(standings))
         .route("/api/tournaments/{id}/matches", get(matches))
         .route("/api/tournaments/{id}/standings/stream", get(stream))
+        .route("/api/tournaments/{id}/hero-stats", get(hero_stats))
+}
+
+/// Every hero in the tournament ranked per scoring criterion, plus overall.
+///
+/// Lives with the leaderboard because it is the same fold input read the same
+/// way; the standings stream's "poll now" push applies to it unchanged.
+async fn hero_stats(
+    State(state): State<AppState>,
+    AppPath(id): AppPath<i64>,
+) -> ApiResult<Json<HeroStatsBoard>> {
+    crate::tournament::service::require_tournament(&state.pool, id).await?;
+    Ok(Json(service::hero_stats(&state, id).await?))
 }
 
 /// The leaderboard, carrying its own column definitions -- the backend cannot

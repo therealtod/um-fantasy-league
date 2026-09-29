@@ -52,9 +52,9 @@ async fn every_table_is_seeded_to_its_expected_size() {
     assert_eq!(4, count(db, "managers", "true").await);
     assert_eq!(3, count(db, "tournaments", "true").await);
     assert_eq!(
-        32,
+        37,
         count(db, "tournament_heroes", "true").await,
-        "12 + 12 + Spring's narrower 8"
+        "Summer's 12 + match 13's 5 drafted-or-banned, Winter's 12, Spring's narrower 8"
     );
     assert_eq!(7, count(db, "tournament_maps", "true").await);
     assert_eq!(4, count(db, "tournament_entries", "true").await);
@@ -431,13 +431,27 @@ async fn no_hero_is_both_drafted_and_banned_in_the_same_match() {
 #[tokio::test]
 async fn every_recorded_hero_was_in_the_tournaments_own_pool() {
     let app = TestApp::spawn().await;
+    // Played, drafted and banned alike: a real event's results never name a
+    // hero its pool does not carry, and the hero performance tables rank the
+    // pool only, so a stray here would score points nobody can see.
     let strays = scalar(
         app.pool(),
         "select count(*)
-         from match_game_participants mgp
-             join match_games mg on mg.id = mgp.game_id
+         from (
+             select mg.tournament_id, mgp.hero_id
+             from match_game_participants mgp
+                 join match_games mg on mg.id = mgp.game_id
+             union all
+             select tm.tournament_id, p.hero_id
+             from match_hero_picks p
+                 join tournament_matches tm on tm.id = p.match_id
+             union all
+             select tm.tournament_id, b.hero_id
+             from hero_bans b
+                 join tournament_matches tm on tm.id = b.match_id
+         ) as named
              left join tournament_heroes th
-                 on th.tournament_id = mg.tournament_id and th.hero_id = mgp.hero_id
+                 on th.tournament_id = named.tournament_id and th.hero_id = named.hero_id
          where th.hero_id is null"
             .to_owned(),
     )
@@ -445,9 +459,7 @@ async fn every_recorded_hero_was_in_the_tournaments_own_pool() {
 
     assert_eq!(
         0, strays,
-        "a result naming a played hero outside the pool would poison every roster's score -- note \
-         this checks who *played*, not who was *banned*: match 13's bans deliberately use \
-         heroes outside Summer of Legends' pool, which this query never looks at"
+        "every hero a result names -- played, drafted or banned -- is in that tournament's pool"
     );
 }
 
