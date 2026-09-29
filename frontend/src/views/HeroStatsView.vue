@@ -4,7 +4,18 @@ import { useHeroStatsStore } from '@/stores/heroStats'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { HeroRankRow } from '@/api/types'
 import { standingsAvailable } from '@/domain/tournamentStatus'
-import { TOP_ROWS, hasHiddenRows, pointsTone, visibleRows, type PointsTone } from '@/domain/heroStats'
+import {
+  OVERALL,
+  TOP_ROWS,
+  hasHiddenRows,
+  heroMatrix,
+  nextSort,
+  pointsTone,
+  sortMatrix,
+  visibleRows,
+  type MatrixSort,
+  type PointsTone,
+} from '@/domain/heroStats'
 import { formatCredits, formatPoints } from '@/lib/format'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 
@@ -21,9 +32,15 @@ function defaultTournamentId() {
 /** Metric keys whose table is showing every hero rather than the top ten. */
 const expanded = ref(new Set<string>())
 
+const DEFAULT_SORT: MatrixSort = { key: OVERALL, direction: 'desc' }
+
+/** The all-heroes table's column and direction; another tournament may not price the same metrics. */
+const sort = ref<MatrixSort>(DEFAULT_SORT)
+
 function start(id: number | null) {
   if (id === null) return
   expanded.value = new Set()
+  sort.value = DEFAULT_SORT
   void heroStats.load(id)
 }
 
@@ -59,7 +76,7 @@ const tables = computed<HeroTable[]>(() => {
   if (!board.value) return []
   return [
     {
-      key: 'OVERALL',
+      key: OVERALL,
       label: 'Overall',
       caption: 'All criteria',
       coefficient: 1,
@@ -76,6 +93,51 @@ const tables = computed<HeroTable[]>(() => {
     })),
   ]
 })
+
+interface MatrixColumn {
+  key: string
+  label: string
+  title: string
+  coefficient: number
+}
+
+/** The all-heroes table's sortable columns: the total, then each criterion in the rule set's order. */
+const matrixColumns = computed<MatrixColumn[]>(() => {
+  if (!board.value) return []
+  return [
+    { key: OVERALL, label: 'Overall', title: 'All criteria', coefficient: 1 },
+    ...board.value.categories.map((category) => ({
+      key: category.metric,
+      label: category.label,
+      title: `${category.metric} × ${category.coefficient}`,
+      coefficient: category.coefficient,
+    })),
+  ]
+})
+
+/** The criteria columns that scroll; Overall is pinned beside the hero instead. */
+const metricColumns = computed(() => matrixColumns.value.slice(1))
+
+/** The sort actually applied: a column a live refresh dropped falls back to Overall. */
+const activeSort = computed<MatrixSort>(() =>
+  matrixColumns.value.some((column) => column.key === sort.value.key) ? sort.value : DEFAULT_SORT,
+)
+
+const matrixRows = computed(() => (board.value ? sortMatrix(heroMatrix(board.value), activeSort.value) : []))
+
+function sortBy(key: string) {
+  sort.value = nextSort(activeSort.value, key)
+}
+
+function ariaSort(key: string) {
+  if (activeSort.value.key !== key) return 'none'
+  return activeSort.value.direction === 'desc' ? 'descending' : 'ascending'
+}
+
+function sortGlyph(key: string) {
+  if (activeSort.value.key !== key) return ''
+  return activeSort.value.direction === 'desc' ? '▼' : '▲'
+}
 
 function toggle(key: string) {
   const next = new Set(expanded.value)
@@ -152,6 +214,109 @@ const currentTournament = computed(() =>
       >
         No recorded results yet — every hero is still on zero.
       </p>
+
+      <!-- Every hero against every criterion at once, sorted by whichever header
+           was clicked. Same scroll shape as the standings leaderboard: rank, hero
+           and overall stay pinned while the criteria scroll underneath. -->
+      <section
+        v-if="board.overall.length > 0"
+        class="panel mt-4 min-w-0"
+        aria-labelledby="hero-matrix-title"
+      >
+        <header
+          class="flex items-baseline justify-between gap-3 border-b border-edge bg-surface-lowest px-4 py-3"
+        >
+          <h2 id="hero-matrix-title" class="label-caps text-cyan">All heroes</h2>
+          <span class="label-caps">Click a column to sort</span>
+        </header>
+        <div class="overflow-x-auto">
+          <table id="hero-matrix" class="w-max min-w-full border-collapse">
+            <thead>
+              <tr class="border-b border-edge bg-surface-lowest text-left">
+                <th
+                  scope="col"
+                  class="label-caps cell-pinned-rank sticky z-20 bg-surface-lowest px-2 py-3 md:px-3"
+                >
+                  Rnk
+                </th>
+                <!-- The hero rides the leaderboard's manager pin: same width, same
+                     offset chain, so the overall column pins right after it. -->
+                <th
+                  scope="col"
+                  class="label-caps cell-pinned-manager sticky z-20 bg-surface-lowest px-3 py-3 whitespace-nowrap md:px-4"
+                >
+                  Hero
+                </th>
+                <th
+                  scope="col"
+                  class="cell-pinned-edge cell-pinned-total cell-total-emphasis sticky z-20 bg-surface-lowest p-0 text-right"
+                  :aria-sort="ariaSort(OVERALL)"
+                >
+                  <button
+                    type="button"
+                    class="label-caps w-full px-3 py-3 text-right whitespace-nowrap text-cyan"
+                    title="All criteria"
+                    @click="sortBy(OVERALL)"
+                  >
+                    Overall {{ sortGlyph(OVERALL) }}
+                  </button>
+                </th>
+                <th
+                  v-for="column in metricColumns"
+                  :key="column.key"
+                  scope="col"
+                  class="p-0 text-right"
+                  :aria-sort="ariaSort(column.key)"
+                >
+                  <button
+                    type="button"
+                    class="label-caps w-full px-4 py-3 text-right whitespace-nowrap hover:text-ink"
+                    :class="{ 'text-cyan': activeSort.key === column.key }"
+                    :title="column.title"
+                    @click="sortBy(column.key)"
+                  >
+                    {{ column.label }} {{ sortGlyph(column.key) }}
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in matrixRows"
+                :key="row.heroId"
+                class="row-opaque border-b border-edge last:border-b-0"
+              >
+                <!-- The rank for the sorted column, as that column's own table ranks it. -->
+                <td class="stat-value cell-pinned cell-pinned-rank px-2 py-2 text-sm text-ink-dim md:px-3">
+                  {{ row.ranks[activeSort.key] ?? '—' }}
+                </td>
+                <td class="cell-pinned cell-pinned-manager px-3 py-2 md:px-4">
+                  <p class="max-w-[6rem] truncate font-mono text-xs font-bold text-ink uppercase md:max-w-[9rem]">
+                    {{ row.heroName }}
+                  </p>
+                  <p class="max-w-[6rem] truncate font-mono text-[10px] text-ink-dim md:max-w-[9rem]">
+                    {{ formatCredits(row.cost) }}
+                  </p>
+                </td>
+                <td
+                  class="stat-value cell-pinned cell-pinned-edge cell-pinned-total cell-total-emphasis px-3 py-2 text-right text-sm whitespace-nowrap"
+                  :class="TONE_CLASS[pointsTone(row.points[OVERALL] ?? 0)]"
+                >
+                  {{ formatPoints(row.points[OVERALL] ?? 0) }}
+                </td>
+                <td
+                  v-for="column in metricColumns"
+                  :key="column.key"
+                  class="stat-value px-4 py-2 text-right text-xs whitespace-nowrap"
+                  :class="TONE_CLASS[pointsTone(row.points[column.key] ?? 0, column.coefficient)]"
+                >
+                  {{ formatPoints(row.points[column.key] ?? 0) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div class="mt-4 grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         <section

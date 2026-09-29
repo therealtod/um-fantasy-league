@@ -387,7 +387,10 @@ can be drafted — so an unfielded pool hero ranks on 0 and a hero a result name
 `every_recorded_hero_was_in_the_tournaments_own_pool` checks that every hero a result names — played,
 drafted *or* banned — is priced in that tournament's pool, which is why Summer also prices the five
 heroes match 13 only drafted or struck. Nothing is stored, and the frontend refreshes it off the existing standings stream rather than a
-second one.
+second one. `HeroStatsView` also pivots that same board, client-side, into one all-heroes table
+sortable by any column (`src/domain/heroStats.ts`'s `heroMatrix`/`sortMatrix`); its rank column is
+the server's rank for the sorted column, never re-derived, and ties keep the server's order in
+either direction.
 
 `GET /api/tournaments/{id}/standings/stream` is an SSE endpoint (`standings::sse::StandingsSseHub`)
 that pushes a bare "something changed" event after `r#match::admin_service::record`/`correct`/`delete`
