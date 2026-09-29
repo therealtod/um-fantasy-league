@@ -199,7 +199,7 @@ function playerLabels(p: MatchImportPreviewDto): string {
           </li>
         </ul>
         <p v-if="addableMaps.length === 0" class="text-xs text-ink-dim">
-          Add the missing entries under Heroes or Maps, then import again.
+          Add the missing entries under Heroes, Hero Pool or Maps, then import again.
         </p>
       </div>
 

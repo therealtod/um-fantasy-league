@@ -550,7 +550,9 @@ pool/pricing (`tournament_heroes`), per-tournament board pool (`tournament_maps`
 sets/coefficients, plus create/update/delete for match results. Both pools also support removal, and
 the two removals are deliberately asymmetric: dropping a hero from `tournament_heroes`
 (`hero::pool_admin::remove_from_pool`) is always allowed and simply re-prices any roster still holding
-it to 0 (the "no cost snapshot" invariant above, applied to a removal rather than a re-price), while
+it to 0 (the "no cost snapshot" invariant above, applied to a removal rather than a re-price) — though
+a recorded match naming that hero can then no longer be *corrected* until it is priced back in, since
+`HeroNotInPool` checks a correction exactly as it checks a new record — while
 dropping a map from `tournament_maps` (`map::admin_service::remove_from_pool`) is rejected with
 `DomainError::conflict` when the tournament has a recorded game on it, since `match_games` carries a
 composite FK onto that row. That FK is `DEFERRABLE INITIALLY DEFERRED` so a tournament delete (which
@@ -578,7 +580,13 @@ policy: `NotExactlyOneWinner` treats zero winners as being as wrong as two, and
 `LoserHasPositiveHealth` rejects a loser who survived. Three more police the draft:
 `PlayedHeroNotDrafted` is what makes a recorded draft complete (and so what makes `APPEARANCE`
 measurable), `BannedHeroDrafted` keeps picks and bans disjoint, and `DuplicatePick` mirrors
-`DuplicateBan`. `BanSideInvalid` polices the ban side described in the invariants above. Activating a
+`DuplicateBan`. `BanSideInvalid` polices the ban side described in the invariants above.
+`HeroNotInPool` requires every hero the match names — played, drafted *or* banned — to be priced in
+this tournament's `tournament_heroes`, the hero half of `MapNotInPool`: a stray would score points no
+roster could hold and the pool-only hero tables never show. A hero that does not exist at all is
+`UnknownHero` instead, never both. Unlike a map there is no foreign key behind it, so it is the rule
+alone that holds the line — `r#match::admin_service::validate` reads the pool ids through
+`hero::query::find_by_ids`. Activating a
 scoring rule set deactivates any active sibling in the same transaction, since only one may be active
 per tournament. An unknown scoring metric (e.g. the seed's `CROWD_FAVOURITE`) is surfaced as a
 non-blocking warning on the response, never rejected.
@@ -638,9 +646,12 @@ is merely reported. Don't turn this into an alias table: a genuinely differently
 catalogue question.
 
 Anything unresolved comes back in `unresolved[]` with the source's own spelling and never blocks the
-*import* — only the recording. `MAP_NOT_IN_POOL` is the one that fires in practice, because
-`match_games` carries a composite FK onto `tournament_maps`; heroes reference `heroes(id)` directly and
-have no equivalent constraint. `external_link` stores the source URL, which is also the duplicate
+*import* — only the recording. The two `…_NOT_IN_POOL` reasons are the ones that fire in practice:
+`MAP_NOT_IN_POOL` because `match_games` carries a composite FK onto `tournament_maps`, and
+`HERO_NOT_IN_POOL` because the record endpoint's `HeroNotInPool` rule would otherwise refuse the
+filled-in draft. Either leaves its slot empty in the preview rather than seeding the form with an id
+the pool-filtered dropdowns cannot show. Only the board carries a one-click fix ("Add to board pool"):
+pricing a hero into a pool needs a price, which is the admin's call. `external_link` stores the source URL, which is also the duplicate
 check — the column is `not null` with a unique index per tournament,
 `matchimport::service::preview` reports the clash as `already_imported_match_id`, and
 `r#match::admin_service` refuses the write with `DomainError::conflict` naming the match to correct. A
@@ -674,7 +685,8 @@ its whole arsenal — every hero it took, whether that hero played, sat out, or 
 and every hero dropdown below is filtered to it: a game's "Side N Hero" offers only that side's
 drafted-and-unstruck heroes, and a side's ban rows offer only its own arsenal. That filtering is what
 makes `PLAYED_HERO_NOT_DRAFTED` and `BANNED_HERO_PLAYED` unreachable from this form, so the wizard
-does not check for them. Games follow: one map and two heroes each, "+ Add Game" for a best-of-N,
+does not check for them — and since every list starts from the tournament's hero pool
+(`listHeroPool`), `HERO_NOT_IN_POOL` is unreachable from it too. Games follow: one map and two heroes each, "+ Add Game" for a best-of-N,
 with the winner a **radio** rather than a checkbox — exactly one side wins, and there is no "neither"
 to express — plus a client-side check so an untouched winner reads as a prompt instead of a 422.
 Pre-bans come last, in their own section, offering only heroes neither side drafted.

@@ -175,16 +175,18 @@ pub enum UnresolvedKind {
 
 /// Why a name could not be used.
 ///
-/// [`UnresolvedReason::MapNotInPool`] is the one that actually fires in
-/// practice: `match_games` carries a composite foreign key onto
-/// `tournament_maps`, so a board this league knows about but has not added to
-/// *this tournament's* pool cannot be recorded against it. Heroes have no such
-/// constraint -- `match_game_participants.hero_id` and `hero_bans.hero_id`
-/// reference `heroes(id)` directly, never `tournament_heroes`.
+/// The two `…NotInPool` reasons are the ones that fire in practice: a name
+/// the catalogue knows, but that *this tournament's* pool does not carry.
+/// [`UnresolvedReason::MapNotInPool`] mirrors the composite foreign key
+/// `match_games` carries onto `tournament_maps`;
+/// [`UnresolvedReason::HeroNotInPool`] mirrors `match_policy`'s
+/// `HERO_NOT_IN_POOL`, which the record endpoint would otherwise reject the
+/// draft with only after the admin had filled it in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UnresolvedReason {
     UnknownHero,
+    HeroNotInPool,
     UnknownMap,
     MapNotInPool,
 }

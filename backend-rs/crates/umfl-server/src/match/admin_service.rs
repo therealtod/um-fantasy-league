@@ -341,13 +341,28 @@ async fn validate(
         .collect();
     let valid_hero_ids: BTreeSet<i64> =
         sqlx::query_scalar!("select id from heroes where id = any($1)", &referenced)
-            .fetch_all(conn)
+            .fetch_all(&mut *conn)
             .await?
             .into_iter()
             .collect();
+    // The same referenced ids, narrowed to this tournament's pool: a hero the
+    // pool does not carry is `HERO_NOT_IN_POOL`, so results can never name a
+    // hero nobody could have drafted.
+    let pool_hero_ids: BTreeSet<i64> =
+        crate::hero::query::find_by_ids(&mut *conn, tournament_id, &referenced)
+            .await?
+            .into_iter()
+            .map(|hero| hero.id)
+            .collect();
 
-    let violations =
-        match_policy::validate(&valid_map_ids, &valid_hero_ids, participants, games, bans);
+    let violations = match_policy::validate(
+        &valid_map_ids,
+        &valid_hero_ids,
+        &pool_hero_ids,
+        participants,
+        games,
+        bans,
+    );
     if violations.is_empty() {
         return Ok(());
     }

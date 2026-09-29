@@ -458,6 +458,61 @@ async fn a_nonexistent_hero_id_is_a_422_not_a_raw_constraint_violation() {
     assert_eq!(rules(&response), ["UNKNOWN_HERO"]);
 }
 
+/// Nikola Tesla is a real hero, but Winter's pool does not price him: a result
+/// naming him would score points no roster could hold and no hero table shows.
+#[tokio::test]
+async fn a_hero_outside_the_tournaments_pool_is_rejected_when_played() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let map = map_id(&app, "Baskerville Manor").await;
+    let robin_hood = app.hero_id("Robin Hood").await;
+    let tesla = app.hero_id("Nikola Tesla").await;
+    let mut drafted = fixture_draft(&app).await;
+    drafted.push(tesla);
+    let request = body(
+        1,
+        &a_link(),
+        json!([
+            participant(Some("Tomas Ferreira"), &drafted),
+            participant(Some("Rina Okafor"), &drafted),
+        ]),
+        json!([game(1, map, (tesla, 6, true), (robin_hood, 0, false))]),
+        json!([]),
+    );
+
+    let response = post_match(&app, winter, &request).await;
+
+    assert_eq!(response.status, 422, "{}", response.text());
+    assert_eq!(rules(&response), ["HERO_NOT_IN_POOL"]);
+    let message = response.json()["violations"][0]["message"]
+        .as_str()
+        .expect("a message")
+        .to_owned();
+    assert!(message.contains(&tesla.to_string()), "{message}");
+}
+
+/// Struck heroes are held to the pool too -- a real event's bans come from the
+/// same roster of heroes its games do.
+#[tokio::test]
+async fn a_hero_outside_the_tournaments_pool_is_rejected_when_only_banned() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id("Winter of Champions").await;
+    let map = map_id(&app, "Baskerville Manor").await;
+    let tesla = app.hero_id("Nikola Tesla").await;
+    let request = body(
+        1,
+        &a_link(),
+        two_sides(&app).await,
+        alice_beats_robin_hood(&app, map).await,
+        json!([{ "heroId": tesla, "banType": "PRE_BAN" }]),
+    );
+
+    let response = post_match(&app, winter, &request).await;
+
+    assert_eq!(response.status, 422, "{}", response.text());
+    assert_eq!(rules(&response), ["HERO_NOT_IN_POOL"]);
+}
+
 /// A hero cannot be struck out of the draft and then taken in it, so a banned
 /// hero that played breaks both ban rules rather than one.
 #[tokio::test]

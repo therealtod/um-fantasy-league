@@ -434,7 +434,8 @@ heroes, maps, a tournament's hero pool and pricing, its board pool, scoring rule
 and match results (create/update/delete). `/admin` in the frontend is the UI over it.
 
 `umfl_domain::match_policy::validate` validates a match submission before save (each game's map in
-the tournament's pool, no duplicate or unknown hero, dense 1..N game numbers, two sides per game, and
+the tournament's pool, every hero played, drafted or banned in its hero pool, no duplicate or unknown
+hero, dense 1..N game numbers, two sides per game, and
 exactly one winner per game — zero is as invalid as two), returning `422` with every violation on
 failure, the same shape as a roster rule breach. Activating a scoring rule set deactivates any active
 sibling for that tournament in the same transaction — only one rule set may be active per

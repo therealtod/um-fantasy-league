@@ -21,6 +21,7 @@ use umfl_domain::name_resolver::NameResolver;
 use umfl_domain::scraped_timestamps;
 
 use crate::error::ApiResult;
+use crate::hero::query::{self as hero_query, HeroFilter};
 use crate::map::query as map_query;
 use crate::r#match::query as match_query;
 use crate::state::AppState;
@@ -33,8 +34,8 @@ use super::{
     UnresolvedKind, UnresolvedName, UnresolvedReason,
 };
 
-/// Scrapes `source_url` and resolves it against this tournament's catalogue and
-/// board pool.
+/// Scrapes `source_url` and resolves it against the catalogue and this
+/// tournament's hero and board pools.
 ///
 /// **Deliberately not transactional.** The scrape is an outbound HTTP call that
 /// can hold a socket open for up to 90 seconds, and a transaction would pin one
@@ -67,10 +68,17 @@ pub async fn preview(
     let heroes = NameResolver::new(query::hero_names(&state.pool).await?);
     let maps = NameResolver::new(query::map_names(&state.pool).await?);
     let pool_map_ids = map_query::pool_map_ids(&state.pool, tournament_id).await?;
+    let pool_hero_ids =
+        hero_query::find_by_tournament(&state.pool, tournament_id, &HeroFilter::default())
+            .await?
+            .into_iter()
+            .map(|hero| hero.id)
+            .collect();
 
     let mut resolution = Resolution {
         heroes,
         maps,
+        pool_hero_ids,
         pool_map_ids,
         // Collected as the resolution runs, then handed back in order: one hero
         // missing from the catalogue can appear as a pick, a game participant
@@ -229,6 +237,7 @@ fn distinct(ids: Vec<i64>) -> Vec<i64> {
 struct Resolution {
     heroes: NameResolver,
     maps: NameResolver,
+    pool_hero_ids: Vec<i64>,
     pool_map_ids: Vec<i64>,
     unresolved: IndexSet<UnresolvedName>,
 }
@@ -236,21 +245,36 @@ struct Resolution {
 impl Resolution {
     fn hero(&mut self, name: Option<&str>) -> Option<i64> {
         let name = name.map(str::trim).filter(|n| !n.is_empty())?;
-        match self.heroes.resolve(Some(name)) {
-            Some(id) => Some(id),
-            None => {
-                self.unresolved.insert(UnresolvedName {
-                    kind: UnresolvedKind::Hero,
-                    source_name: name.to_owned(),
-                    reason: UnresolvedReason::UnknownHero,
-                    map_id: None,
-                    message: format!(
-                        "No hero named \"{name}\" exists. Add it under Heroes, then import again."
-                    ),
-                });
-                None
-            }
+        let Some(hero_id) = self.heroes.resolve(Some(name)) else {
+            self.unresolved.insert(UnresolvedName {
+                kind: UnresolvedKind::Hero,
+                source_name: name.to_owned(),
+                reason: UnresolvedReason::UnknownHero,
+                map_id: None,
+                message: format!(
+                    "No hero named \"{name}\" exists. Add it under Heroes, then import again."
+                ),
+            });
+            return None;
+        };
+        // The record endpoint rejects a hero outside this tournament's pool
+        // (`HERO_NOT_IN_POOL`), so the preview says so up front -- and leaves
+        // the slot empty rather than seeding the form with an id none of its
+        // pool-filtered dropdowns can show.
+        if !self.pool_hero_ids.contains(&hero_id) {
+            self.unresolved.insert(UnresolvedName {
+                kind: UnresolvedKind::Hero,
+                source_name: name.to_owned(),
+                reason: UnresolvedReason::HeroNotInPool,
+                map_id: None,
+                message: format!(
+                    "\"{name}\" is not in this tournament's hero pool. \
+                     Price it in under Hero Pool, then import again."
+                ),
+            });
+            return None;
         }
+        Some(hero_id)
     }
 
     fn map(&mut self, name: Option<&str>) -> Option<i64> {
@@ -270,7 +294,8 @@ impl Resolution {
         // The one that fires in practice: `match_games` carries a composite
         // foreign key onto `tournament_maps`, so a board this league knows about
         // but has not added to *this* tournament's pool cannot be recorded
-        // against it. Heroes have no equivalent constraint.
+        // against it. (A hero outside the pool is refused the same way, by
+        // `HERO_NOT_IN_POOL` rather than a foreign key -- see `hero` above.)
         if !self.pool_map_ids.contains(&map_id) {
             self.unresolved.insert(UnresolvedName {
                 kind: UnresolvedKind::Map,

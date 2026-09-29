@@ -165,7 +165,30 @@ describe('MatchImportPanel', () => {
 
     expect(wrapper.text()).toContain('Nonexistent Hero')
     expect(wrapper.findAll('button.btn-ghost').some((b) => b.text().includes('Add to board pool'))).toBe(false)
-    expect(wrapper.text()).toContain('Add the missing entries under Heroes or Maps')
+    expect(wrapper.text()).toContain('Add the missing entries under Heroes, Hero Pool or Maps')
+  })
+
+  it('blocks recording a hero outside the pool and says where to price it', async () => {
+    importMatch.mockResolvedValue({
+      ...resolvedPreview,
+      unresolved: [
+        {
+          kind: 'HERO',
+          sourceName: 'Wyatt Earp',
+          reason: 'HERO_NOT_IN_POOL',
+          message: '"Wyatt Earp" is not in this tournament\'s hero pool. Price it in under Hero Pool, then import again.',
+        },
+      ],
+    })
+    const wrapper = await mountPanel()
+    await runImport(wrapper)
+
+    expect(wrapper.text()).toContain('Wyatt Earp')
+    expect(wrapper.text()).toContain('Price it in under Hero Pool')
+    // No one-click shortcut: pricing a hero needs a price, which only the admin can pick.
+    expect(wrapper.findAll('button.btn-ghost').some((b) => b.text().includes('Add to board pool'))).toBe(false)
+    // Recording would only come back as HERO_NOT_IN_POOL, so the panel does not offer it.
+    expect(wrapper.findAll('button.btn-primary').at(-1)!.attributes('disabled')).toBeDefined()
   })
 
   it('blocks recording a url already imported, and offers to correct that match instead', async () => {

@@ -333,11 +333,12 @@ export interface ImportMatchRequest {
 export type UnresolvedKind = 'HERO' | 'MAP'
 
 /**
- * `MAP_NOT_IN_POOL` is the one that fires in practice: a board this league knows
- * about but that isn't in *this tournament's* pool cannot carry a recorded game.
- * Heroes have no equivalent constraint.
+ * The two `…_NOT_IN_POOL` reasons are the ones that fire in practice: a hero or
+ * board this league knows about but that isn't in *this tournament's* pool
+ * cannot appear in a recorded match (`HERO_NOT_IN_POOL` / `MAP_NOT_IN_POOL` on
+ * the record endpoint).
  */
-export type UnresolvedReason = 'UNKNOWN_HERO' | 'UNKNOWN_MAP' | 'MAP_NOT_IN_POOL'
+export type UnresolvedReason = 'UNKNOWN_HERO' | 'HERO_NOT_IN_POOL' | 'UNKNOWN_MAP' | 'MAP_NOT_IN_POOL'
 
 export interface UnresolvedName {
   kind: UnresolvedKind

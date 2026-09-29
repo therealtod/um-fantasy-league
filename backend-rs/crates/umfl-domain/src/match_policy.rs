@@ -26,6 +26,14 @@ pub enum MatchRule {
     /// One or more games use a map outside this tournament's board pool.
     MapNotInPool,
 
+    /// A hero that exists is named -- played, drafted or banned -- without
+    /// being in this tournament's hero pool. A real event's results only ever
+    /// name heroes its pool carries, and the hero performance tables rank the
+    /// pool alone, so a stray would score points nobody could see. A hero
+    /// that does not exist at all is [`MatchRule::UnknownHero`] instead, never
+    /// both.
+    HeroNotInPool,
+
     /// The series has no games at all -- at least one is required.
     InvalidGameCount,
 
@@ -83,6 +91,7 @@ impl MatchRule {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::MapNotInPool => "MAP_NOT_IN_POOL",
+            Self::HeroNotInPool => "HERO_NOT_IN_POOL",
             Self::InvalidGameCount => "INVALID_GAME_COUNT",
             Self::GameNumbersNotSequential => "GAME_NUMBERS_NOT_SEQUENTIAL",
             Self::InvalidParticipantCount => "INVALID_PARTICIPANT_COUNT",
@@ -185,9 +194,13 @@ pub const EXPECTED_PARTICIPANT_COUNT: usize = 2;
 
 /// Validates a match submission, reporting **every** broken rule rather than
 /// the first, so the admin wizard can highlight everything wrong in one pass.
+///
+/// `valid_hero_ids` is which referenced heroes exist at all; `pool_hero_ids`
+/// is which are in this tournament's hero pool.
 pub fn validate(
     valid_map_ids: &BTreeSet<i64>,
     valid_hero_ids: &BTreeSet<i64>,
+    pool_hero_ids: &BTreeSet<i64>,
     participants: &[MatchParticipantInput],
     games: &[MatchGameInput],
     bans: &[MatchBanInput],
@@ -195,6 +208,7 @@ pub fn validate(
     validate_expecting(
         valid_map_ids,
         valid_hero_ids,
+        pool_hero_ids,
         participants,
         games,
         bans,
@@ -205,6 +219,7 @@ pub fn validate(
 pub fn validate_expecting(
     valid_map_ids: &BTreeSet<i64>,
     valid_hero_ids: &BTreeSet<i64>,
+    pool_hero_ids: &BTreeSet<i64>,
     participants: &[MatchParticipantInput],
     games: &[MatchGameInput],
     bans: &[MatchBanInput],
@@ -440,7 +455,7 @@ pub fn validate_expecting(
         ));
     }
 
-    let unknown_heroes: BTreeSet<i64> = games
+    let named_heroes: BTreeSet<i64> = games
         .iter()
         .flat_map(|g| g.participants.iter().map(|p| p.hero_id))
         .chain(
@@ -449,12 +464,28 @@ pub fn validate_expecting(
                 .flat_map(|p| p.drafted_hero_ids.iter().copied()),
         )
         .chain(bans.iter().map(|b| b.hero_id))
-        .filter(|id| !valid_hero_ids.contains(id))
         .collect();
+    let (existing_heroes, unknown_heroes): (BTreeSet<i64>, BTreeSet<i64>) = named_heroes
+        .into_iter()
+        .partition(|id| valid_hero_ids.contains(id));
     if !unknown_heroes.is_empty() {
         violations.push(MatchViolation::new(
             MatchRule::UnknownHero,
             format!("Hero(es) do not exist: {}.", render_ids(&unknown_heroes)),
+        ));
+    }
+    let heroes_outside_pool: BTreeSet<i64> = existing_heroes
+        .into_iter()
+        .filter(|id| !pool_hero_ids.contains(id))
+        .collect();
+    if !heroes_outside_pool.is_empty() {
+        violations.push(MatchViolation::new(
+            MatchRule::HeroNotInPool,
+            format!(
+                "Hero(es) {} are not in this tournament's hero pool -- price them into the \
+                 pool before recording a match that names them.",
+                render_ids(&heroes_outside_pool)
+            ),
         ));
     }
 
@@ -515,7 +546,12 @@ mod tests {
         BTreeSet::from([1, 2, 3])
     }
 
+    /// Hero 13 exists but is not in the pool -- the `HERO_NOT_IN_POOL` case.
     fn valid_heroes() -> BTreeSet<i64> {
+        BTreeSet::from([10, 11, 12, 13])
+    }
+
+    fn pool_heroes() -> BTreeSet<i64> {
         BTreeSet::from([10, 11, 12])
     }
 
@@ -599,7 +635,14 @@ mod tests {
         games: &[MatchGameInput],
         bans: &[MatchBanInput],
     ) -> Vec<MatchViolation> {
-        validate(&valid_maps(), &valid_heroes(), participants, games, bans)
+        validate(
+            &valid_maps(),
+            &valid_heroes(),
+            &pool_heroes(),
+            participants,
+            games,
+            bans,
+        )
     }
 
     fn only_message(violations: &[MatchViolation]) -> &str {
@@ -996,6 +1039,59 @@ mod tests {
 
         assert_eq!(rules(&violations), vec![MatchRule::UnknownHero]);
         assert!(only_message(&violations).contains("999"));
+    }
+
+    #[test]
+    fn a_hero_outside_the_pool_is_rejected_wherever_it_is_named() {
+        // Played, drafted, and banned: each on its own is a stray.
+        let played = check(&drafts(&[10], &[13]), &one_legal_game(10, 13), &[]);
+        assert_eq!(rules(&played), vec![MatchRule::HeroNotInPool]);
+        assert!(only_message(&played).contains("13"));
+
+        let drafted = check(&drafts(&[10, 13], &[11]), &one_legal_game(10, 11), &[]);
+        assert_eq!(rules(&drafted), vec![MatchRule::HeroNotInPool]);
+
+        let banned = check(
+            &participants(),
+            &one_legal_game(10, 11),
+            &[ban(13, BanType::PreBan, None)],
+        );
+        assert_eq!(rules(&banned), vec![MatchRule::HeroNotInPool]);
+    }
+
+    #[test]
+    fn a_hero_that_does_not_exist_is_unknown_not_also_outside_the_pool() {
+        let violations = check(
+            &participants(),
+            &one_legal_game(10, 11),
+            &[
+                ban(999, BanType::PreBan, None),
+                ban(13, BanType::PreBan, None),
+            ],
+        );
+
+        assert_eq!(
+            rules(&violations),
+            vec![MatchRule::UnknownHero, MatchRule::HeroNotInPool]
+        );
+        assert!(violations[0].message.contains("999"));
+        assert!(!violations[1].message.contains("999"));
+        assert!(violations[1].message.contains("13"));
+    }
+
+    #[test]
+    fn a_hero_named_in_several_places_is_reported_once() {
+        let violations = check(
+            &drafts(&[10], &[13]),
+            &[
+                game(1, vec![won(10), played(13)]),
+                game(2, vec![played(10), won(13)]),
+            ],
+            &[],
+        );
+
+        assert_eq!(rules(&violations), vec![MatchRule::HeroNotInPool]);
+        assert_eq!(only_message(&violations).matches("13").count(), 1);
     }
 
     /// The player label is free text with no table behind it, so there is

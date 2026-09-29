@@ -7,7 +7,10 @@
 //!
 //! Everything writes to **Summer of Legends**, whose seeded board pool
 //! deliberately carries only one of this match's three boards -- which is what
-//! makes `MAP_NOT_IN_POOL` observable without arranging anything.
+//! makes `MAP_NOT_IN_POOL` observable without arranging anything. Its hero pool
+//! likewise prices only some of the capture's heroes, so `HERO_NOT_IN_POOL` is
+//! just as observable; `stock_pool` fills both in when a test needs the preview
+//! fully resolved.
 
 use std::sync::Arc;
 
@@ -69,12 +72,62 @@ async fn summer(app: &TestApp) -> i64 {
     app.tournament_id("Summer of Legends").await
 }
 
-/// Every board in the fixture, so the preview comes back fully resolved.
+/// Every board *and* every hero in the fixture, so the preview comes back fully
+/// resolved. The capture is a real match from a real event, and most of its
+/// sixteen heroes are not among the ones Summer of Legends' seed prices.
+async fn stock_pool(app: &TestApp, tournament_id: i64) {
+    stock_board_pool(app, tournament_id).await;
+    stock_hero_pool(app, tournament_id).await;
+}
+
+/// Every hero the fixture names -- picked, played, banned or pre-banned -- at a
+/// flat price. Prices are beside the point: the importer only asks whether a
+/// hero is in the pool.
+async fn stock_hero_pool(app: &TestApp, tournament_id: i64) {
+    let names: Vec<String> = fixture_hero_names();
+    sqlx::query(
+        "insert into tournament_heroes (tournament_id, hero_id, cost)
+         select $1, id, 1000 from heroes where name = any($2)
+         on conflict do nothing",
+    )
+    .bind(tournament_id)
+    .bind(&names)
+    .execute(app.pool())
+    .await
+    .expect("price the fixture's heroes into the pool");
+}
+
+fn fixture_hero_names() -> Vec<String> {
+    let scraped = sample_match();
+    let sides = [scraped.side_a.as_ref(), scraped.side_b.as_ref()];
+    let mut names: Vec<String> = sides
+        .iter()
+        .flatten()
+        .flat_map(|side| {
+            side.picks
+                .iter()
+                .cloned()
+                .chain(side.bans.iter().filter_map(|b| b.hero_name.clone()))
+        })
+        .chain(scraped.pre_bans.iter().cloned())
+        .chain(scraped.games.iter().flat_map(|g| {
+            [g.side_a.as_ref(), g.side_b.as_ref()]
+                .into_iter()
+                .flatten()
+                .filter_map(|s| s.hero_name.clone())
+        }))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every board in the fixture.
 ///
 /// Written straight to the link table: `tournament_maps` is a composite-keyed
 /// table with no aggregate, and the point here is the importer, not the pool
 /// endpoint that `map_admin.rs` already covers.
-async fn stock_pool(app: &TestApp, tournament_id: i64) {
+async fn stock_board_pool(app: &TestApp, tournament_id: i64) {
     for name in ["Technodrome", "Raptor Paddock", "Navy Pier"] {
         sqlx::query!(
             "insert into tournament_maps (tournament_id, map_id)
@@ -344,6 +397,8 @@ async fn reports_a_board_that_is_missing_from_this_tournaments_pool() {
     // Navy Pier, so this deliberately does *not* stock the pool.
     let app = app_with(sample_match()).await;
     let summer = summer(&app).await;
+    // Heroes stocked, boards left as seeded: this test is about the board pool.
+    stock_hero_pool(&app, summer).await;
 
     let preview = preview(&app, summer).await;
 
@@ -369,8 +424,7 @@ async fn reports_a_board_that_is_missing_from_this_tournaments_pool() {
         "the unresolved game has no map"
     );
     assert!(games[1]["mapId"].is_i64(), "the resolvable one still does");
-    // Heroes are unaffected: they reference `heroes(id)`, never
-    // `tournament_heroes`.
+    // A board missing from the pool costs that game its map and nothing else.
     assert!(unresolved.iter().all(|u| u["kind"] != "HERO"));
 }
 
@@ -405,6 +459,45 @@ async fn reports_an_unknown_hero_exactly_once() {
     assert!(first_side.get("heroId").is_none());
     // The name is still carried so the admin can see what failed.
     assert_eq!(first_side["heroName"], GHOST);
+}
+
+/// A hero the catalogue knows but this tournament's pool does not price is
+/// reported up front, the way a board outside the board pool is -- recording
+/// it would only fail later with `HERO_NOT_IN_POOL`. Wyatt Earp is both a pick
+/// and game 1's side-B hero here, and is still named once.
+#[tokio::test]
+async fn reports_a_hero_missing_from_this_tournaments_pool() {
+    let app = app_with(sample_match()).await;
+    let summer = summer(&app).await;
+    stock_board_pool(&app, summer).await;
+
+    let preview = preview(&app, summer).await;
+
+    let outside: Vec<&Value> = preview["unresolved"]
+        .as_array()
+        .expect("unresolved")
+        .iter()
+        .filter(|u| u["reason"] == "HERO_NOT_IN_POOL")
+        .collect();
+    let wyatt: Vec<&&Value> = outside
+        .iter()
+        .filter(|u| u["sourceName"] == "Wyatt Earp")
+        .collect();
+    assert_eq!(wyatt.len(), 1, "named once, though it appears twice");
+    assert_eq!(wyatt[0]["kind"], "HERO");
+    assert!(
+        wyatt[0]["message"]
+            .as_str()
+            .expect("a message")
+            .contains("hero pool")
+    );
+
+    let game_one = &preview["games"][0]["participants"];
+    // Tomoe Gozen is in Summer's pool, so she resolves...
+    assert!(game_one[0]["heroId"].is_i64(), "{game_one}");
+    // ... and Wyatt Earp's slot is left empty for the admin, name kept.
+    assert!(game_one[1].get("heroId").is_none(), "{game_one}");
+    assert_eq!(game_one[1]["heroName"], "Wyatt Earp");
 }
 
 /// A timezone the parser cannot resolve costs the timestamp, never the import.
