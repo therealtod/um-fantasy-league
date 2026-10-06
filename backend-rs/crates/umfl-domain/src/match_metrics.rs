@@ -264,6 +264,7 @@ mod tests {
             hero_name: hero_name.into(),
             health_remaining: health,
             is_winner,
+            stats: Default::default(),
         }
     }
 

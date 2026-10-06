@@ -14,6 +14,7 @@
 
 use crate::Violation;
 use crate::match_result::BanType;
+use crate::roster_roles;
 use indexmap::IndexMap;
 use std::collections::BTreeSet;
 
@@ -85,6 +86,17 @@ pub enum MatchRule {
     /// A `hero_id` referenced by a game participant, a pick or a ban does not
     /// exist.
     UnknownHero,
+
+    /// A game's stat name is not SCREAMING_SNAKE_CASE once normalised, so the
+    /// `match_game_stats` format CHECK would reject it.
+    StatNameMalformed,
+
+    /// One hero's stats in one game name the same stat twice once normalised
+    /// (`'attacks'` and `'ATTACKS'`), so there is no telling which to keep.
+    DuplicateStat,
+
+    /// A stat is a count of things a hero did, so it cannot be negative.
+    StatValueNegative,
 }
 
 impl MatchRule {
@@ -106,6 +118,9 @@ impl MatchRule {
             Self::NotExactlyOneWinner => "NOT_EXACTLY_ONE_WINNER",
             Self::LoserHasPositiveHealth => "LOSER_HAS_POSITIVE_HEALTH",
             Self::UnknownHero => "UNKNOWN_HERO",
+            Self::StatNameMalformed => "STAT_NAME_MALFORMED",
+            Self::DuplicateStat => "DUPLICATE_STAT",
+            Self::StatValueNegative => "STAT_VALUE_NEGATIVE",
         }
     }
 }
@@ -160,11 +175,15 @@ pub struct MatchParticipantInput {
     pub drafted_hero_ids: Vec<i64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchGameParticipantInput {
     pub hero_id: i64,
     pub health_remaining: i32,
     pub is_winner: bool,
+    /// This hero's stats for this game, keyed as submitted -- before the
+    /// trim-and-uppercase normalisation, which is what lets the stat rules
+    /// catch `'attacks'` and `'ATTACKS'` arriving together.
+    pub stats: IndexMap<String, i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -489,6 +508,74 @@ pub fn validate_expecting(
         ));
     }
 
+    violations.extend(stat_violations(games));
+
+    violations
+}
+
+/// The stat rules, which only look at one hero's stats in one game at a time.
+///
+/// Checked against the *normalised* name, because that is what is stored and
+/// what a role's weights are matched against.
+fn stat_violations(games: &[MatchGameInput]) -> Vec<MatchViolation> {
+    let mut violations = Vec::new();
+    let mut malformed: Vec<String> = Vec::new();
+    let mut duplicated: Vec<i32> = Vec::new();
+    let mut negative: Vec<i32> = Vec::new();
+
+    for game in games {
+        for participant in &game.participants {
+            let mut seen: Vec<String> = Vec::new();
+            for (stat, value) in &participant.stats {
+                let name = roster_roles::normalise_stat(stat);
+                if !roster_roles::is_well_formed_stat(&name) && !malformed.contains(&name) {
+                    malformed.push(name.clone());
+                }
+                if seen.contains(&name) && !duplicated.contains(&game.game_number) {
+                    duplicated.push(game.game_number);
+                }
+                seen.push(name);
+                if *value < 0 && !negative.contains(&game.game_number) {
+                    negative.push(game.game_number);
+                }
+            }
+        }
+    }
+
+    if !malformed.is_empty() {
+        violations.push(MatchViolation::new(
+            MatchRule::StatNameMalformed,
+            format!(
+                "Stat name(s) must be letters, digits and underscores starting with a letter: {}.",
+                malformed
+                    .iter()
+                    .map(|m| format!("'{m}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ));
+    }
+    if !duplicated.is_empty() {
+        duplicated.sort();
+        violations.push(MatchViolation::new(
+            MatchRule::DuplicateStat,
+            format!(
+                "Game(s) {} name the same stat twice for one hero.",
+                render_numbers(&duplicated)
+            ),
+        ));
+    }
+    if !negative.is_empty() {
+        negative.sort();
+        violations.push(MatchViolation::new(
+            MatchRule::StatValueNegative,
+            format!(
+                "Game(s) {} have a negative stat -- a stat counts what a hero did.",
+                render_numbers(&negative)
+            ),
+        ));
+    }
+
     violations
 }
 
@@ -581,6 +668,7 @@ mod tests {
             hero_id,
             health_remaining: 0,
             is_winner: false,
+            stats: IndexMap::new(),
         }
     }
 
@@ -1172,5 +1260,78 @@ mod tests {
             &[],
         );
         assert_eq!(only_message(&unknown), "Hero(es) do not exist: 998, 999.");
+    }
+
+    // -- stats --------------------------------------------------------------
+
+    fn with_stats(
+        mut p: MatchGameParticipantInput,
+        stats: &[(&str, i32)],
+    ) -> MatchGameParticipantInput {
+        p.stats = stats.iter().map(|(k, v)| ((*k).to_string(), *v)).collect();
+        p
+    }
+
+    #[test]
+    fn well_formed_stats_pass_in_any_case() {
+        let violations = check(
+            &participants(),
+            &[game(
+                1,
+                vec![
+                    with_stats(won(10), &[("attacks", 5), (" Healing ", 2)]),
+                    with_stats(played(11), &[("ATTACKS", 3)]),
+                ],
+            )],
+            &[],
+        );
+        assert!(violations.is_empty(), "{violations:?}");
+    }
+
+    #[test]
+    fn a_malformed_stat_name_is_named() {
+        let violations = check(
+            &participants(),
+            &[game(
+                1,
+                vec![with_stats(won(10), &[("damage-dealt", 5)]), played(11)],
+            )],
+            &[],
+        );
+        assert_eq!(rules(&violations), vec![MatchRule::StatNameMalformed]);
+        assert!(violations[0].message.contains("'DAMAGE-DEALT'"));
+    }
+
+    #[test]
+    fn the_same_stat_twice_after_normalising_is_a_duplicate() {
+        let violations = check(
+            &participants(),
+            &[
+                game(1, vec![won(10), played(11)]),
+                game(
+                    2,
+                    vec![
+                        with_stats(won(11), &[("attacks", 5), ("ATTACKS", 6)]),
+                        played(10),
+                    ],
+                ),
+            ],
+            &[],
+        );
+        assert_eq!(rules(&violations), vec![MatchRule::DuplicateStat]);
+        assert!(violations[0].message.contains("[2]"));
+    }
+
+    #[test]
+    fn a_negative_stat_is_refused() {
+        let violations = check(
+            &participants(),
+            &[game(
+                1,
+                vec![won(10), with_stats(played(11), &[("ATTACKS", -1)])],
+            )],
+            &[],
+        );
+        assert_eq!(rules(&violations), vec![MatchRule::StatValueNegative]);
     }
 }

@@ -151,9 +151,9 @@ body.
 (`crates/umfl-server/src/auth/authorize.rs`)'s `rules()` table, an ordered list of
 `(method, ant-style path pattern, access)` rows that `authorize` walks first-match-wins. It allowlists
 the read-only GETs that viewing a tournament needs — nobody needs an account to browse tournaments,
-hero pools, standings, hero performance or match history, only to enter and draft — and everything else under `/api/**`
+hero pools, roster roles, standings, hero performance or match history, only to enter and draft — and everything else under `/api/**`
 is `Access::Authenticated`, with a trailing `/**` → `Access::Deny` backstop. Keep it in step with
-`authorize_rules` in `tests/it/security.rs`, which asserts it from the outside. The two credential
+`the_public_reads_need_no_credential` in `tests/it/security.rs`, which asserts it from the outside. The two credential
 paths (`auth::dev`, `auth::supabase`) differ only in how a credential is *verified*, never in which
 routes require one — which is also why neither carries any route knowledge of its own; each resolves
 an identity only when the request actually offered a credential, so no public GET pays a JWT
@@ -329,10 +329,34 @@ Admin API below; nothing outside that surface writes reference data or results.
   `r#match::admin_service`). Promote it to a real table only if something starts scoring or ranking
   the humans — until then, a `player` table only buys you CRUD you have to build and a foreign key
   that can 500.
+- **A role is the manager's, a stat is the match's, and the bonus is derived from both.** Roster
+  roles (`V6__roster_roles.sql`) are switched per tournament by `tournaments.roles_enabled`, and
+  *off* means the board, the roster builder and the match wizard behave exactly as before. An admin
+  defines a tournament's roles (`roster_roles`, an optional `max_per_roster` cap) and the free-form
+  stats each one weights (`roster_role_weights`, shaped like `scoring_coefficients`). A manager
+  gives each roster hero a role; an admin records each game's per-hero stats with the match
+  (`match_game_stats`, keyed `(game_id, side)` onto `match_game_participants`). The **role bonus** is
+  that game's stats priced by the role *this entry* gave the hero, folded at read time by
+  `umfl_domain::standings::board_with_roles` into a `ROLE_BONUS` column appended after the rule set's
+  own — nothing stores it, and retuning a weight re-prices every round on the next read. Three
+  consequences worth not undoing. **Assignments are a log, like swaps**: `entry_hero_roles
+  (entry_id, hero_id, from_round, role_id)`, and the role in force for a round is the row with the
+  greatest `from_round` not past it (`roster_roles::role_at`), so re-assigning a role in a swap
+  window re-prices only the rounds after it. A draft has no history worth keeping and simply
+  overwrites its rows at round 1; once locked, a change is upserted at `current_round`, only while
+  a swap window is open, and spends no swap allowance. **Stats are match facts**: written only by
+  `r#match::writer` inside the match's own transaction and assembled into `MatchResult`, so
+  `MatchResultCache`'s existing invalidation already covers them — no new hook. **The bonus is per
+  holder**, which is why the ticker and `hero_stats::board` deliberately leave it out: both price a
+  hero once, whoever held it. `roles_enabled` is read in exactly one place, `role::query::book`,
+  which hands every rule and the fold `None` when it is off — and switching it off hides the bonus
+  without deleting a single assignment or stat, so switching it back on restores it. The seed
+  (`db/seed/V7__demo_roles.sql`) defines Winter of Champions' roles but leaves the flag off, because
+  Winter is also where the integration suite drafts and locks rosters.
 
 Domain rules live in pure functions in `umfl-domain`, with no `sqlx`/`axum`/I/O dependency at all —
-`roster_policy`, `match_policy`, `match_metrics`, `scoring_engine`, `scoring_rule_set_policy`. New
-rules belong there, tested directly, not inside a `service.rs`.
+`roster_policy`, `roster_roles`, `match_policy`, `match_metrics`, `scoring_engine`,
+`scoring_rule_set_policy`. New rules belong there, tested directly, not inside a `service.rs`.
 
 `roster_policy::validate_draft` deliberately permits over-budget selections (the builder is a
 scratchpad, the meter just runs past 100%); `validate_lock` adds the budget and roster-size checks.
@@ -359,7 +383,10 @@ its negative, so a heavy defeat costs what a clean victory earns. They are two r
 than one key with a flag because a rule set is a set of weighted metric rows: an admin picks the
 behaviour by naming it, and pricing both is legal. Don't collapse them back into one extractor.
 `WIN`/`LOSS` are scored per game, not per series, so a hero that takes game 1 and drops game 2 of a
-Bo3 collects one of each.
+Bo3 collects one of each. A game's per-hero *stats* (`GameParticipantResult.stats`) are not metrics
+and no extractor reads them: they are priced only by a manager's roster role (see the invariant
+above), and `ROLE_BONUS` is a column the fold appends, not a registry key — an admin who prices a
+`ROLE_BONUS` coefficient gets the ordinary unknown-metric warning, never a second column.
 
 `MatchResult::hero_contexts()` (`umfl_domain::match_result`) is where per-game and per-series part
 ways, and the split is the whole reason `APPEARANCE` is not multiplied by series length: a hero that
@@ -379,7 +406,8 @@ in a round share a timestamp.
 holding: `umfl_domain::hero_stats::board` prices every `hero_contexts()` entry once, exactly as the
 leaderboard does, and returns an `overall` table plus one ranked table per scored metric (the same
 columns, via the shared `metric_columns()`, and the same `competition_rank()`). A hero's points there
-are what it earned whoever held it, so no roster or swap log is read — only the cached match list,
+are what it earned whoever held it, so no roster, swap log or role is read — and no role bonus is
+priced — only the cached match list,
 the active rules and the pool, under the same cache-before-snapshot ordering as the leaderboard's
 `standings::service::board`. Its hero set is **exactly the pool** — the tables exist to inform a draft, and only a pool hero
 can be drafted — so an unfielded pool hero ranks on 0 and a hero a result names from outside the pool
@@ -479,7 +507,10 @@ field is *absent* on the wire, not `null`; templates need a `?? '—'` fallback 
 Stores: `auth` (Supabase session), `manager`, `heroes` (keyed by tournament — cost is
 tournament-scoped), `tournaments`, `roster`, `standings`, `heroStats` (the per-hero tables, loaded and
 refreshed exactly like `standings` and off the same `/standings/stream` signal). `roster` keeps an optimistic `selectedIds`
-and rolls it back if the server rejects. `standings` loads once via `load(id)`, then opens the
+and rolls it back if the server rejects, and an optimistic `roleOf` (heroId → roleId) beside it for
+the same reason, along with the tournament's `roles`: a draft saves a role on change, a staged swap
+sends the arrivals' roles with the swap itself, and a locked roster with nothing staged saves a
+re-assignment on its own while the window is open. `standings` loads once via `load(id)`, then opens the
 `/standings/stream` SSE connection (`src/api/sseClient.ts`) and calls `refresh()` every time the
 backend signals that a match was written. `refresh()` always refetches the full ticker head from
 `sinceMatchId=0` rather than incrementally — a correction reuses an existing match id and a deletion
@@ -489,7 +520,13 @@ on tournament switch and closed on unmount.
 
 `src/domain` is this side's answer to the backend's pure `umfl-domain` functions: plain functions over
 plain data, no Vue import, tested as data rather than through a `mount()`. A rule that a component can
-state without a DOM belongs there. Two modules live in it.
+state without a DOM belongs there. The two to know before touching a form are below; two more
+serve roles. `src/domain/rosterRoles.ts` mirrors `roster_roles::validate_assignments` (every hero
+needs a role at commit, caps hold) so the lock button and its hint react on click — **change a rule,
+change both sides**, exactly as for the budget. `src/domain/matchStats.ts` parses a match's stats
+sheet (CSV with a `game,hero|side,<STAT>…` header, or a JSON array of `{game, hero|side, stats}`);
+`matchForm.applyStats` lays the rows onto the games, matching each to one of *that game's* two
+heroes with the import's exact-after-normalisation rule, and applies the sheet all-or-nothing.
 
 `src/domain/rosterPolicy.ts` intentionally duplicates the Rust budget arithmetic
 (`roster_policy::budget_status`) so the meter reacts on click. **If you change that arithmetic, change
@@ -549,8 +586,11 @@ plus optional `VITE_DEV_MANAGER_ID` to skip Supabase Auth against a dev backend.
 
 `/api/admin/**`, `Access::Admin`-gated, backed by `managers.is_admin` (our own data, independent of
 any identity provider). Covers create/update for tournaments, heroes, maps, per-tournament hero
-pool/pricing (`tournament_heroes`), per-tournament board pool (`tournament_maps`), and scoring rule
-sets/coefficients, plus create/update/delete for match results. Both pools also support removal, and
+pool/pricing (`tournament_heroes`), per-tournament board pool (`tournament_maps`), scoring rule
+sets/coefficients and roster roles (`/api/admin/tournaments/{id}/roles`, create/update/delete — a
+delete is refused with `DomainError::conflict` while any entry has assigned the role, since
+`entry_hero_roles.role_id` deliberately does not cascade), plus create/update/delete for match
+results. Both pools also support removal, and
 the two removals are deliberately asymmetric: dropping a hero from `tournament_heroes`
 (`hero::pool_admin::remove_from_pool`) is always allowed and simply re-prices any roster still holding
 it to 0 (the "no cost snapshot" invariant above, applied to a removal rather than a re-price) — though
@@ -601,7 +641,16 @@ converted into the same 422 shape. Both checks run against the *normalised* metr
 `^[A-Z][A-Z0-9_]*$` CHECK. Without it a duplicated or hyphenated metric reached the database and came
 back as `ApiError::DataIntegrity`'s generic 409, which names nothing. The policy validates the *shape*
 of a metric name and never the *set* — an unimplemented metric stays a warning, per the paragraph
-above.
+above. `roster_roles::validate_weights` does the same for a role's weighted stats, with rule codes
+`DUPLICATE_STAT` and `MALFORMED_STAT`, rendered as the same scoring-rule 422.
+
+A match's stats ride on the ordinary record/correct request as an optional
+`MatchGameParticipantRequest.stats` map; `match_policy` checks them with `StatNameMalformed`,
+`DuplicateStat` (two names that normalise alike) and `StatValueNegative`, and the stored name is the
+normalised one. A manager's roles go through `PUT /api/tournaments/{id}/entries/me/roles` (the whole
+roster's, not a delta), and a swap's arrivals bring theirs in the swap body's optional `roles`; the
+rule codes are `RosterRule`'s `ROLES_DISABLED`, `UNKNOWN_ROLE`, `ROLE_HERO_NOT_ON_ROSTER`,
+`ROLE_UNASSIGNED`, `ROLE_CAP_EXCEEDED` and `ROLE_CHANGE_CLOSED`.
 
 ## Match import
 
@@ -666,9 +715,11 @@ is updated in place and never meets the index; only moving one match's link onto
 `/admin` (`AdminDashboardView.vue`) is a manager-gated dashboard, not a separate app — it composes
 per-entity wizard components (`TournamentManagementWizard`, `HeroManagementWizard`,
 `MapManagementWizard`, `HeroPoolWizard`, `MapPoolWizard`, `ScoringRuleSetWizard`,
-`MatchResultWizard`, `MatchListAdmin`) that each call the corresponding `/api/admin/...` endpoints
+`RoleManagementWizard`, `MatchResultWizard`, `MatchListAdmin`) that each call the corresponding `/api/admin/...` endpoints
 through the same `src/api/client.ts`. Those are the dashboard's own children; only
-`MatchResultWizard` is itself composed further, out of the four section components below. It's
+`MatchResultWizard` is itself composed further, out of the section components below — plus
+`MatchStatsSection`, the stats-sheet upload, rendered only when the tournament has `rolesEnabled`.
+The tournament form's "Roster Roles" checkbox is the toggle itself. It's
 reachable only by managers with `isAdmin` true — see
 Routes above for the two layers of UI gating — with the Admin API's own `Access::Admin` check as
 the actual security boundary.

@@ -32,6 +32,10 @@ pub struct TournamentFields<'a> {
     /// this struct would let an admin renaming a tournament reset it to round
     /// one and shut an open window without meaning to.
     pub swaps_per_round: i32,
+    /// Whether this tournament uses roster roles. Configuration rather than
+    /// operational state -- unlike the round and the window, it is the
+    /// admin's form that decides it -- so it is taken from the request.
+    pub roles_enabled: bool,
 }
 
 pub async fn create(state: &AppState, fields: TournamentFields<'_>) -> ApiResult<Tournament> {
@@ -56,6 +60,7 @@ pub async fn create(state: &AppState, fields: TournamentFields<'_>) -> ApiResult
         current_round: 1,
         swaps_per_round: fields.swaps_per_round,
         swap_window_open: false,
+        roles_enabled: fields.roles_enabled,
     };
     let id = writer::insert_tournament(&mut *tx, &tournament).await?;
     tx.commit().await?;
@@ -107,6 +112,7 @@ pub async fn update(
         current_round: existing.current_round,
         swaps_per_round: fields.swaps_per_round,
         swap_window_open: existing.swap_window_open,
+        roles_enabled: fields.roles_enabled,
     };
     writer::update_tournament(&mut *tx, &tournament).await?;
 

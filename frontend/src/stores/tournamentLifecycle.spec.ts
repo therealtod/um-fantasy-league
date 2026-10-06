@@ -59,6 +59,7 @@ async function draftAndLock(
       swapsAvailable: 0,
       alreadySwappedThisRound: false,
       swappable: false,
+      roleAssignments: [],
     }
   }
 

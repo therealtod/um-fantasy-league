@@ -19,7 +19,10 @@ import type {
   MatchResultDto,
   ProblemDetail,
   RecordMatchRequest,
+  RoleAssignment,
+  RoleRequest,
   Roster,
+  RosterRole,
   RosterViolation,
   ScoringRuleSetDto,
   StandingsBoard,
@@ -181,10 +184,33 @@ export const api = {
    * cannot disagree about what counts as one swap. One call spends the window —
    * there is no second submission for that round.
    */
-  swapRoster: (tournamentId: number, heroIds: number[]): Promise<Roster> =>
+  swapRoster: (
+    tournamentId: number,
+    heroIds: number[],
+    roles: RoleAssignment[] = [],
+  ): Promise<Roster> =>
     request(`/tournaments/${tournamentId}/entries/me/swaps`, {
       method: 'POST',
-      body: JSON.stringify({ heroIds }),
+      body: JSON.stringify({ heroIds, roles }),
+    }),
+
+  /**
+   * The roles a manager picks from, with what each rewards. Public, like the
+   * hero pool, and listed whether or not the tournament currently uses them —
+   * `Tournament.rolesEnabled` is what decides that.
+   */
+  roles: (tournamentId: number): Promise<RosterRole[]> =>
+    request(`/tournaments/${tournamentId}/roles`),
+
+  /**
+   * Give the roster's heroes their roles — the whole roster's, not a delta.
+   * Free while drafting; once locked, only while a swap window is open, and
+   * then it spends no allowance.
+   */
+  setRoles: (tournamentId: number, assignments: RoleAssignment[]): Promise<Roster> =>
+    request(`/tournaments/${tournamentId}/entries/me/roles`, {
+      method: 'PUT',
+      body: JSON.stringify({ assignments }),
     }),
 
   standings: (tournamentId: number): Promise<StandingsBoard> =>
@@ -346,5 +372,21 @@ export const api = {
       request(`/admin/tournaments/${tournamentId}/scoring-rule-sets/${ruleSetId}/activate`, {
         method: 'POST',
       }),
+
+    // Roles
+    createRole: (tournamentId: number, data: RoleRequest): Promise<RosterRole> =>
+      request(`/admin/tournaments/${tournamentId}/roles`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    updateRole: (tournamentId: number, roleId: number, data: RoleRequest): Promise<RosterRole> =>
+      request(`/admin/tournaments/${tournamentId}/roles/${roleId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+
+    deleteRole: (tournamentId: number, roleId: number): Promise<void> =>
+      request(`/admin/tournaments/${tournamentId}/roles/${roleId}`, { method: 'DELETE' }),
   },
 }

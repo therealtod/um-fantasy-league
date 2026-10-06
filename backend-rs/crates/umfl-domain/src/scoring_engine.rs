@@ -203,6 +203,7 @@ mod tests {
                         hero_name: "Bigfoot".into(),
                         health_remaining: 11,
                         is_winner: true,
+                        stats: Default::default(),
                     },
                     GameParticipantResult {
                         side: 1,
@@ -210,6 +211,7 @@ mod tests {
                         hero_name: "Beowulf".into(),
                         health_remaining: 0,
                         is_winner: false,
+                        stats: Default::default(),
                     },
                 ],
             }],

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from entry_hero_roles where entry_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b11cd3ec4208dd2677e13b6c8c84f61d3b39884236c5ea72f5aaadeabb9803d"
+}

@@ -15,6 +15,7 @@
 
 use crate::match_metrics;
 use crate::match_result::{HeroRole, MatchResult};
+use crate::roster_roles::{self, ROLE_BONUS_METRIC, RoleAssignment, RoleBook};
 use crate::rounding::round2;
 use crate::scoring_engine::{self, ScoringRules};
 use crate::time::java_instant;
@@ -88,6 +89,11 @@ pub struct EntryRoster {
     /// use the mechanic -- and then [`EntryRoster::holdings`] degenerates to
     /// "held everything from round 1", i.e. exactly the old behaviour.
     pub swaps: Vec<RosterSwap>,
+    /// Which role this entry gave each hero, from which round on -- the rows
+    /// of `entry_hero_roles`. Read only when the tournament uses roles, and
+    /// empty otherwise. A log for the same reason [`EntryRoster::swaps`] is:
+    /// a re-assignment must not re-price the rounds before it.
+    pub role_assignments: Vec<RoleAssignment>,
 }
 
 impl EntryRoster {
@@ -234,9 +240,24 @@ pub struct TickerEntry {
 }
 
 /// Every hero the tournament touched, priced once.
-struct ScoredAppearance {
+///
+/// `stats` rides along unpriced: what a game's stats are worth depends on the
+/// role the *holder* gave the hero, so it can only be priced per entry.
+struct ScoredAppearance<'a> {
     round: i32,
     breakdown: IndexMap<String, f64>,
+    stats: Option<&'a IndexMap<String, i32>>,
+}
+
+/// Folds recorded matches into a ranked leaderboard, for a tournament that
+/// does not use roles. See [`board_with_roles`].
+pub fn board(
+    tournament_id: i64,
+    matches: &[MatchResult],
+    rules: &ScoringRules,
+    rosters: &[EntryRoster],
+) -> StandingsBoard {
+    board_with_roles(tournament_id, matches, rules, rosters, None)
 }
 
 /// Folds recorded matches into a ranked leaderboard.
@@ -244,16 +265,26 @@ struct ScoredAppearance {
 /// Each (hero, match) pair is priced exactly once regardless of how many
 /// rosters hold that hero -- cheaper than the join's fan-out, and impossible to
 /// get inconsistent with [`ticker`], which prices from the same contexts.
-pub fn board(
+///
+/// `roles` is `None` when the tournament does not use roles, and the board is
+/// then exactly what it was before roles existed. When it is `Some`, every
+/// game a held hero played also earns the role bonus: that game's stats priced
+/// by the role *this entry* had given the hero for that round
+/// ([`roster_roles::role_at`]), reported as one extra [`ROLE_BONUS_METRIC`]
+/// column. The bonus is the one number here that differs between two managers
+/// holding the same hero, which is why it is priced per entry rather than
+/// once per appearance like everything else.
+pub fn board_with_roles(
     tournament_id: i64,
     matches: &[MatchResult],
     rules: &ScoringRules,
     rosters: &[EntryRoster],
+    roles: Option<&RoleBook>,
 ) -> StandingsBoard {
     let current_round = matches.iter().map(|m| m.round).max().unwrap_or(0);
 
     // An `IndexMap` preserves first-encounter order.
-    let mut appearances_by_hero: IndexMap<i64, Vec<ScoredAppearance>> = IndexMap::new();
+    let mut appearances_by_hero: IndexMap<i64, Vec<ScoredAppearance<'_>>> = IndexMap::new();
     for match_result in matches {
         for context in match_result.hero_contexts() {
             appearances_by_hero
@@ -262,6 +293,7 @@ pub fn board(
                 .push(ScoredAppearance {
                     round: match_result.round,
                     breakdown: scoring_engine::breakdown(&context, rules),
+                    stats: context.stats(),
                 });
         }
     }
@@ -277,6 +309,9 @@ pub fn board(
                 .iter()
                 .map(|metric| (metric.clone(), 0.0))
                 .collect();
+            if roles.is_some() {
+                totals.insert(ROLE_BONUS_METRIC.to_string(), 0.0);
+            }
             let mut round_points = 0.0;
 
             // Holdings, not the current roster: a hero scores for this manager
@@ -297,6 +332,24 @@ pub fn board(
                         *totals.entry(metric.clone()).or_insert(0.0) += points;
                         if appearance.round == current_round {
                             round_points += points;
+                        }
+                    }
+
+                    // Only a played game has stats, and only a hero with a
+                    // role in force for that round has anything to price
+                    // them with.
+                    let role = roles.zip(roster_roles::role_at(
+                        &entry.role_assignments,
+                        holding.hero_id,
+                        appearance.round,
+                    ));
+                    if let (Some((book, role_id)), Some(stats)) = (role, appearance.stats)
+                        && let Some(role) = book.get(role_id)
+                    {
+                        let bonus = roster_roles::role_bonus(role, stats);
+                        *totals.entry(ROLE_BONUS_METRIC.to_string()).or_insert(0.0) += bonus;
+                        if appearance.round == current_round {
+                            round_points += bonus;
                         }
                     }
                 }
@@ -327,9 +380,27 @@ pub fn board(
         tournament_id,
         rule_set_name: rules.name.clone(),
         current_round,
-        metrics: metric_columns(rules),
+        metrics: board_columns(rules, roles),
         rows: rank(unranked),
     }
+}
+
+/// The leaderboard's columns: the rule set's, then the role bonus when the
+/// tournament uses roles. Last, because it is the one column no rule set
+/// orders.
+///
+/// Its coefficient is 1: the bonus is already in points, each role carrying
+/// its own weights.
+fn board_columns(rules: &ScoringRules, roles: Option<&RoleBook>) -> Vec<MetricColumn> {
+    let mut columns = metric_columns(rules);
+    if roles.is_some() {
+        columns.push(MetricColumn {
+            metric: ROLE_BONUS_METRIC.to_string(),
+            label: "Role Bonus".to_string(),
+            coefficient: 1.0,
+        });
+    }
+    columns
 }
 
 /// The rule set's scored metrics as display columns, in the rule set's own
@@ -586,6 +657,7 @@ mod tests {
             hero_name: name.into(),
             health_remaining: health,
             is_winner,
+            stats: Default::default(),
         }
     }
 
@@ -682,6 +754,7 @@ mod tests {
                 })
                 .collect(),
             swaps: Vec::new(),
+            role_assignments: Vec::new(),
         }
     }
 
@@ -1250,6 +1323,167 @@ mod tests {
         assert_eq!(
             board(1, &matches, &standard(), &[plain]).rows[0].total_points,
             38.50
+        );
+    }
+
+    // -- roles --------------------------------------------------------------
+
+    /// Attacker (1) prices ATTACKS and DAMAGE_DEALT; Healer (2) prices HEALING.
+    fn role_book() -> RoleBook {
+        use crate::roster_roles::RosterRole;
+        let weights = |pairs: &[(&str, &str)]| -> IndexMap<String, Decimal> {
+            pairs
+                .iter()
+                .map(|(stat, w)| ((*stat).to_string(), Decimal::from_str(w).unwrap()))
+                .collect()
+        };
+        RoleBook::new([
+            RosterRole {
+                id: 1,
+                name: "Attacker".into(),
+                max_per_roster: None,
+                weights: weights(&[("ATTACKS", "1.0000"), ("DAMAGE_DEALT", "0.2500")]),
+            },
+            RosterRole {
+                id: 2,
+                name: "Healer".into(),
+                max_per_roster: Some(1),
+                weights: weights(&[("HEALING", "1.5000")]),
+            },
+        ])
+    }
+
+    /// `one_game_match`, with Bigfoot's game recorded as 5 attacks, 9 damage
+    /// and 4 healing: 7.25 to an Attacker, 6.00 to a Healer.
+    fn match_with_stats(match_id: i64, round: i32) -> MatchResult {
+        let mut m = match_in_round(match_id, round);
+        m.games[0].participants[0].stats = [("ATTACKS", 5), ("DAMAGE_DEALT", 9), ("HEALING", 4)]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        m
+    }
+
+    fn with_roles(mut entry: EntryRoster, log: &[(i64, i32, i64)]) -> EntryRoster {
+        entry.role_assignments = log
+            .iter()
+            .map(|&(hero_id, from_round, role_id)| RoleAssignment {
+                hero_id,
+                from_round,
+                role_id,
+            })
+            .collect();
+        entry
+    }
+
+    #[test]
+    fn the_same_hero_earns_a_different_bonus_under_each_managers_role() {
+        let attacker = with_roles(
+            roster(1, "Attacking", &[(7, "Bigfoot", 2500)]),
+            &[(7, 1, 1)],
+        );
+        let healer = with_roles(roster(2, "Healing", &[(7, "Bigfoot", 2500)]), &[(7, 1, 2)]);
+
+        let board = board_with_roles(
+            1,
+            &[match_with_stats(6, 2)],
+            &standard(),
+            &[attacker, healer],
+            Some(&role_book()),
+        );
+
+        assert_eq!(board.rows[0].handle, "Attacking");
+        assert_eq!(board.rows[0].breakdown[ROLE_BONUS_METRIC], 7.25);
+        assert_eq!(board.rows[0].total_points, 26.5, "19.25 + 7.25");
+        assert_eq!(board.rows[1].breakdown[ROLE_BONUS_METRIC], 6.0);
+        assert_eq!(board.rows[1].total_points, 25.25, "19.25 + 6.00");
+        assert_eq!(board.rows[0].round_points, 26.5);
+    }
+
+    #[test]
+    fn the_role_bonus_is_the_last_column_and_is_dense() {
+        let unassigned = roster(1, "NoRole", &[(7, "Bigfoot", 2500)]);
+        let board = board_with_roles(
+            1,
+            &[match_with_stats(6, 2)],
+            &standard(),
+            &[unassigned],
+            Some(&role_book()),
+        );
+
+        let last = board.metrics.last().unwrap();
+        assert_eq!(last.metric, ROLE_BONUS_METRIC);
+        assert_eq!(last.label, "Role Bonus");
+        assert_eq!(last.coefficient, 1.0);
+        assert_eq!(
+            board.rows[0].breakdown[ROLE_BONUS_METRIC], 0.0,
+            "a hero with no role earns nothing, but the cell is still there"
+        );
+        assert_eq!(board.rows[0].total_points, 19.25);
+    }
+
+    #[test]
+    fn without_roles_the_board_is_exactly_the_plain_board() {
+        let entry = with_roles(
+            roster(1, "Attacking", &[(7, "Bigfoot", 2500)]),
+            &[(7, 1, 1)],
+        );
+        let matches = [match_with_stats(6, 2)];
+
+        let plain = board(1, &matches, &standard(), std::slice::from_ref(&entry));
+        let off = board_with_roles(1, &matches, &standard(), &[entry], None);
+
+        assert_eq!(plain, off);
+        assert!(!off.metrics.iter().any(|m| m.metric == ROLE_BONUS_METRIC));
+        assert!(!off.rows[0].breakdown.contains_key(ROLE_BONUS_METRIC));
+    }
+
+    /// Re-assigning a role re-prices the rounds after it and leaves the
+    /// rounds before it alone -- the reason assignments are a log.
+    #[test]
+    fn a_reassigned_role_only_prices_the_rounds_from_its_change_on() {
+        let entry = with_roles(
+            roster(1, "Switcher", &[(7, "Bigfoot", 2500)]),
+            &[(7, 1, 1), (7, 2, 2)],
+        );
+        let board = board_with_roles(
+            1,
+            &[match_with_stats(1, 1), match_with_stats(2, 2)],
+            &standard(),
+            &[entry],
+            Some(&role_book()),
+        );
+
+        let row = &board.rows[0];
+        assert_eq!(
+            row.breakdown[ROLE_BONUS_METRIC], 13.25,
+            "7.25 as Attacker, then 6.00 as Healer"
+        );
+        assert_eq!(
+            row.round_points, 25.25,
+            "round 2 is 19.25 plus the Healer bonus"
+        );
+    }
+
+    /// The bonus follows the holding, like every other point: a hero traded
+    /// away earns its old manager nothing after the trade.
+    #[test]
+    fn a_hero_traded_away_stops_earning_its_role_bonus() {
+        let swapper = with_roles(
+            roster_with_swaps(1, "Swapper", &[(11, "Beowulf", 2400)], &[(2, 7, 11)]),
+            &[(7, 1, 1), (11, 2, 1)],
+        );
+        let board = board_with_roles(
+            1,
+            &[match_with_stats(1, 1), match_with_stats(2, 2)],
+            &standard(),
+            &[swapper],
+            Some(&role_book()),
+        );
+
+        assert_eq!(
+            board.rows[0].breakdown[ROLE_BONUS_METRIC], 7.25,
+            "Bigfoot's round-1 bonus only; Beowulf recorded no stats"
         );
     }
 }

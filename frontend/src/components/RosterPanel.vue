@@ -4,6 +4,7 @@ import BudgetMeter from './BudgetMeter.vue'
 import DestructiveConfirmPanel from './DestructiveConfirmPanel.vue'
 import { useRosterStore } from '@/stores/roster'
 import { lockBlockedReason, swapBlockedReason } from '@/domain/rosterGuidance'
+import { describeWeights } from '@/domain/rosterRoles'
 import { formatCredits } from '@/lib/format'
 
 const roster = useRosterStore()
@@ -30,8 +31,14 @@ const blockedReason = computed(() =>
   }),
 )
 
+/**
+ * The role half of "why is the button dead", shown only once every other rule
+ * is satisfied, so the hint names one thing to fix at a time.
+ */
+const roleBlocked = computed(() => roster.roleIssues.join(' ') || null)
+
 /** Why the submit-swaps button is dead, on the same contract as the lock one. */
-const swapBlocked = computed(() =>
+const heroSwapBlocked = computed(() =>
   swapBlockedReason({
     registered: roster.registered,
     locked: roster.locked,
@@ -45,6 +52,14 @@ const swapBlocked = computed(() =>
     swapsStaged: roster.swapsStaged,
   }),
 )
+
+const swapBlocked = computed(() => heroSwapBlocked.value ?? roleBlocked.value)
+
+/** The role a hero holds, for the weights hint under its dropdown. */
+function roleOf(heroId: number) {
+  const roleId = roster.roleFor(heroId)
+  return roster.roles.find((role) => role.id === roleId)
+}
 
 /**
  * Locking is irreversible — there is no unlock endpoint — so the button asks
@@ -98,22 +113,42 @@ async function confirmLock() {
       <li
         v-for="(hero, index) in roster.selected"
         :key="hero.id"
-        class="flex items-center gap-3 border border-edge bg-surface-mid p-2.5"
+        class="border border-edge bg-surface-mid p-2.5"
       >
-        <span class="label-caps w-4 shrink-0">{{ index + 1 }}</span>
-        <p class="min-w-0 flex-1 truncate font-mono text-xs font-bold text-ink uppercase">
-          {{ hero.name }}
-        </p>
-        <span class="stat-value shrink-0 text-xs text-cyan">{{ formatCredits(hero.cost) }}</span>
-        <button
-          v-if="!roster.locked || roster.staging"
-          type="button"
-          class="shrink-0 px-1 font-mono text-xs text-ink-dim transition-colors hover:text-magenta"
-          :aria-label="`Remove ${hero.name}`"
-          @click="roster.toggle(hero.id)"
-        >
-          &times;
-        </button>
+        <div class="flex items-center gap-3">
+          <span class="label-caps w-4 shrink-0">{{ index + 1 }}</span>
+          <p class="min-w-0 flex-1 truncate font-mono text-xs font-bold text-ink uppercase">
+            {{ hero.name }}
+          </p>
+          <span class="stat-value shrink-0 text-xs text-cyan">{{ formatCredits(hero.cost) }}</span>
+          <button
+            v-if="!roster.locked || roster.staging"
+            type="button"
+            class="shrink-0 px-1 font-mono text-xs text-ink-dim transition-colors hover:text-magenta"
+            :aria-label="`Remove ${hero.name}`"
+            @click="roster.toggle(hero.id)"
+          >
+            &times;
+          </button>
+        </div>
+        <!-- The role this manager gives the hero, which decides what its game stats earn. -->
+        <div v-if="roster.rolesEnabled" class="mt-2 pl-7">
+          <select
+            class="field-input-sm w-full cursor-pointer"
+            :value="roster.roleFor(hero.id) ?? ''"
+            :disabled="!roster.rolesEditable || roster.saving"
+            :aria-label="`Role for ${hero.name}`"
+            @change="roster.setRole(hero.id, Number(($event.target as HTMLSelectElement).value))"
+          >
+            <option value="" disabled>Choose a role…</option>
+            <option v-for="role in roster.roles" :key="role.id" :value="role.id">
+              {{ role.name }}{{ role.maxPerRoster ? ` (max ${role.maxPerRoster})` : '' }}
+            </option>
+          </select>
+          <p v-if="roleOf(hero.id)" class="mt-1 font-mono text-[10px] text-ink-dim">
+            {{ describeWeights(roleOf(hero.id)!) }}
+          </p>
+        </div>
       </li>
 
       <li
@@ -158,8 +193,8 @@ async function confirmLock() {
             Lock In Roster ({{ roster.selected.length }}/{{ roster.rosterSize }})
           </template>
         </button>
-        <p v-if="blockedReason" class="mt-2 font-mono text-[11px] text-ink-dim">
-          {{ blockedReason }}
+        <p v-if="blockedReason ?? roleBlocked" class="mt-2 font-mono text-[11px] text-ink-dim">
+          {{ blockedReason ?? roleBlocked }}
         </p>
       </template>
 

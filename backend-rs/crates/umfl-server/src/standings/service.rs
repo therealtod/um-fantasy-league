@@ -19,12 +19,14 @@ use umfl_domain::standings::{StandingsBoard, TickerEntry};
 
 use crate::error::ApiResult;
 use crate::hero::query::{self as hero_query, HeroFilter};
+use crate::role::query as role_query;
 use crate::scoring::query as scoring_query;
 use crate::state::AppState;
+use crate::tournament::query as tournament_query;
 
 use super::query;
 
-/// The leaderboard.
+/// The leaderboard, role bonus included when the tournament uses roles.
 ///
 /// # Why REPEATABLE READ, and not merely read-only
 ///
@@ -89,9 +91,23 @@ pub async fn board(state: &AppState, tournament_id: i64) -> ApiResult<StandingsB
     let mut tx = snapshot(state).await?;
     let rules = resolve_rules(&mut tx, tournament_id).await?;
     let rosters = query::rosters(&mut tx, tournament_id).await?;
+    // `None` when the tournament does not use roles, which is what keeps the
+    // board free of a Role Bonus column there. The handler has already 404'd
+    // an unknown tournament, so a vanished one here is a delete that landed
+    // in between -- and a board without roles is the honest answer for it.
+    let roles = match tournament_query::find_by_id(&mut *tx, tournament_id).await? {
+        Some(tournament) => role_query::book(&mut tx, &tournament).await?,
+        None => None,
+    };
     tx.commit().await?;
 
-    Ok(fold::board(tournament_id, &matches, &rules, &rosters))
+    Ok(fold::board_with_roles(
+        tournament_id,
+        &matches,
+        &rules,
+        &rosters,
+        roles.as_ref(),
+    ))
 }
 
 /// The newest recorded matches, as the Standings ticker renders them.

@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select r.entry_id, r.hero_id, r.from_round, r.role_id\n         from entry_hero_roles r\n             join tournament_entries e on e.id = r.entry_id\n         where e.tournament_id = $1\n         order by r.entry_id, r.from_round, r.hero_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entry_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "entry_hero_roles",
+            "name": "entry_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hero_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "entry_hero_roles",
+            "name": "hero_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "from_round",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "entry_hero_roles",
+            "name": "from_round"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "role_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "entry_hero_roles",
+            "name": "role_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "17cba8f620eec71971624463a0fd058844027dfff7df365e44d1581443f8c1b2"
+}

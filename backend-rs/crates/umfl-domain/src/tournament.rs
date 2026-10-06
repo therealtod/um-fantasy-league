@@ -96,6 +96,11 @@ pub struct Tournament {
     /// the round's results are recorded, or a manager could read the ticker and
     /// then buy the heroes that just scored.
     pub swap_window_open: bool,
+    /// Whether managers give their heroes roles and the standings price the
+    /// role bonus ([`crate::roster_roles`]). Off for every tournament that
+    /// predates the mechanic; switching it off hides the bonus without
+    /// deleting any assignment, so switching it back on restores it.
+    pub roles_enabled: bool,
 }
 
 impl Tournament {
@@ -201,6 +206,7 @@ mod tests {
             current_round: 1,
             swaps_per_round: 0,
             swap_window_open: false,
+            roles_enabled: false,
         }
     }
 

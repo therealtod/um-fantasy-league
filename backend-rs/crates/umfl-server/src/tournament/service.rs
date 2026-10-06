@@ -7,6 +7,7 @@ use chrono::Utc;
 use indexmap::IndexMap;
 use sqlx::{PgConnection, PgExecutor};
 use umfl_domain::roster_policy::{self, BudgetStatus, RosterPick, RosterRule, RosterViolation};
+use umfl_domain::roster_roles::{self, RoleBook};
 use umfl_domain::tournament::{
     EntrySlot, EntryStatus, Tournament, TournamentEntry, TournamentStatus,
 };
@@ -15,6 +16,7 @@ use umfl_domain::{DomainError, Violation};
 use crate::error::{ApiError, ApiResult};
 use crate::hero::{HeroView, query as hero_query};
 use crate::manager::Manager;
+use crate::role::query as role_query;
 use crate::state::AppState;
 
 use super::{query, writer};
@@ -39,6 +41,13 @@ pub struct RosterSnapshot {
     /// Whether a swap would be accepted right now -- the swap counterpart to
     /// the `lockable` flag, and what the builder's submit button reads.
     pub swappable: bool,
+    /// Whether locking would be accepted right now: no roster rule *and*, when
+    /// the tournament uses roles, no role rule is broken.
+    pub lockable: bool,
+    /// `(hero_id, role_id)` for each hero on the roster that has a role, in
+    /// slot order -- the role in force now. Empty when the tournament does not
+    /// use roles.
+    pub role_assignments: Vec<(i64, i64)>,
 }
 
 pub async fn list_tournaments(
@@ -184,6 +193,14 @@ pub async fn set_slots(
         .map(|p| EntrySlot { hero_id: p.hero_id })
         .collect();
     writer::update_entry(&mut tx, &entry).await?;
+    // A hero taken off a draft takes its role with it, so re-picking it later
+    // starts unassigned rather than with a stale choice.
+    writer::delete_draft_roles_except(
+        &mut tx,
+        entry.id.expect("a loaded entry has an id"),
+        &entry.hero_ids(),
+    )
+    .await?;
 
     let snapshot = snapshot(&mut tx, entry, tournament).await?;
     tx.commit().await?;
@@ -202,7 +219,14 @@ pub async fn lock_roster(
     let mut entry = require_my_entry(&mut tx, tournament_id, manager).await?;
 
     let picks = resolve_picks(&mut *tx, &tournament, &entry.hero_ids()).await?;
-    let violations = roster_policy::validate_lock(&picks, &tournament, &entry);
+    let mut violations = roster_policy::validate_lock(&picks, &tournament, &entry);
+    let book = role_query::book(&mut tx, &tournament).await?;
+    let current = current_role_pairs(&mut tx, &entry).await?;
+    violations.extend(lock_role_violations(
+        &entry.hero_ids(),
+        &current,
+        book.as_ref(),
+    ));
     if !violations.is_empty() {
         return Err(roster_rule(violations));
     }
@@ -235,6 +259,7 @@ pub async fn swap_roster(
     tournament_id: i64,
     manager: &Manager,
     hero_ids: &[i64],
+    roles: &[(i64, i64)],
 ) -> ApiResult<RosterSnapshot> {
     let mut tx = state.pool.begin().await?;
 
@@ -255,7 +280,7 @@ pub async fn swap_roster(
     let already_swapped =
         query::swapped_in_round(&mut *tx, entry_id, tournament.current_round).await?;
 
-    let violations = roster_policy::validate_swap(
+    let mut violations = roster_policy::validate_swap(
         &held,
         &picks,
         &tournament,
@@ -263,6 +288,29 @@ pub async fn swap_roster(
         swaps_used,
         already_swapped,
     );
+
+    // The roles the roster comes out with: what each kept hero already has,
+    // overridden by anything submitted. An arriving hero has no role but the
+    // one submitted for it, so with roles on it has to bring one -- a hero
+    // landing without a role would score no bonus and nobody would notice.
+    let proposed_ids: Vec<i64> = picks.iter().map(|p| p.hero_id).collect();
+    let book = role_query::book(&mut tx, &tournament).await?;
+    let current = current_role_pairs(&mut tx, &entry).await?;
+    let merged = merge_roles(&proposed_ids, &current, roles);
+    let arrivals: Vec<i64> = proposed_ids
+        .iter()
+        .copied()
+        .filter(|id| !held.contains(id))
+        .collect();
+    let required: &[i64] = if book.is_some() { &arrivals } else { &[] };
+    // With roles off nothing about roles is checked unless some were sent.
+    let role_input: &[(i64, i64)] = if book.is_some() { &merged } else { roles };
+    violations.extend(roster_roles::validate_assignments(
+        &proposed_ids,
+        role_input,
+        book.as_ref(),
+        required,
+    ));
     if !violations.is_empty() {
         return Err(roster_rule(violations));
     }
@@ -291,6 +339,84 @@ pub async fn swap_roster(
         .collect();
     writer::update_entry(&mut tx, &entry).await?;
     writer::insert_roster_swaps(&mut tx, entry_id, tournament.current_round, &exchanges).await?;
+    if book.is_some() {
+        let changed = changed_roles(&current, &merged);
+        writer::upsert_entry_roles(&mut tx, entry_id, tournament.current_round, &changed).await?;
+    }
+
+    let snapshot = snapshot(&mut tx, entry, tournament).await?;
+    tx.commit().await?;
+    Ok(snapshot)
+}
+
+/// Give the heroes on the caller's roster their roles.
+///
+/// `assignments` is the whole roster's roles, not a delta. What happens next
+/// depends on where the entry is, for the same reasons its heroes can change:
+///
+/// * **A draft** (while the tournament still takes roster changes) is a
+///   scratchpad: the log is simply overwritten, every row from round one, and
+///   a hero may still be left without a role -- that only bites at lock.
+/// * **A locked roster** may change roles only while a swap window is open.
+///   Changes are appended to the log from the current round, so the rounds
+///   already played keep the role they were scored under; the roster has to
+///   come out fully assigned. Re-assigning spends no swap allowance and is
+///   not the round's one swap submission: it moves no hero.
+///
+/// Takes the entry's row lock first, like [`swap_roster`], so a concurrent
+/// swap and role change cannot each validate against the other's stale view.
+pub async fn set_roles(
+    state: &AppState,
+    tournament_id: i64,
+    manager: &Manager,
+    assignments: &[(i64, i64)],
+) -> ApiResult<RosterSnapshot> {
+    let mut tx = state.pool.begin().await?;
+
+    let tournament = require_tournament(&mut *tx, tournament_id).await?;
+    query::lock_entry_by_manager(&mut *tx, tournament_id, manager.id).await?;
+    let entry = require_my_entry(&mut tx, tournament_id, manager).await?;
+    let entry_id = entry.id.expect("a loaded entry has an id");
+    let hero_ids = entry.hero_ids();
+    let book = role_query::book(&mut tx, &tournament).await?;
+
+    let mut violations = Vec::new();
+    if book.is_some() {
+        if entry.is_locked() && !tournament.accepts_swaps() {
+            violations.push(RosterViolation {
+                rule: RosterRule::RoleChangeClosed,
+                message: "Roles on a locked roster can only change while a swap window is open."
+                    .into(),
+            });
+        }
+        if !entry.is_locked() && !tournament.accepts_roster_changes() {
+            violations.push(RosterViolation {
+                rule: RosterRule::TournamentClosed,
+                message: format!(
+                    "{} is {} and rosters are frozen.",
+                    tournament.name, tournament.status
+                ),
+            });
+        }
+    }
+    let required: &[i64] = if entry.is_locked() { &hero_ids } else { &[] };
+    violations.extend(roster_roles::validate_assignments(
+        &hero_ids,
+        assignments,
+        book.as_ref(),
+        required,
+    ));
+    if !violations.is_empty() {
+        return Err(roster_rule(violations));
+    }
+
+    if entry.is_locked() {
+        let current = current_role_pairs(&mut tx, &entry).await?;
+        let changed = changed_roles(&current, assignments);
+        writer::upsert_entry_roles(&mut tx, entry_id, tournament.current_round, &changed).await?;
+    } else {
+        writer::replace_draft_roles(&mut tx, entry_id, assignments).await?;
+    }
 
     let snapshot = snapshot(&mut tx, entry, tournament).await?;
     tx.commit().await?;
@@ -463,15 +589,89 @@ async fn snapshot(
     .is_empty()
         && swaps_available > 0;
 
+    // The roles in force now. With roles off the roster reports none, even if
+    // assignments survive from before an admin switched them off -- there is
+    // nothing for the builder to show them against.
+    let book = role_query::book(&mut *conn, &tournament).await?;
+    let role_assignments = match &book {
+        Some(_) => current_role_pairs(&mut *conn, &entry).await?,
+        None => Vec::new(),
+    };
+    // `lockable` answers "would the lock button work", so it asks every rule
+    // the lock endpoint will.
+    let lockable = roster_policy::validate_lock(&picks, &tournament, &entry).is_empty()
+        && lock_role_violations(&hero_ids, &role_assignments, book.as_ref()).is_empty();
+
     Ok(RosterSnapshot {
         swaps_available,
         already_swapped_this_round,
         swappable,
+        lockable,
+        role_assignments,
         entry,
         tournament,
         heroes,
         budget,
     })
+}
+
+/// The role in force now for each hero on the entry's roster, in slot order.
+/// A hero without one is simply absent.
+async fn current_role_pairs(
+    conn: &mut PgConnection,
+    entry: &TournamentEntry,
+) -> sqlx::Result<Vec<(i64, i64)>> {
+    let entry_id = entry.id.expect("a loaded entry has an id");
+    let log = query::role_assignments_for_entry(&mut *conn, entry_id).await?;
+    let current = roster_roles::current_roles(&log);
+    Ok(entry
+        .hero_ids()
+        .into_iter()
+        .filter_map(|hero_id| current.get(&hero_id).map(|role| (hero_id, *role)))
+        .collect())
+}
+
+/// The role rules that bite at lock: with roles on, every hero needs one and
+/// no cap may be exceeded. With roles off there is nothing to check -- and in
+/// particular, assignments left over from before an admin switched roles off
+/// are not an error.
+fn lock_role_violations(
+    hero_ids: &[i64],
+    current: &[(i64, i64)],
+    book: Option<&RoleBook>,
+) -> Vec<RosterViolation> {
+    match book {
+        Some(book) => roster_roles::validate_assignments(hero_ids, current, Some(book), hero_ids),
+        None => Vec::new(),
+    }
+}
+
+/// The roles a roster of `proposed` heroes would come out with: each kept
+/// hero's current role, overridden by `submitted`. Heroes leaving take their
+/// roles with them; submitted roles for heroes not on `proposed` are kept so
+/// the policy can report them.
+fn merge_roles(
+    proposed: &[i64],
+    current: &[(i64, i64)],
+    submitted: &[(i64, i64)],
+) -> Vec<(i64, i64)> {
+    let mut merged: Vec<(i64, i64)> = current
+        .iter()
+        .copied()
+        .filter(|(hero, _)| proposed.contains(hero) && !submitted.iter().any(|(h, _)| h == hero))
+        .collect();
+    merged.extend_from_slice(submitted);
+    merged
+}
+
+/// The assignments in `wanted` that differ from what is in force now -- the
+/// only ones worth a row in the log.
+fn changed_roles(current: &[(i64, i64)], wanted: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    wanted
+        .iter()
+        .copied()
+        .filter(|pair| !current.contains(pair))
+        .collect()
 }
 
 fn roster_rule(violations: Vec<RosterViolation>) -> ApiError {

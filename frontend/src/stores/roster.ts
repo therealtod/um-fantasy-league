@@ -1,8 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api, ApiError, describeError } from '@/api/client'
-import type { BudgetStatus, Hero, Roster, RosterViolation } from '@/api/types'
+import type { BudgetStatus, Hero, Roster, RosterRole, RosterViolation } from '@/api/types'
 import { budgetStatus as computeBudgetStatus, heroesChanged } from '@/domain/rosterPolicy'
+import {
+  assignmentsFor,
+  roleProblems,
+  swapRoles,
+  toRoleMap,
+  type RoleMap,
+} from '@/domain/rosterRoles'
 import { standingsAvailable } from '@/domain/tournamentStatus'
 import { useHeroesStore } from './heroes'
 import { useTournamentsStore } from './tournaments'
@@ -19,6 +26,13 @@ export const useRosterStore = defineStore('roster', () => {
   const saving = ref(false)
   const error = ref<string | null>(null)
   const violations = ref<RosterViolation[]>([])
+  /** The roles this tournament offers, whether or not it currently uses them. */
+  const roles = ref<RosterRole[]>([])
+  /**
+   * Optimistic local roles, heroId → roleId — `selectedIds`' counterpart, so a
+   * role dropdown and the lock hint react before the server replies.
+   */
+  const roleOf = ref<RoleMap>({})
 
   const tournament = computed(() =>
     tournamentId.value === null ? null : tournamentsStore.byId(tournamentId.value),
@@ -34,6 +48,9 @@ export const useRosterStore = defineStore('roster', () => {
   )
   const registered = computed(() => roster.value !== null)
   const locked = computed(() => roster.value?.locked ?? false)
+
+  /** Whether this tournament uses roles at all. Off means no dropdowns and no rules. */
+  const rolesEnabled = computed(() => tournament.value?.rolesEnabled ?? false)
 
   const swapWindowOpen = computed(() => roster.value?.swapWindowOpen ?? false)
   const swapsAvailable = computed(() => roster.value?.swapsAvailable ?? 0)
@@ -84,9 +101,46 @@ export const useRosterStore = defineStore('roster', () => {
   )
 
   const full = computed(() => selectedIds.value.length === rosterSize.value)
-  const lockable = computed(
-    () => registered.value && !locked.value && full.value && budget.value.spent <= creditGrant.value,
+
+  /** The heroes the server last confirmed, and their roles — what a swap is measured against. */
+  const heldIds = computed(() => roster.value?.heroes.map((hero) => hero.id) ?? [])
+  const heldRoles = computed(() => toRoleMap(roster.value?.roleAssignments ?? []))
+
+  /**
+   * Why the roles would stop the next commit — at lock every hero needs one, on
+   * a swap every arriving hero does — one line per problem. Empty with roles off.
+   */
+  const roleIssues = computed(() => {
+    if (!rolesEnabled.value) return []
+    const required = locked.value
+      ? selectedIds.value.filter((id) => !heldIds.value.includes(id))
+      : selectedIds.value
+    return roleProblems(selectedIds.value, roleOf.value, roles.value, required)
+  })
+
+  /**
+   * Whether a locked roster's roles can change right now: only while a window is
+   * open, the same as its heroes. Re-assigning spends no swap allowance.
+   */
+  const rolesEditable = computed(
+    () =>
+      rolesEnabled.value &&
+      registered.value &&
+      (!locked.value || (swapWindowOpen.value && tournament.value?.status !== 'COMPLETED')),
   )
+
+  const lockable = computed(
+    () =>
+      registered.value &&
+      !locked.value &&
+      full.value &&
+      budget.value.spent <= creditGrant.value &&
+      roleIssues.value.length === 0,
+  )
+
+  function roleFor(heroId: number): number | undefined {
+    return roleOf.value[heroId]
+  }
 
   function isSelected(heroId: number) {
     return selectedIds.value.includes(heroId)
@@ -95,6 +149,8 @@ export const useRosterStore = defineStore('roster', () => {
   function reset() {
     roster.value = null
     selectedIds.value = []
+    roleOf.value = {}
+    roles.value = []
     violations.value = []
     error.value = null
   }
@@ -113,13 +169,27 @@ export const useRosterStore = defineStore('roster', () => {
   function adopt(next: Roster) {
     roster.value = next
     selectedIds.value = next.heroes.map((hero) => hero.id)
+    roleOf.value = toRoleMap(next.roleAssignments ?? [])
     violations.value = []
   }
 
   async function select(id: number | null) {
     tournamentId.value = id
     reset()
-    if (id !== null) await load()
+    if (id !== null) await Promise.all([load(), loadRoles(id)])
+  }
+
+  /**
+   * The tournament's roles. Public and cheap, so it is read whether or not the
+   * tournament uses them — a failure only costs the dropdowns, never the roster.
+   */
+  async function loadRoles(id: number) {
+    try {
+      const loaded = await api.roles(id)
+      if (tournamentId.value === id) roles.value = loaded
+    } catch {
+      roles.value = []
+    }
   }
 
   async function load() {
@@ -219,10 +289,16 @@ export const useRosterStore = defineStore('roster', () => {
     error.value = null
     violations.value = []
     try {
-      adopt(await api.swapRoster(id, selectedIds.value))
+      const roleChanges = rolesEnabled.value
+        ? swapRoles(heldIds.value, selectedIds.value, heldRoles.value, roleOf.value)
+        : []
+      adopt(await api.swapRoster(id, selectedIds.value, roleChanges))
       await tournamentsStore.load()
     } catch (e) {
-      if (roster.value) selectedIds.value = roster.value.heroes.map((hero) => hero.id)
+      if (roster.value) {
+        selectedIds.value = roster.value.heroes.map((hero) => hero.id)
+        roleOf.value = toRoleMap(roster.value.roleAssignments ?? [])
+      }
       if (e instanceof ApiError) {
         violations.value = e.violations
         error.value = e.message
@@ -238,8 +314,55 @@ export const useRosterStore = defineStore('roster', () => {
   function discardSwaps() {
     if (!roster.value) return
     selectedIds.value = roster.value.heroes.map((hero) => hero.id)
+    roleOf.value = toRoleMap(roster.value.roleAssignments ?? [])
     error.value = null
     violations.value = []
+  }
+
+  /**
+   * Give one hero a role.
+   *
+   * Three paths, for the same reasons `toggle` has two:
+   *  - **Staging a swap** — with heroes staged, the role is held locally and
+   *    goes up with `submitSwaps`, so a role for an arriving hero lands in the
+   *    same transaction as the hero itself.
+   *  - **A draft** — the whole roster's roles are saved straight away, with the
+   *    previous roles restored if the server refuses.
+   *  - **A locked roster with an open window** — the same save, but the server
+   *    wants every hero assigned, so it waits until none is missing.
+   */
+  async function setRole(heroId: number, roleId: number) {
+    const id = tournamentId.value
+    if (id === null || !rolesEditable.value) return
+
+    const previous = { ...roleOf.value }
+    roleOf.value = { ...previous, [heroId]: roleId }
+    error.value = null
+    violations.value = []
+
+    const heroIds = selectedIds.value
+    // With an exchange staged the role rides along with it; with nothing
+    // staged a window still lets roles change on their own, saved now.
+    if (staging.value && swapsStaged.value > 0) return
+    if (locked.value && heroIds.some((hero) => roleOf.value[hero] === undefined)) return
+
+    saving.value = true
+    try {
+      const next = await api.setRoles(id, assignmentsFor(heroIds, roleOf.value))
+      // Keep any unsaved hero selection a draft might be mid-way through.
+      roster.value = next
+      roleOf.value = toRoleMap(next.roleAssignments ?? [])
+    } catch (e) {
+      roleOf.value = previous
+      if (e instanceof ApiError) {
+        violations.value = e.violations
+        error.value = e.message
+      } else {
+        error.value = 'Could not update roles'
+      }
+    } finally {
+      saving.value = false
+    }
   }
 
   async function lock() {
@@ -267,6 +390,7 @@ export const useRosterStore = defineStore('roster', () => {
     standingsOpen,
     roster,
     selectedIds,
+    roleOf,
     selected,
     loading,
     saving,
@@ -284,6 +408,12 @@ export const useRosterStore = defineStore('roster', () => {
     alreadySwappedThisRound,
     staging,
     swapsStaged,
+    roles,
+    rolesEnabled,
+    rolesEditable,
+    roleIssues,
+    roleFor,
+    setRole,
     isSelected,
     select,
     load,

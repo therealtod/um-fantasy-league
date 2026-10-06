@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tournaments set swaps_per_round = 1 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4797e0747f5c1a9547a5c7c51d20abc896d00236aa2e4781603d9d588c7a5c58"
+}

@@ -16,6 +16,7 @@ pub mod map;
 pub mod r#match;
 pub mod matchimport;
 pub mod ratelimit;
+pub mod role;
 pub mod scoring;
 pub mod standings;
 pub mod state;

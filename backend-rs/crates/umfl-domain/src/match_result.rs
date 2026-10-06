@@ -12,6 +12,7 @@
 
 use crate::time::java_instant;
 use chrono::{DateTime, Utc};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 /// Why a hero was struck out of a series.
@@ -86,6 +87,13 @@ pub struct GameParticipantResult {
     /// losing side may finish below it -- an overkill hit lands it negative.
     pub health_remaining: i32,
     pub is_winner: bool,
+    /// What this hero did in this game, by normalised stat name -- how often
+    /// it attacked, healed, schemed -- as an admin uploaded it from the
+    /// game's stats sheet. Empty when none was recorded, and then absent
+    /// from the JSON rather than `{}`. Priced only by a manager's role (see
+    /// [`crate::roster_roles`]), never by a scoring metric.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub stats: IndexMap<String, i32>,
 }
 
 /// One game of a series: its own map, its own two participants.
@@ -297,6 +305,12 @@ impl<'a> MetricContext<'a> {
         }
     }
 
+    /// This hero's stats in this game. `None` off a played game, which has no
+    /// game to have recorded any in.
+    pub fn stats(&self) -> Option<&'a IndexMap<String, i32>> {
+        self.participant().map(|p| &p.stats)
+    }
+
     /// Everyone else in the same game. Empty for a `Drafted` or `Banned`
     /// context, which has no game to look at.
     pub fn opponents(&self) -> Vec<&'a GameParticipantResult> {
@@ -343,6 +357,7 @@ mod tests {
                     hero_name: format!("Hero {hero_id}"),
                     health_remaining: health,
                     is_winner: won,
+                    stats: Default::default(),
                 })
                 .collect(),
         }

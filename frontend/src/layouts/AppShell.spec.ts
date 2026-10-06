@@ -43,6 +43,7 @@ const baseTournament: Tournament = {
   currentRound: 1,
   swapsPerRound: 0,
   swapWindowOpen: false,
+  rolesEnabled: false,
   // myEntryStatus absent: that is what the wire looks like with no entry.
 }
 

@@ -31,6 +31,7 @@ const open: Tournament = {
   currentRound: 1,
   swapsPerRound: 0,
   swapWindowOpen: false,
+  rolesEnabled: false,
   // myEntryStatus deliberately absent
 }
 

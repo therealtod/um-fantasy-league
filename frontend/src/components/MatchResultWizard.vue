@@ -4,7 +4,7 @@ import { api, describeError, violationMessages } from '@/api/client'
 import { useAsyncRequest } from '@/composables/useAsyncRequest'
 import { useTournamentsStore } from '@/stores/tournaments'
 import { byName } from '@/lib/sort'
-import type { Hero, MapAdminDto, MatchImportPreviewDto } from '@/api/types'
+import type { Hero, MapAdminDto, MatchImportPreviewDto, RosterRole } from '@/api/types'
 // The form model, the seeding, the payload conversion, the option lists and the
 // validation all live in the domain module, as plain functions over plain data.
 // What is left here is the reactive wrapper, the API calls, and the shell the
@@ -21,6 +21,7 @@ import MatchUnassignedBanSection from '@/components/MatchUnassignedBanSection.vu
 import MatchDraftSide from '@/components/MatchDraftSide.vue'
 import MatchGameRow from '@/components/MatchGameRow.vue'
 import MatchPreBanSection from '@/components/MatchPreBanSection.vue'
+import MatchStatsSection from '@/components/MatchStatsSection.vue'
 
 interface Props {
   tournamentId?: number
@@ -51,6 +52,17 @@ const isInitialized = ref(false)
 // scores against — so the admin picks from a list instead of typing a raw id.
 const mapPool = ref<MapAdminDto[]>([])
 const heroPool = ref<Hero[]>([])
+/** The tournament's roles — only for the stats section's "no role rewards this" hint. */
+const roles = ref<RosterRole[]>([])
+
+/**
+ * Whether this tournament prices a stats sheet at all. Off, the stats section
+ * is hidden; a correction still carries whatever stats the match already has,
+ * so switching roles back on later finds them where they were.
+ */
+const rolesEnabled = computed(
+  () => tournamentsStore.byId(props.tournamentId ?? -1)?.rolesEnabled ?? false,
+)
 
 /**
  * The round a new match lands in unless the admin says otherwise — the
@@ -108,12 +120,14 @@ async function loadPools() {
   const tournamentId = props.tournamentId
   if (!tournamentId) return
 
-  const [maps, heroes] = await Promise.all([
+  const [maps, heroes, tournamentRoles] = await Promise.all([
     api.admin.listMapPool(tournamentId),
     api.admin.listHeroPool(tournamentId),
+    rolesEnabled.value ? api.roles(tournamentId) : Promise.resolve([]),
   ])
   mapPool.value = maps.sort(byName)
   heroPool.value = heroes.sort(byName)
+  roles.value = tournamentRoles
 }
 
 // Appending a game is the one edit left at this level, since it is the only one
@@ -308,6 +322,15 @@ onMounted(async () => {
 
         <button type="button" class="btn-ghost" @click="addGame">+ Add Game</button>
       </div>
+
+      <!-- The stats sheet the managers' roles are priced from. After the games,
+           because its rows are matched to the heroes the games name. -->
+      <MatchStatsSection
+        v-if="rolesEnabled"
+        v-model="form"
+        :hero-pool="heroPool"
+        :roles="roles"
+      />
 
       <!-- Pre-bans: struck before sides were assigned, so they belong to neither
            draft and score neither ban metric. -->

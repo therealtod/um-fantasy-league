@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from roster_role_weights where role_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9dda7b392bbbe49074b628e0f1c4042932f9da2e1e0c118dfc400a529eb18cd"
+}

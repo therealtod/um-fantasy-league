@@ -100,7 +100,12 @@ test.describe('tournament lifecycle', () => {
       data: {
         round,
         playedAt: new Date().toISOString(),
-        participants: [{ playerLabel: winner.player }, { playerLabel: loser.player }],
+        // A match's link is its identity and is required even when typed by hand.
+        externalLink: `urn:umfl:e2e:${tournamentId}:${round}:${winner.hero}`,
+        participants: [
+          { playerLabel: winner.player, draftedHeroIds: [heroIdOf[winner.hero]] },
+          { playerLabel: loser.player, draftedHeroIds: [heroIdOf[loser.hero]] },
+        ],
         games: [
           {
             gameNumber: 1,
@@ -176,11 +181,12 @@ test.describe('tournament lifecycle', () => {
         await expect(page.getByText(hero, { exact: true })).toBeVisible()
         await pickHero(page, hero)
         await expect(
-          page.getByRole('button', { name: `Lock Roster (${index + 1}/${heroes.length})` }),
+          page.getByRole('button', { name: `Lock In Roster (${index + 1}/${heroes.length})` }),
         ).toBeVisible()
       }
 
-      await page.getByRole('button', { name: `Lock Roster (${heroes.length}/${heroes.length})` }).click()
+      await page.getByRole('button', { name: `Lock In Roster (${heroes.length}/${heroes.length})` }).click()
+      await page.getByRole('button', { name: 'Lock Roster', exact: true }).click()
       await expect(page.getByText('Roster Locked', { exact: true })).toBeVisible()
 
       return context
@@ -211,13 +217,13 @@ test.describe('tournament lifecycle', () => {
           1,
           'Sherwood Forest',
           { player: 'Dmitri Kovac', hero: 'King Arthur', health: 10 },
-          { player: 'Hana Sato', hero: 'Sherlock Holmes', health: 2 },
+          { player: 'Hana Sato', hero: 'Sherlock Holmes', health: 0 },
         )
         await recordMatch(
           2,
           'Raptor Paddock',
           { player: 'Aurelie Blanc', hero: 'Robin Hood', health: 6 },
-          { player: 'Miles Ashworth', hero: 'Dracula', health: 3 },
+          { player: 'Miles Ashworth', hero: 'Dracula', health: 0 },
         )
 
         await setTournamentStatus('COMPLETED', '2026-11-03')
@@ -236,7 +242,7 @@ test.describe('tournament lifecycle', () => {
 
         const runnerUpRow = page.getByRole('row').filter({ hasText: 'SherlockMain' })
         await expect(runnerUpRow.locator('td').first()).toHaveText('2')
-        await expect(runnerUpRow).toContainText('8.0')
+        await expect(runnerUpRow).toContainText('3.0')
       })
     } finally {
       await playerAContext?.close()

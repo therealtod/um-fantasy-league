@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Hero, MatchImportPreviewDto, MatchResultDto } from '@/api/types'
 import * as matchForm from './matchForm'
 import type { MatchForm } from './matchForm'
+import { parseStatsFile, type StatsRow } from './matchStats'
 
 const heroPool: Hero[] = [
   { id: 10, name: 'Sherlock Holmes', imageUrl: null, cost: 500 },
@@ -646,5 +647,120 @@ describe('validate', () => {
     // Repeating a hero across games is the ordinary case: the draft names it
     // once and both games draw from it.
     expect(check(form)).toBeNull()
+  })
+})
+
+/* -------------------------------------------------------------------------
+ * Stats: a stats sheet laid onto the games, carried through a save and read
+ * back by a correction.
+ * ------------------------------------------------------------------------- */
+
+describe('applyStats', () => {
+  function sheet(csv: string): StatsRow[] {
+    const parsed = parseStatsFile(csv)
+    if (!parsed.ok) throw new Error(parsed.errors.join('; '))
+    return parsed.rows
+  }
+
+  it('places each row on the side whose hero it names, in the game it names', () => {
+    const form = validForm()
+
+    const problems = matchForm.applyStats(
+      form,
+      sheet('game,hero,ATTACKS,HEALING\n1,dracula,3,2\n1,Sherlock  Holmes,5,'),
+      heroPool,
+    )
+
+    expect(problems).toEqual([])
+    expect(form.games[0]!.participants[0]!.stats).toEqual({ ATTACKS: 5 })
+    expect(form.games[0]!.participants[1]!.stats).toEqual({ ATTACKS: 3, HEALING: 2 })
+    expect(matchForm.statNames(form)).toEqual(['ATTACKS', 'HEALING'])
+  })
+
+  it('places a row by side when it names no hero', () => {
+    const form = validForm()
+
+    expect(matchForm.applyStats(form, sheet('game,side,ATTACKS\n1,2,7'), heroPool)).toEqual([])
+    expect(form.games[0]!.participants[1]!.stats).toEqual({ ATTACKS: 7 })
+  })
+
+  it('changes nothing when any row cannot be placed, and says which', () => {
+    const form = validForm()
+    form.games[0]!.participants[0]!.stats = { ATTACKS: 1 }
+
+    const problems = matchForm.applyStats(
+      form,
+      sheet(
+        'game,hero,side,ATTACKS\n1,Dracula,,3\n2,Dracula,,3\n1,Medusa,,1\n1,Sherlock Holmes,2,1\n1,Dracula,,9',
+      ),
+      heroPool,
+    )
+
+    expect(problems).toEqual([
+      'Line 3: this match has no game 2.',
+      'Line 4: Medusa did not play game 1.',
+      'Line 5: Sherlock Holmes played side 1, not side 2.',
+      'Line 6: game 1, side 2 already has a row.',
+    ])
+    expect(form.games[0]!.participants[0]!.stats, 'all or nothing').toEqual({ ATTACKS: 1 })
+    expect(form.games[0]!.participants[1]!.stats).toBeUndefined()
+  })
+
+  it('replaces the stats the form held, since the file is the whole sheet', () => {
+    const form = validForm()
+    form.games[0]!.participants[0]!.stats = { ATTACKS: 1 }
+
+    matchForm.applyStats(form, sheet('game,hero,HEALING\n1,Dracula,2'), heroPool)
+
+    expect(form.games[0]!.participants[0]!.stats).toBeUndefined()
+    expect(form.games[0]!.participants[1]!.stats).toEqual({ HEALING: 2 })
+  })
+
+  it('clears every game, leaving no empty stats objects behind', () => {
+    const form = validForm()
+    form.games[0]!.participants[0]!.stats = { ATTACKS: 1 }
+
+    matchForm.clearStats(form)
+
+    expect(form.games[0]!.participants.every((p) => !('stats' in p))).toBe(true)
+    expect(matchForm.statNames(form)).toEqual([])
+  })
+
+  it('travels with the payload and comes back with a correction', () => {
+    const form = validForm()
+    form.games[0]!.participants[0]!.stats = { ATTACKS: 5 }
+
+    const payload = matchForm.toPayload(form)
+    expect(payload.games[0]!.participants[0]!.stats).toEqual({ ATTACKS: 5 })
+    expect(payload.games[0]!.participants[1]!.stats).toBeUndefined()
+
+    const saved: MatchResultDto = {
+      matchId: 1,
+      tournamentId: 1,
+      round: 1,
+      playedAt: '2026-08-20T18:00:00Z',
+      externalLink: 'https://example.com/match/1',
+      participants: [
+        { side: 0, draftedHeroes: [{ heroId: 10, heroName: 'Sherlock Holmes' }] },
+        { side: 1, draftedHeroes: [{ heroId: 11, heroName: 'Dracula' }] },
+      ],
+      games: [
+        {
+          gameId: 1,
+          gameNumber: 1,
+          mapId: 5,
+          mapName: 'Marmoreal',
+          participants: [
+            { side: 0, heroId: 10, heroName: 'Sherlock Holmes', healthRemaining: 8, isWinner: true, stats: { ATTACKS: 5 } },
+            { side: 1, heroId: 11, heroName: 'Dracula', healthRemaining: 0, isWinner: false },
+          ],
+        },
+      ],
+      bans: [],
+    }
+    const reread = matchForm.formFromMatch(saved)
+
+    expect(reread.games[0]!.participants[0]!.stats).toEqual({ ATTACKS: 5 })
+    expect('stats' in reread.games[0]!.participants[1]!).toBe(false)
   })
 })

@@ -585,7 +585,8 @@ async fn match_ids_ascend_with_played_at_which_is_what_makes_the_id_a_safe_polli
 /// interleaving that produces. Since the last squash back to a `V1` baseline
 /// (see `AGENTS.md`) that is `V1`/`V2` from `db/migration`, then `V3` from
 /// `db/seed`, then `V4__roster_swaps.sql` back in `db/migration`, then `V5`
-/// in the seed again -- exactly the alternation this test exists for.
+/// in the seed again, and the same again for `V6__roster_roles.sql` and
+/// `V7__demo_roles.sql` -- exactly the alternation this test exists for.
 ///
 /// `V5__demo_swap_config.sql` is why it is not merely decorative: it configures
 /// the swap columns `V4` adds, so it has to sort *after* a migration that
@@ -603,7 +604,7 @@ fn the_two_flyway_locations_interleave_by_version() {
     let plan = crate::harness::migrate::plan(&root.join("migration"), Some(&root.join("seed")));
 
     let versions: Vec<u32> = plan.iter().map(|m| m.version).collect();
-    assert_eq!(vec![1, 2, 3, 4, 5], versions);
+    assert_eq!(vec![1, 2, 3, 4, 5, 6, 7], versions);
 
     let seeded: Vec<u32> = plan
         .iter()
@@ -611,7 +612,7 @@ fn the_two_flyway_locations_interleave_by_version() {
         .map(|m| m.version)
         .collect();
     assert_eq!(
-        vec![3, 5],
+        vec![3, 5, 7],
         seeded,
         "each seed file sits after the schema it configures"
     );
@@ -619,7 +620,7 @@ fn the_two_flyway_locations_interleave_by_version() {
     // The `prod` shape: same schema and reference data, no league data at all.
     let without_seed = crate::harness::migrate::plan(&root.join("migration"), None);
     assert_eq!(
-        vec![1, 2, 4],
+        vec![1, 2, 4, 6],
         without_seed.iter().map(|m| m.version).collect::<Vec<_>>()
     );
 }

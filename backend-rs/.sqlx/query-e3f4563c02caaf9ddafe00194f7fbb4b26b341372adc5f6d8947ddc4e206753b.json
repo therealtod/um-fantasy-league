@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select map_id from tournament_maps where tournament_id = $1 order by map_id limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "map_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "tournament_maps",
+            "name": "map_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e3f4563c02caaf9ddafe00194f7fbb4b26b341372adc5f6d8947ddc4e206753b"
+}

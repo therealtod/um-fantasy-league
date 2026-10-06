@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Roster, RosterViolation, Tournament } from '@/api/types'
+import type { Roster, RosterRole, RosterViolation, Tournament } from '@/api/types'
 
 vi.mock('@/api/client', () => ({
   api: {
@@ -9,6 +9,8 @@ vi.mock('@/api/client', () => ({
     setSlots: vi.fn(),
     lockRoster: vi.fn(),
     swapRoster: vi.fn(),
+    setRoles: vi.fn(),
+    roles: vi.fn(),
   },
   ApiError: class extends Error {
     constructor(
@@ -26,6 +28,7 @@ vi.mock('@/api/client', () => ({
 }))
 
 import { api, ApiError } from '@/api/client'
+import { toRoleMap } from '@/domain/rosterRoles'
 import { useHeroesStore } from './heroes'
 import { useRosterStore } from './roster'
 import { useTournamentsStore } from './tournaments'
@@ -47,6 +50,7 @@ function tournament(overrides: Partial<Tournament> = {}): Tournament {
     currentRound: 1,
     swapsPerRound: 0,
     swapWindowOpen: false,
+    rolesEnabled: false,
     ...overrides,
   }
 }
@@ -69,19 +73,21 @@ function roster(heroIds: number[], overrides: Partial<Roster> = {}): Roster {
     swapsAvailable: 0,
     alreadySwappedThisRound: false,
     swappable: false,
+    roleAssignments: [],
     ...overrides,
   }
 }
 
 /**
  * Seeds a store directly at the state `adopt()` would have left it in after
- * a real load/register/toggle — `roster` and `selectedIds` always move
- * together in the real store, so a test that sets only `roster` leaves
- * `selectedIds` stale.
+ * a real load/register/toggle — `roster`, `selectedIds` and `roleOf` always
+ * move together in the real store, so a test that sets only `roster` leaves
+ * the other two stale.
  */
 function seed(store: ReturnType<typeof useRosterStore>, heroIds: number[], overrides: Partial<Roster> = {}) {
   store.roster = roster(heroIds, overrides)
   store.selectedIds = [...heroIds]
+  store.roleOf = toRoleMap(store.roster.roleAssignments)
 }
 
 describe('roster store', () => {
@@ -408,7 +414,7 @@ describe('roster store', () => {
       await store.submitSwaps()
 
       expect(api.swapRoster).toHaveBeenCalledTimes(1)
-      expect(api.swapRoster).toHaveBeenCalledWith(TOURNAMENT_ID, [1, 9])
+      expect(api.swapRoster).toHaveBeenCalledWith(TOURNAMENT_ID, [1, 9], [])
       expect(store.selectedIds).toEqual([1, 9])
       expect(store.alreadySwappedThisRound).toBe(true)
       expect(store.staging).toBe(false)
@@ -478,6 +484,171 @@ describe('roster store', () => {
 
       expect(store.staging).toBe(false)
       expect(api.setSlots).toHaveBeenCalledWith(TOURNAMENT_ID, [1, 2])
+    })
+  })
+
+  describe('roles', () => {
+    const ATTACKER = 11
+    const HEALER = 12
+    const ROLES: RosterRole[] = [
+      {
+        id: ATTACKER,
+        tournamentId: TOURNAMENT_ID,
+        name: 'Attacker',
+        sortOrder: 1,
+        weights: [{ stat: 'ATTACKS', coefficient: 1 }],
+      },
+      {
+        id: HEALER,
+        tournamentId: TOURNAMENT_ID,
+        name: 'Healer',
+        maxPerRoster: 1,
+        sortOrder: 2,
+        weights: [{ stat: 'HEALING', coefficient: 1.5 }],
+      },
+    ]
+
+    /** A tournament that uses roles, with the two roles above on offer. */
+    function withRoles(store: ReturnType<typeof useRosterStore>) {
+      useTournamentsStore().tournaments[0]!.rolesEnabled = true
+      store.tournamentId = TOURNAMENT_ID
+      store.roles = ROLES
+    }
+
+    it('saves a draft role straight away and adopts the reply', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2])
+      vi.mocked(api.setRoles).mockResolvedValueOnce(
+        roster([1, 2], { roleAssignments: [{ heroId: 1, roleId: ATTACKER }] }),
+      )
+
+      await store.setRole(1, ATTACKER)
+
+      expect(api.setRoles).toHaveBeenCalledWith(TOURNAMENT_ID, [{ heroId: 1, roleId: ATTACKER }])
+      expect(store.roleFor(1)).toBe(ATTACKER)
+    })
+
+    it('rolls the role back when the server refuses it', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2])
+      const violations: RosterViolation[] = [{ rule: 'ROLE_CAP_EXCEEDED', message: 'At most 1 Healer' }]
+      vi.mocked(api.setRoles).mockRejectedValueOnce(new ApiError(422, { detail: 'nope', violations }))
+
+      await store.setRole(1, HEALER)
+
+      expect(store.roleFor(1)).toBeUndefined()
+      expect(store.violations).toEqual(violations)
+    })
+
+    it('will not lock until every hero has a role, and says why', () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], { roleAssignments: [{ heroId: 1, roleId: ATTACKER }] })
+
+      expect(store.lockable).toBe(false)
+      expect(store.roleIssues).toEqual(['One hero still needs a role.'])
+
+      seed(store, [1, 2], {
+        roleAssignments: [
+          { heroId: 1, roleId: ATTACKER },
+          { heroId: 2, roleId: ATTACKER },
+        ],
+      })
+      expect(store.lockable).toBe(true)
+    })
+
+    it('will not lock with a role over its cap', () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], {
+        roleAssignments: [
+          { heroId: 1, roleId: HEALER },
+          { heroId: 2, roleId: HEALER },
+        ],
+      })
+
+      expect(store.lockable).toBe(false)
+      expect(store.roleIssues).toEqual(['At most 1 Healer — 2 assigned.'])
+    })
+
+    it('lets roles go unassigned in a tournament that does not use them', () => {
+      const store = useRosterStore()
+      store.tournamentId = TOURNAMENT_ID
+      seed(store, [1, 2])
+
+      expect(store.rolesEnabled).toBe(false)
+      expect(store.roleIssues).toEqual([])
+      expect(store.lockable).toBe(true)
+    })
+
+    it('sends an arriving hero’s role with the swap rather than on its own', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], {
+        locked: true,
+        status: 'LOCKED',
+        swapWindowOpen: true,
+        swapsAvailable: 1,
+        roleAssignments: [
+          { heroId: 1, roleId: ATTACKER },
+          { heroId: 2, roleId: HEALER },
+        ],
+      })
+      vi.mocked(api.swapRoster).mockResolvedValueOnce(roster([1, 9], { locked: true }))
+
+      await store.toggle(2)
+      await store.toggle(9)
+      expect(store.roleIssues).toEqual(['One hero still needs a role.'])
+
+      await store.setRole(9, HEALER)
+      expect(api.setRoles).not.toHaveBeenCalled()
+      expect(store.roleIssues).toEqual([])
+
+      await store.submitSwaps()
+      expect(api.swapRoster).toHaveBeenCalledWith(TOURNAMENT_ID, [1, 9], [
+        { heroId: 9, roleId: HEALER },
+      ])
+    })
+
+    it('re-assigns a kept hero on its own inside a window when nothing is staged', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], {
+        locked: true,
+        status: 'LOCKED',
+        swapWindowOpen: true,
+        swapsAvailable: 1,
+        roleAssignments: [
+          { heroId: 1, roleId: ATTACKER },
+          { heroId: 2, roleId: HEALER },
+        ],
+      })
+      vi.mocked(api.setRoles).mockResolvedValueOnce(roster([1, 2], { locked: true }))
+
+      await store.setRole(2, ATTACKER)
+
+      expect(api.setRoles).toHaveBeenCalledWith(TOURNAMENT_ID, [
+        { heroId: 1, roleId: ATTACKER },
+        { heroId: 2, roleId: ATTACKER },
+      ])
+    })
+
+    it('leaves a locked roster’s roles alone while the window is shut', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], {
+        locked: true,
+        status: 'LOCKED',
+        roleAssignments: [{ heroId: 1, roleId: ATTACKER }],
+      })
+
+      await store.setRole(1, HEALER)
+
+      expect(store.rolesEditable).toBe(false)
+      expect(store.roleFor(1)).toBe(ATTACKER)
+      expect(api.setRoles).not.toHaveBeenCalled()
     })
   })
 })

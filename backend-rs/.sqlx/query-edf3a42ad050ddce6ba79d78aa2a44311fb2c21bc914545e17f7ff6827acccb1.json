@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select mgs.game_id, mgs.side, mgs.stat, mgs.value\n         from match_game_stats mgs\n         join match_games mg on mg.id = mgs.game_id\n         where mg.match_id = any($1)\n         order by mgs.game_id, mgs.side, mgs.stat",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "game_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "match_game_stats",
+            "name": "game_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "side",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "match_game_stats",
+            "name": "side"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "stat",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "match_game_stats",
+            "name": "stat"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "value",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "match_game_stats",
+            "name": "value"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "edf3a42ad050ddce6ba79d78aa2a44311fb2c21bc914545e17f7ff6827acccb1"
+}

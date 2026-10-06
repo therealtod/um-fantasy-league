@@ -62,7 +62,7 @@ pub struct Rule {
 
 /// The table, transcribed rule for rule from `apiAuthorizationRules`.
 ///
-/// Keep it in step with `authorize_rules` in `tests/it/security.rs`, which
+/// Keep it in step with `the_public_reads_need_no_credential` in `tests/it/security.rs`, which
 /// asserts it from the outside.
 pub fn rules() -> &'static [Rule] {
     static RULES: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
@@ -78,8 +78,8 @@ pub fn rules() -> &'static [Rule] {
                 pattern: "/actuator/info",
                 access: Access::Permit,
             },
-            // Viewing tournaments, hero pools, standings and hero performance
-            // needs no account -- only entering a tournament and drafting a
+            // Viewing tournaments, hero pools, roles, standings and hero
+            // performance needs no account -- only entering a tournament and drafting a
             // roster does. GET only: `POST /api/tournaments` falls through to
             // `/api/**` below.
             Rule {
@@ -115,6 +115,13 @@ pub fn rules() -> &'static [Rule] {
             Rule {
                 method: Some(Method::GET),
                 pattern: "/api/tournaments/*/hero-stats",
+                access: Access::Permit,
+            },
+            // The roles a manager picks from, with what each rewards -- read
+            // before registering, like the hero pool.
+            Rule {
+                method: Some(Method::GET),
+                pattern: "/api/tournaments/*/roles",
                 access: Access::Permit,
             },
             // Must precede `/api/**` -- first match wins.
@@ -249,6 +256,8 @@ mod tests {
             "/api/tournaments/1/standings",
             "/api/tournaments/1/standings/stream",
             "/api/tournaments/1/matches",
+            "/api/tournaments/1/hero-stats",
+            "/api/tournaments/1/roles",
         ] {
             assert_eq!(
                 required_access(&Method::GET, path),
@@ -273,6 +282,10 @@ mod tests {
         );
         assert_eq!(
             required_access(&Method::POST, "/api/tournaments/1/entries"),
+            Access::Authenticated
+        );
+        assert_eq!(
+            required_access(&Method::PUT, "/api/tournaments/1/entries/me/roles"),
             Access::Authenticated
         );
     }

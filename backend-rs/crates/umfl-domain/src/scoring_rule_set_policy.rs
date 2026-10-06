@@ -68,13 +68,15 @@ pub struct ScoringCoefficientInput {
 }
 
 /// Mirrors the `scoring_coefficient_metric_format` CHECK in
-/// `V1__core_schema.sql`: `^[A-Z][A-Z0-9_]*$`.
+/// `V1__core_schema.sql`: `^[A-Z][A-Z0-9_]*$`. The roster-role stat CHECKs in
+/// `V6__roster_roles.sql` use the same pattern, which is why
+/// [`crate::roster_roles`] calls this too.
 ///
 /// Hand-written rather than a regex because `umfl-domain` has no regex
 /// dependency and this is four lines. Anchors both ends against the whole
 /// input -- so a trailing newline fails too -- without the `$`-before-newline
 /// subtlety a partial-match API would introduce.
-fn is_well_formed(metric: &str) -> bool {
+pub(crate) fn is_well_formed(metric: &str) -> bool {
     let mut chars = metric.chars();
     match chars.next() {
         Some(first) if first.is_ascii_uppercase() => {}

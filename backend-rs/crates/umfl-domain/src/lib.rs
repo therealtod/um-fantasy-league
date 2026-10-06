@@ -16,6 +16,7 @@ pub mod match_metrics;
 pub mod match_policy;
 pub mod name_resolver;
 pub mod roster_policy;
+pub mod roster_roles;
 pub mod scoring_engine;
 pub mod scoring_rule_set_policy;
 pub mod scraped_timestamps;

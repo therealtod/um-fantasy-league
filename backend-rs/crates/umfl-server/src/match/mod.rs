@@ -21,6 +21,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use umfl_domain::match_policy::{
     MatchBanInput, MatchGameInput, MatchGameParticipantInput, MatchParticipantInput,
@@ -89,11 +90,15 @@ pub struct MatchGameWrite {
     pub participants: Vec<MatchGameParticipantWrite>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchGameParticipantWrite {
     pub hero_id: i64,
     pub health_remaining: i32,
     pub is_winner: bool,
+    /// `(stat, value)`, the stat already normalised -- what
+    /// `match_game_stats` stores, and what a role's weights are matched
+    /// against.
+    pub stats: Vec<(String, i32)>,
 }
 
 /// `(match_id, hero_id)` is the natural key -- a hero is struck at most once
@@ -225,6 +230,15 @@ pub struct MatchGameParticipantRequest {
     #[garde(skip)]
     #[serde(default)]
     pub is_winner: bool,
+    /// What this hero did in this game -- `{"ATTACKS": 5, "HEALING": 2}` --
+    /// as the admin uploaded it from the game's stats sheet. Optional: a game
+    /// with no sheet simply earns no role bonus. Names and values are checked
+    /// by [`umfl_domain::match_policy`] (`STAT_NAME_MALFORMED`,
+    /// `DUPLICATE_STAT`, `STAT_VALUE_NEGATIVE`), so nothing here skips past
+    /// the same 422 every other match rule renders as.
+    #[garde(skip)]
+    #[serde(default)]
+    pub stats: IndexMap<String, i32>,
 }
 
 #[derive(Debug, Deserialize, garde::Validate)]
@@ -390,6 +404,7 @@ impl RecordMatchRequest {
                         hero_id: p.hero_id.expect("validated as present"),
                         health_remaining: p.health_remaining.expect("validated as present"),
                         is_winner: p.is_winner,
+                        stats: p.stats.clone(),
                     })
                     .collect(),
             })

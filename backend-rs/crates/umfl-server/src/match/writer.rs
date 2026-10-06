@@ -183,6 +183,43 @@ async fn insert_game(
         &health,
         &winners
     )
+    .execute(&mut *conn)
+    .await?;
+
+    insert_stats(conn, game_id, game).await
+}
+
+/// Each side's stats for one game, as one statement. Keyed by side, like the
+/// participants just written: the stat rows reference
+/// `match_game_participants (game_id, side)`, so they can only exist for a
+/// hero that actually played this game.
+async fn insert_stats(
+    conn: &mut PgConnection,
+    game_id: i64,
+    game: &MatchGameWrite,
+) -> sqlx::Result<()> {
+    let mut sides: Vec<i32> = Vec::new();
+    let mut stats: Vec<String> = Vec::new();
+    let mut values: Vec<i32> = Vec::new();
+    for (side, participant) in game.participants.iter().enumerate() {
+        for (stat, value) in &participant.stats {
+            sides.push(side as i32);
+            stats.push(stat.clone());
+            values.push(*value);
+        }
+    }
+    if sides.is_empty() {
+        return Ok(());
+    }
+    sqlx::query!(
+        "insert into match_game_stats (game_id, side, stat, value)
+         select $1, s, st, v
+         from unnest($2::integer[], $3::text[], $4::integer[]) as t(s, st, v)",
+        game_id,
+        &sides,
+        &stats,
+        &values
+    )
     .execute(conn)
     .await?;
     Ok(())

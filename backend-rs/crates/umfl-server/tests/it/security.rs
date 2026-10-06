@@ -64,6 +64,7 @@ async fn the_public_reads_need_no_credential() {
         "/api/tournaments/1/standings/stream",
         "/api/tournaments/1/matches",
         "/api/tournaments/1/hero-stats",
+        "/api/tournaments/1/roles",
         "/actuator/health",
         "/actuator/info",
     ] {
@@ -84,6 +85,7 @@ async fn a_write_to_a_publicly_readable_path_still_needs_an_identity() {
         ("POST", "/api/tournaments"),
         ("PUT", "/api/tournaments/1"),
         ("POST", "/api/tournaments/1/entries"),
+        ("PUT", "/api/tournaments/1/entries/me/roles"),
     ] {
         let response = send(&app, method, uri, None).await;
         assert_eq!(response.status, StatusCode::UNAUTHORIZED, "{method} {uri}");

@@ -244,6 +244,7 @@ mod tests {
             hero_name: name.into(),
             health_remaining: health,
             is_winner,
+            stats: Default::default(),
         }
     }
 
@@ -507,6 +508,7 @@ mod tests {
                 cost: 2500,
             }],
             swaps: Vec::new(),
+            role_assignments: Vec::new(),
         };
         let managers = standings::board(1, &matches, &standard(), &[entry]);
 

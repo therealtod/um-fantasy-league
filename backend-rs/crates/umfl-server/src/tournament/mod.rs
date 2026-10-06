@@ -15,7 +15,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use umfl_domain::roster_policy::{self, BudgetStatus, RosterPick};
+use umfl_domain::roster_policy::BudgetStatus;
 use umfl_domain::tournament::{EntryStatus, Tournament, TournamentFormat, TournamentStatus};
 
 use crate::auth::{CurrentManager, MaybeManager};
@@ -56,6 +56,9 @@ pub struct TournamentDto {
     /// off for this tournament.
     pub swaps_per_round: i32,
     pub swap_window_open: bool,
+    /// Whether managers give their heroes roles here, and the board prices
+    /// the role bonus.
+    pub roles_enabled: bool,
 }
 
 impl TournamentDto {
@@ -76,6 +79,7 @@ impl TournamentDto {
             current_round: tournament.current_round,
             swaps_per_round: tournament.swaps_per_round,
             swap_window_open: tournament.swap_window_open,
+            roles_enabled: tournament.roles_enabled,
         }
     }
 }
@@ -122,8 +126,9 @@ pub struct RosterDto {
     pub roster_size: i32,
     pub heroes: Vec<HeroDto>,
     pub budget: BudgetStatusDto,
-    /// True when `validate_lock` raises no violations for this roster — i.e.
-    /// the lock button may enable.
+    /// True when locking would be accepted — `validate_lock` and, when the
+    /// tournament uses roles, the role rules raise nothing — i.e. the lock
+    /// button may enable.
     pub lockable: bool,
     /// Whether an admin has a swap window open on this tournament.
     pub swap_window_open: bool,
@@ -135,21 +140,21 @@ pub struct RosterDto {
     /// The swap counterpart to [`RosterDto::lockable`]: true when a swap would
     /// be accepted right now, so the submit button may enable.
     pub swappable: bool,
+    /// The role in force now for each hero that has one, in slot order. Empty
+    /// when the tournament does not use roles.
+    pub role_assignments: Vec<RoleAssignmentDto>,
+}
+
+/// One hero's role, on the wire in both directions.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleAssignmentDto {
+    pub hero_id: i64,
+    pub role_id: i64,
 }
 
 impl From<RosterSnapshot> for RosterDto {
     fn from(snapshot: RosterSnapshot) -> Self {
-        let picks: Vec<RosterPick> = snapshot
-            .heroes
-            .iter()
-            .map(|h| RosterPick {
-                hero_id: h.id,
-                cost: h.cost,
-            })
-            .collect();
-        let lockable =
-            roster_policy::validate_lock(&picks, &snapshot.tournament, &snapshot.entry).is_empty();
-
         Self {
             entry_id: snapshot.entry.id.expect("a saved entry has an id"),
             tournament_id: snapshot
@@ -163,11 +168,16 @@ impl From<RosterSnapshot> for RosterDto {
             roster_size: snapshot.tournament.roster_size,
             heroes: snapshot.heroes.into_iter().map(HeroDto::from).collect(),
             budget: snapshot.budget.into(),
-            lockable,
+            lockable: snapshot.lockable,
             swap_window_open: snapshot.tournament.swap_window_open,
             swaps_available: snapshot.swaps_available,
             already_swapped_this_round: snapshot.already_swapped_this_round,
             swappable: snapshot.swappable,
+            role_assignments: snapshot
+                .role_assignments
+                .into_iter()
+                .map(|(hero_id, role_id)| RoleAssignmentDto { hero_id, role_id })
+                .collect(),
         }
     }
 }
@@ -184,6 +194,63 @@ impl From<RosterSnapshot> for RosterDto {
 pub struct SetSlotsRequest {
     #[garde(custom(hero_ids_rule))]
     pub hero_ids: Option<Vec<i64>>,
+}
+
+/// One hero's role, as a manager submits it. Both ids must be present.
+#[derive(Debug, Deserialize, garde::Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleAssignmentRequest {
+    #[garde(custom(required("heroId is required")))]
+    pub hero_id: Option<i64>,
+    #[garde(custom(required("roleId is required")))]
+    pub role_id: Option<i64>,
+}
+
+/// The roles for the whole roster -- not a delta. At most 64, the same bound
+/// as `heroIds`.
+#[derive(Debug, Deserialize, garde::Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRolesRequest {
+    #[garde(dive, custom(assignments_rule))]
+    pub assignments: Option<Vec<RoleAssignmentRequest>>,
+}
+
+fn assignments_rule(value: &Option<Vec<RoleAssignmentRequest>>, _: &()) -> garde::Result {
+    match value {
+        None => Err(garde::Error::new("assignments is required")),
+        Some(list) if list.len() > 64 => {
+            Err(garde::Error::new("assignments must not exceed 64 entries"))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// A swap: the whole proposed roster, plus the roles to go with it.
+///
+/// `roles` is optional and partial -- an arriving hero needs one when the
+/// tournament uses roles, a kept hero only if its manager is re-assigning it.
+#[derive(Debug, Deserialize, garde::Validate)]
+#[serde(rename_all = "camelCase")]
+pub struct SwapRequest {
+    #[garde(custom(hero_ids_rule))]
+    pub hero_ids: Option<Vec<i64>>,
+    #[serde(default)]
+    #[garde(dive, length(max = 64))]
+    pub roles: Vec<RoleAssignmentRequest>,
+}
+
+/// The validated pairs. Validation has already run, so the `expect`s are
+/// unreachable.
+fn to_pairs(requests: &[RoleAssignmentRequest]) -> Vec<(i64, i64)> {
+    requests
+        .iter()
+        .map(|r| {
+            (
+                r.hero_id.expect("validated as present"),
+                r.role_id.expect("validated as present"),
+            )
+        })
+        .collect()
 }
 
 fn hero_ids_rule(value: &Option<Vec<i64>>, _: &()) -> garde::Result {
@@ -225,6 +292,13 @@ pub struct CreateTournamentRequest {
     #[serde(default)]
     #[garde(custom(non_negative("swapsPerRound must not be negative")))]
     pub swaps_per_round: Option<i32>,
+    /// Optional, and false when absent -- the same reasoning as
+    /// `swaps_per_round`: off is what every tournament predating roles is,
+    /// and on an update a client omitting it switches roles off, which is
+    /// why the admin form always sends it.
+    #[serde(default)]
+    #[garde(skip)]
+    pub roles_enabled: Option<bool>,
 }
 
 /// Full replace — every field is resubmitted, including `status`.
@@ -286,6 +360,7 @@ impl CreateTournamentRequest {
             // client omitting it switches the mechanic off, which is why the
             // admin form always sends it.
             swaps_per_round: self.swaps_per_round.unwrap_or(0),
+            roles_enabled: self.roles_enabled.unwrap_or(false),
         }
     }
 }
@@ -299,6 +374,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/tournaments/{id}/entries/me/slots", put(set_slots))
         .route("/api/tournaments/{id}/entries/me/lock", post(lock))
         .route("/api/tournaments/{id}/entries/me/swaps", post(swap))
+        .route("/api/tournaments/{id}/entries/me/roles", put(set_roles))
         .route("/api/admin/tournaments", post(admin_create))
         .route(
             "/api/admin/tournaments/{id}",
@@ -413,18 +489,32 @@ async fn lock(
 
 /// Exchange heroes on a locked roster during an open swap window.
 ///
-/// Reuses [`SetSlotsRequest`]: the body is the whole proposed roster, not a
-/// list of exchanges, and the service derives the difference. The builder
+/// The body is the whole proposed roster, not a list of exchanges, and the
+/// service derives the difference. The builder
 /// already holds a full list, and deriving the diff server-side is what keeps
 /// the two sides from disagreeing about what counts as one swap.
 async fn swap(
     State(state): State<AppState>,
     CurrentManager(manager): CurrentManager,
     AppPath(id): AppPath<i64>,
-    ValidJson(request): ValidJson<SetSlotsRequest>,
+    ValidJson(request): ValidJson<SwapRequest>,
 ) -> ApiResult<Json<RosterDto>> {
+    let roles = to_pairs(&request.roles);
     let hero_ids = request.hero_ids.unwrap_or_default();
-    let snapshot = service::swap_roster(&state, id, &manager, &hero_ids).await?;
+    let snapshot = service::swap_roster(&state, id, &manager, &hero_ids, &roles).await?;
+    Ok(Json(RosterDto::from(snapshot)))
+}
+
+/// Give the heroes on the roster their roles -- freely while drafting, and
+/// during an open swap window once locked. See [`service::set_roles`].
+async fn set_roles(
+    State(state): State<AppState>,
+    CurrentManager(manager): CurrentManager,
+    AppPath(id): AppPath<i64>,
+    ValidJson(request): ValidJson<SetRolesRequest>,
+) -> ApiResult<Json<RosterDto>> {
+    let assignments = to_pairs(request.assignments.as_deref().unwrap_or_default());
+    let snapshot = service::set_roles(&state, id, &manager, &assignments).await?;
     Ok(Json(RosterDto::from(snapshot)))
 }
 

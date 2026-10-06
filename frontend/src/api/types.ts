@@ -56,8 +56,40 @@ export interface Tournament {
    * and an admin shuts it again before the round's results are recorded.
    */
   swapWindowOpen: boolean
+  /**
+   * Whether managers give each hero a role here and the standings price the
+   * role bonus. Off hides the bonus without deleting any assignment.
+   */
+  rolesEnabled: boolean
   /** Absent, not null, when this manager has no entry — see the note at the top. */
   myEntryStatus?: EntryStatus | null
+}
+
+/** One stat a role rewards, and how much each one is worth. */
+export interface RoleWeight {
+  /** SCREAMING_SNAKE, matched against the stat columns of a game's stats sheet. */
+  stat: string
+  coefficient: number
+}
+
+/**
+ * A role a manager can give a hero on their roster — "Attacker", "Healer" — and
+ * the per-game stats it turns into points.
+ */
+export interface RosterRole {
+  id: number
+  tournamentId: number
+  name: string
+  /** At most this many heroes on one roster may take the role. Absent is uncapped. */
+  maxPerRoster?: number
+  sortOrder: number
+  weights: RoleWeight[]
+}
+
+/** One hero's role, on the wire in both directions. */
+export interface RoleAssignment {
+  heroId: number
+  roleId: number
 }
 
 export interface BudgetStatus {
@@ -90,6 +122,11 @@ export interface Roster {
   alreadySwappedThisRound: boolean
   /** The swap counterpart to `lockable`: whether a swap would be accepted now. */
   swappable: boolean
+  /**
+   * The role in force now for each hero that has one, in slot order. Empty when
+   * the tournament does not use roles.
+   */
+  roleAssignments: RoleAssignment[]
 }
 
 /**
@@ -220,9 +257,21 @@ export interface CreateTournamentRequest {
    * a manager mid-swap. Those move only through `advanceRound`/`setSwapWindow`.
    */
   swapsPerRound?: number
+  /**
+   * Whether this tournament uses roster roles. An update is a full replace and
+   * an omitted flag reads as off, so the admin form always sends it.
+   */
+  rolesEnabled?: boolean
 }
 
 export type UpdateTournamentRequest = CreateTournamentRequest
+
+export interface RoleRequest {
+  name: string
+  maxPerRoster?: number | null
+  sortOrder?: number
+  weights: RoleWeight[]
+}
 
 export interface CreateHeroRequest {
   name: string
@@ -278,10 +327,19 @@ export interface MatchParticipantRequest {
   draftedHeroIds: number[]
 }
 
+/**
+ * What one hero did in one game, by stat name — `{ ATTACKS: 5, HEALING: 2 }`.
+ * The keys are whatever the tournament's stats sheet has columns for; a role
+ * prices the ones it weights.
+ */
+export type GameStats = Record<string, number>
+
 export interface MatchGameParticipantRequest {
   heroId: number
   healthRemaining: number
   isWinner: boolean
+  /** Omitted when the game has no stats sheet: it then earns no role bonus. */
+  stats?: GameStats
 }
 
 export interface MatchGameRequest {
@@ -420,6 +478,8 @@ export interface GameParticipantResult {
   heroName: string
   healthRemaining: number
   isWinner: boolean
+  /** Absent when no stats were recorded for this game. */
+  stats?: GameStats
 }
 
 export interface GameResult {

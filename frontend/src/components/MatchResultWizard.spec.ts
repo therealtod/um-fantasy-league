@@ -25,10 +25,12 @@ const listHeroPool = vi.fn()
 const recordMatch = vi.fn()
 const correctMatch = vi.fn()
 const getMatch = vi.fn()
+const listRoles = vi.fn()
 const violationMessagesMock = vi.fn((_e: unknown) => [] as string[])
 
 vi.mock('@/api/client', () => ({
   api: {
+    roles: (...args: unknown[]) => listRoles(...args),
     admin: {
       listMapPool: (...args: unknown[]) => listMapPool(...args),
       listHeroPool: (...args: unknown[]) => listHeroPool(...args),
@@ -41,10 +43,14 @@ vi.mock('@/api/client', () => ({
   violationMessages: (e: unknown) => violationMessagesMock(e),
 }))
 
+/** What `byId` answers — undefined unless a test needs the tournament itself. */
+let tournamentInStore: { id: number; currentRound: number; rolesEnabled: boolean } | undefined
+
 vi.mock('@/stores/tournaments', () => ({
   // `byId` is what the wizard reads the tournament's `currentRound` off, to
-  // seed a new match's round the way the server would default it.
-  useTournamentsStore: () => ({ tournaments: [], byId: () => undefined }),
+  // seed a new match's round the way the server would default it — and its
+  // `rolesEnabled`, which decides whether the stats sheet is offered at all.
+  useTournamentsStore: () => ({ tournaments: [], byId: () => tournamentInStore }),
 }))
 
 const mapPool: MapAdminDto[] = [{ id: 5, name: 'Center Square' }]
@@ -97,6 +103,7 @@ async function draftBothSides(wrapper: VueWrapper, side0: number[], side1: numbe
 
 beforeEach(() => {
   vi.clearAllMocks()
+  tournamentInStore = undefined
   listMapPool.mockResolvedValue(mapPool)
   listHeroPool.mockResolvedValue(heroPool)
   violationMessagesMock.mockReturnValue([])
@@ -569,5 +576,86 @@ describe('MatchResultWizard prefilled from an import', () => {
     const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
     expect((wrapper.find('#game-0-map').element as HTMLSelectElement).value).toBe('0')
     expect(wrapper.findAll('[id^="draft-0-"]')).toHaveLength(0)
+  })
+})
+
+describe('MatchResultWizard stats sheet', () => {
+  /**
+   * Hands the hidden file input a file. jsdom's `File` has no `text()`, and the
+   * section reads nothing but `name` and `text()`, so a stand-in carrying just
+   * those two is the file as far as the binding under test is concerned.
+   */
+  async function upload(wrapper: VueWrapper, name: string, contents: string) {
+    const input = wrapper.find('#match-stats-file')
+    Object.defineProperty(input.element, 'files', {
+      value: [{ name, text: async () => contents }],
+      configurable: true,
+    })
+    await input.trigger('change')
+    await flushPromises()
+  }
+
+  /** One decided game: Sherlock Holmes (side 1) beats Dracula (side 2). */
+  async function oneGame(wrapper: VueWrapper) {
+    await draftBothSides(wrapper, [10], [11])
+    await wrapper.find('#game-0-map').setValue('5')
+    await wrapper.find('#game-0-hero-0').setValue('10')
+    await wrapper.find('#game-0-hero-1').setValue('11')
+    await wrapper.find('#game-0-health-0').setValue('6')
+    await wrapper.findAll('input[type=radio]')[0]!.setValue()
+  }
+
+  beforeEach(() => {
+    tournamentInStore = { id: 1, currentRound: 1, rolesEnabled: true }
+    listRoles.mockResolvedValue([
+      { id: 1, tournamentId: 1, name: 'Attacker', sortOrder: 1, weights: [{ stat: 'ATTACKS', coefficient: 1 }] },
+    ])
+  })
+
+  it('lays an uploaded sheet onto the games and sends it with the match', async () => {
+    recordMatch.mockResolvedValue({})
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+    await oneGame(wrapper)
+
+    await upload(wrapper, 'stats.csv', 'game,hero,ATTACKS,HEALING\n1,Sherlock Holmes,5,0\n1,Dracula,2,3')
+
+    expect(wrapper.text()).toContain('Applied stats.csv')
+    expect(wrapper.text()).toContain('No role rewards HEALING')
+
+    await wrapper.find('button.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(recordMatch).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        games: [
+          expect.objectContaining({
+            participants: [
+              expect.objectContaining({ heroId: 10, stats: { ATTACKS: 5, HEALING: 0 } }),
+              expect.objectContaining({ heroId: 11, stats: { ATTACKS: 2, HEALING: 3 } }),
+            ],
+          }),
+        ],
+      }),
+    )
+  })
+
+  it('says why a sheet was not applied, and applies none of it', async () => {
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+    await oneGame(wrapper)
+
+    await upload(wrapper, 'stats.csv', 'game,hero,ATTACKS\n1,Medusa,5')
+
+    expect(wrapper.text()).toContain('The file was not applied')
+    expect(wrapper.text()).toContain('Line 2: Medusa did not play game 1.')
+    expect(wrapper.text()).not.toContain('Applied stats.csv')
+  })
+
+  it('is not offered in a tournament that does not use roles', async () => {
+    tournamentInStore = { id: 1, currentRound: 1, rolesEnabled: false }
+    const wrapper = await mountWizard({ tournamentId: 1, mode: 'create' })
+
+    expect(wrapper.find('#match-stats-file').exists()).toBe(false)
+    expect(listRoles).not.toHaveBeenCalled()
   })
 })

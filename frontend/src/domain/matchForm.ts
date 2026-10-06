@@ -1,11 +1,13 @@
 import type {
   BanType,
+  GameStats,
   Hero,
   MatchGameRequest,
   MatchImportPreviewDto,
   MatchResultDto,
   RecordMatchRequest,
 } from '@/api/types'
+import { normaliseHeroName, type StatsRow } from './matchStats'
 
 /**
  * The match wizard's form model, and every rule that operates on it.
@@ -195,7 +197,14 @@ export function formFromMatch(matchData: MatchResultDto): MatchForm {
         mapId: game.mapId,
         participants: [...game.participants]
           .sort((a, b) => a.side - b.side)
-          .map((p) => ({ heroId: p.heroId, healthRemaining: p.healthRemaining, isWinner: p.isWinner })),
+          .map((p) => ({
+            heroId: p.heroId,
+            healthRemaining: p.healthRemaining,
+            isWinner: p.isWinner,
+            // Read back so a correction keeps the stats sheet it was recorded
+            // with; absent rather than `{}` when there was none.
+            ...(p.stats ? { stats: { ...p.stats } } : {}),
+          })),
       })),
     preBans: matchData.bans.filter((ban) => ban.banType === 'PRE_BAN').map((ban) => ({ heroId: ban.heroId })),
     unassignedBans: matchData.bans
@@ -366,6 +375,88 @@ export function setWinner(form: MatchForm, gameIndex: number, participantIndex: 
   form.games[gameIndex].participants.forEach((p, i) => {
     p.isWinner = i === participantIndex
   })
+}
+
+/* -------------------------------------------------------------------------
+ * Stats: a match's stats sheet, laid onto its games. Read by the role a
+ * manager gave each hero, never by a scoring metric — see `matchStats.ts` for
+ * the file itself.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Lays a parsed stats sheet onto the form's games, replacing whatever stats
+ * they held — the file is the sheet for the whole match.
+ *
+ * All or nothing: any row that cannot be placed comes back as a message and
+ * the form is left untouched, because half a sheet would quietly price some
+ * heroes and not others. A row is placed by its game number and then by the
+ * hero it names — one of *that game's* two heroes, matched the way the import
+ * matches names — or by its side when it names one instead. So the games'
+ * heroes have to be chosen before a sheet that names heroes can be applied.
+ */
+export function applyStats(form: MatchForm, rows: StatsRow[], heroPool: Hero[]): string[] {
+  const errors: string[] = []
+  const placed = new Map<string, GameStats>()
+
+  for (const row of rows) {
+    const gameIndex = form.games.findIndex((game) => game.gameNumber === row.game)
+    if (gameIndex === -1) {
+      errors.push(`${row.at}: this match has no game ${row.game}.`)
+      continue
+    }
+    const participants = form.games[gameIndex].participants
+
+    let side = row.side === undefined ? -1 : row.side - 1
+    if (row.hero !== undefined) {
+      const wanted = normaliseHeroName(row.hero)
+      const bySide = participants.findIndex(
+        (p) => p.heroId !== UNSET && normaliseHeroName(heroName(heroPool, p.heroId)) === wanted,
+      )
+      if (bySide === -1) {
+        errors.push(`${row.at}: ${row.hero} did not play game ${row.game}.`)
+        continue
+      }
+      if (side !== -1 && side !== bySide) {
+        errors.push(`${row.at}: ${row.hero} played side ${bySide + 1}, not side ${side + 1}.`)
+        continue
+      }
+      side = bySide
+    }
+
+    const key = `${gameIndex}:${side}`
+    if (placed.has(key)) {
+      errors.push(`${row.at}: game ${row.game}, side ${side + 1} already has a row.`)
+      continue
+    }
+    placed.set(key, row.stats)
+  }
+
+  if (errors.length > 0) return errors
+
+  form.games.forEach((game, gameIndex) => {
+    game.participants.forEach((participant, side) => {
+      const stats = placed.get(`${gameIndex}:${side}`)
+      if (stats && Object.keys(stats).length > 0) participant.stats = { ...stats }
+      else delete participant.stats
+    })
+  })
+  return []
+}
+
+/** Drops every game's stats — the match is recorded with no stats sheet. */
+export function clearStats(form: MatchForm) {
+  form.games.forEach((game) => game.participants.forEach((participant) => delete participant.stats))
+}
+
+/** Every stat any game records, in first-seen order — the stats preview's columns. */
+export function statNames(form: MatchForm): string[] {
+  const names = new Set<string>()
+  for (const game of form.games) {
+    for (const participant of game.participants) {
+      for (const name of Object.keys(participant.stats ?? {})) names.add(name)
+    }
+  }
+  return [...names]
 }
 
 /* -------------------------------------------------------------------------

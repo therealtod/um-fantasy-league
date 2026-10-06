@@ -5,6 +5,7 @@ import MapManagementWizard from '@/components/MapManagementWizard.vue'
 import TournamentManagementWizard from '@/components/TournamentManagementWizard.vue'
 import HeroPoolWizard from '@/components/HeroPoolWizard.vue'
 import MapPoolWizard from '@/components/MapPoolWizard.vue'
+import RoleManagementWizard from '@/components/RoleManagementWizard.vue'
 import ScoringRuleSetWizard from '@/components/ScoringRuleSetWizard.vue'
 import MatchResultWizard from '@/components/MatchResultWizard.vue'
 import MatchListAdmin from '@/components/MatchListAdmin.vue'
@@ -23,6 +24,7 @@ type AdminSection =
   | 'hero-pool'
   | 'map-pool'
   | 'scoring'
+  | 'roles'
   | 'matches'
 
 type MatchViewMode = 'list' | 'create' | 'edit' | 'import'
@@ -54,6 +56,11 @@ const sections = [
     id: 'scoring' as const,
     label: 'Scoring Rules',
     description: 'Manage scoring rule sets and coefficients',
+  },
+  {
+    id: 'roles' as const,
+    label: 'Roster Roles',
+    description: 'Define roles and the game stats they reward',
   },
   {
     id: 'matches' as const,
@@ -160,6 +167,7 @@ function returnToMatchList() {
         <HeroPoolWizard v-else-if="currentSection === 'hero-pool'" />
         <MapPoolWizard v-else-if="currentSection === 'map-pool'" />
         <ScoringRuleSetWizard v-else-if="currentSection === 'scoring'" />
+        <RoleManagementWizard v-else-if="currentSection === 'roles'" />
 
         <!-- Match Results Section -->
         <div v-else-if="currentSection === 'matches'">

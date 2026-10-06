@@ -20,6 +20,7 @@ mod match_admin;
 mod match_cache;
 mod match_import;
 mod request_validation;
+mod roles;
 mod roster_flow;
 mod schema_and_seed;
 mod scoring_admin;

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select role_id, stat, coefficient from roster_role_weights\n         where role_id = any($1) order by role_id, stat",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "role_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "roster_role_weights",
+            "name": "role_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "stat",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "roster_role_weights",
+            "name": "stat"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "coefficient",
+        "type_info": "Numeric",
+        "origin": {
+          "Table": {
+            "table": "roster_role_weights",
+            "name": "coefficient"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9d8c145cdca165084edaf0504e2d7782a5586e580ae4d8ff6f6edc7e91c9cf46"
+}

@@ -4,6 +4,7 @@
 
 use indexmap::IndexMap;
 use sqlx::PgExecutor;
+use umfl_domain::roster_roles::RoleAssignment;
 use umfl_domain::standings::RosterSwap;
 use umfl_domain::tournament::{
     EntrySlot, EntryStatus, Tournament, TournamentEntry, TournamentFormat, TournamentStatus,
@@ -17,7 +18,7 @@ pub async fn find_all_ordered(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<Tourn
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant,
-                  current_round, swaps_per_round, swap_window_open
+                  current_round, swaps_per_round, swap_window_open, roles_enabled
            from tournaments order by start_date asc"#
     )
     .fetch_all(db)
@@ -37,6 +38,7 @@ pub async fn find_all_ordered(db: impl PgExecutor<'_>) -> sqlx::Result<Vec<Tourn
                 current_round: r.current_round,
                 swaps_per_round: r.swaps_per_round,
                 swap_window_open: r.swap_window_open,
+                roles_enabled: r.roles_enabled,
             })
         })
         .collect()
@@ -50,7 +52,7 @@ pub async fn find_by_status_ordered(
     let rows = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant,
-                  current_round, swaps_per_round, swap_window_open
+                  current_round, swaps_per_round, swap_window_open, roles_enabled
            from tournaments where status = $1 order by start_date asc"#,
         status.as_str()
     )
@@ -71,6 +73,7 @@ pub async fn find_by_status_ordered(
                 current_round: r.current_round,
                 swaps_per_round: r.swaps_per_round,
                 swap_window_open: r.swap_window_open,
+                roles_enabled: r.roles_enabled,
             })
         })
         .collect()
@@ -80,7 +83,7 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
     let Some(r) = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant,
-                  current_round, swaps_per_round, swap_window_open
+                  current_round, swaps_per_round, swap_window_open, roles_enabled
            from tournaments where id = $1"#,
         id
     )
@@ -102,6 +105,7 @@ pub async fn find_by_id(db: impl PgExecutor<'_>, id: i64) -> sqlx::Result<Option
         current_round: r.current_round,
         swaps_per_round: r.swaps_per_round,
         swap_window_open: r.swap_window_open,
+        roles_enabled: r.roles_enabled,
     }))
 }
 
@@ -111,7 +115,7 @@ pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<O
     let Some(r) = sqlx::query!(
         r#"select id, name, format, status, start_date, end_date,
                   capacity, roster_size, credit_grant,
-                  current_round, swaps_per_round, swap_window_open
+                  current_round, swaps_per_round, swap_window_open, roles_enabled
            from tournaments where name = $1"#,
         name
     )
@@ -133,6 +137,7 @@ pub async fn find_by_name(db: impl PgExecutor<'_>, name: &str) -> sqlx::Result<O
         current_round: r.current_round,
         swaps_per_round: r.swaps_per_round,
         swap_window_open: r.swap_window_open,
+        roles_enabled: r.roles_enabled,
     }))
 }
 
@@ -454,6 +459,60 @@ pub async fn swaps_by_entry_for_tournament(
             hero_out_id: row.hero_out_id,
             hero_in_id: row.hero_in_id,
         });
+    }
+    Ok(by_entry)
+}
+
+/// One entry's role log, oldest first -- every role it has given every hero,
+/// with the round each took effect from.
+pub async fn role_assignments_for_entry(
+    db: impl PgExecutor<'_>,
+    entry_id: i64,
+) -> sqlx::Result<Vec<RoleAssignment>> {
+    let rows = sqlx::query!(
+        "select hero_id, from_round, role_id from entry_hero_roles
+         where entry_id = $1 order by from_round, hero_id",
+        entry_id
+    )
+    .fetch_all(db)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| RoleAssignment {
+            hero_id: r.hero_id,
+            from_round: r.from_round,
+            role_id: r.role_id,
+        })
+        .collect())
+}
+
+/// Every entry's role log for one tournament, keyed by entry id -- one query
+/// for the whole board, for the reason [`swaps_by_entry_for_tournament`] is.
+pub async fn role_assignments_by_entry_for_tournament(
+    db: impl PgExecutor<'_>,
+    tournament_id: i64,
+) -> sqlx::Result<IndexMap<i64, Vec<RoleAssignment>>> {
+    let rows = sqlx::query!(
+        "select r.entry_id, r.hero_id, r.from_round, r.role_id
+         from entry_hero_roles r
+             join tournament_entries e on e.id = r.entry_id
+         where e.tournament_id = $1
+         order by r.entry_id, r.from_round, r.hero_id",
+        tournament_id
+    )
+    .fetch_all(db)
+    .await?;
+
+    let mut by_entry: IndexMap<i64, Vec<RoleAssignment>> = IndexMap::new();
+    for row in rows {
+        by_entry
+            .entry(row.entry_id)
+            .or_default()
+            .push(RoleAssignment {
+                hero_id: row.hero_id,
+                from_round: row.from_round,
+                role_id: row.role_id,
+            });
     }
     Ok(by_entry)
 }

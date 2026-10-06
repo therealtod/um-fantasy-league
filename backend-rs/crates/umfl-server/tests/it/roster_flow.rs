@@ -577,7 +577,7 @@ async fn a_swap_is_refused_while_the_window_is_shut() {
     let beowulf = app.hero_id("Beowulf").await;
     let proposed = vec![picks[0], picks[1], beowulf];
 
-    let err = service::swap_roster(&app.state, winter, &manager, &proposed)
+    let err = service::swap_roster(&app.state, winter, &manager, &proposed, &[])
         .await
         .expect_err("the window is shut");
 
@@ -606,9 +606,15 @@ async fn a_swap_is_refused_before_the_roster_is_locked() {
         .unwrap();
 
     let beowulf = app.hero_id("Beowulf").await;
-    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
-        .await
-        .expect_err("an unlocked entry belongs on the draft path");
+    let err = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], picks[1], beowulf],
+        &[],
+    )
+    .await
+    .expect_err("an unlocked entry belongs on the draft path");
 
     assert_eq!(rules(&err), ["SWAP_WINDOW_CLOSED"]);
 }
@@ -623,9 +629,15 @@ async fn round_one_offers_no_allowance_at_all() {
     let picks = locked_at_round(&app, winter, &manager, 1, true).await;
 
     let beowulf = app.hero_id("Beowulf").await;
-    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
-        .await
-        .expect_err("nothing has happened to react to");
+    let err = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], picks[1], beowulf],
+        &[],
+    )
+    .await
+    .expect_err("nothing has happened to react to");
 
     assert_eq!(rules(&err), ["SWAP_LIMIT_EXCEEDED"]);
 }
@@ -638,9 +650,15 @@ async fn swapping_more_heroes_than_the_allowance_permits_is_rejected() {
     let picks = locked_at_round(&app, winter, &manager, 2, true).await;
 
     let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
-    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], beowulf, bigfoot])
-        .await
-        .expect_err("two heroes on a one-swap allowance");
+    let err = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], beowulf, bigfoot],
+        &[],
+    )
+    .await
+    .expect_err("two heroes on a one-swap allowance");
 
     assert_eq!(rules(&err), ["SWAP_LIMIT_EXCEEDED"]);
     assert!(
@@ -659,9 +677,15 @@ async fn a_swap_that_breaks_the_budget_is_rejected() {
     // Sinbad (1900) out, Medusa (5600) in: 3400 + 2900 + 5600 = 11_900, which
     // is 1_900 past the grant.
     let medusa = app.hero_id("Medusa").await;
-    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], medusa])
-        .await
-        .expect_err("11_900 does not fit in 10_000");
+    let err = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], picks[1], medusa],
+        &[],
+    )
+    .await
+    .expect_err("11_900 does not fit in 10_000");
 
     assert_eq!(rules(&err), ["BUDGET_EXCEEDED"]);
 }
@@ -674,10 +698,15 @@ async fn a_successful_swap_rewrites_the_slots_and_records_the_exchange() {
     let picks = locked_at_round(&app, winter, &manager, 2, true).await;
     let (sinbad, beowulf) = (picks[2], app.hero_id("Beowulf").await);
 
-    let snapshot =
-        service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
-            .await
-            .expect("one hero, one swap, within budget");
+    let snapshot = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], picks[1], beowulf],
+        &[],
+    )
+    .await
+    .expect("one hero, one swap, within budget");
 
     assert_eq!(snapshot.entry.hero_ids(), [picks[0], picks[1], beowulf]);
     assert_eq!(
@@ -718,13 +747,25 @@ async fn a_second_submission_in_the_same_round_is_rejected() {
     // Round 3 with one swap per round banks an allowance of two, so the second
     // submission is refused by the one-submission rule rather than by running
     // out of swaps -- which is the distinction being pinned here.
-    service::swap_roster(&app.state, winter, &manager, &[picks[0], picks[1], beowulf])
-        .await
-        .expect("the first submission lands");
+    service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], picks[1], beowulf],
+        &[],
+    )
+    .await
+    .expect("the first submission lands");
 
-    let err = service::swap_roster(&app.state, winter, &manager, &[picks[0], bigfoot, beowulf])
-        .await
-        .expect_err("one submission per round");
+    let err = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], bigfoot, beowulf],
+        &[],
+    )
+    .await
+    .expect_err("one submission per round");
 
     assert_eq!(rules(&err), ["ALREADY_SWAPPED_THIS_ROUND"]);
     assert_eq!(
@@ -779,7 +820,9 @@ async fn a_second_submission_cannot_slip_past_on_a_read_taken_before_the_lock() 
     let (state, mine) = (app.state.clone(), manager.clone());
     let proposed = vec![picks[0], picks[1], beowulf];
     let queued =
-        tokio::spawn(async move { service::swap_roster(&state, winter, &mine, &proposed).await });
+        tokio::spawn(
+            async move { service::swap_roster(&state, winter, &mine, &proposed, &[]).await },
+        );
 
     // Two local statements stand between that call's `begin` and its lock, so
     // this is three orders of magnitude more than it needs to be waiting there.
@@ -835,10 +878,15 @@ async fn an_unused_window_is_banked_and_spent_later() {
     let picks = locked_at_round(&app, winter, &manager, 3, true).await;
     let (beowulf, bigfoot) = (app.hero_id("Beowulf").await, app.hero_id("Bigfoot").await);
 
-    let snapshot =
-        service::swap_roster(&app.state, winter, &manager, &[picks[0], beowulf, bigfoot])
-            .await
-            .expect("both banked swaps spent in one submission");
+    let snapshot = service::swap_roster(
+        &app.state,
+        winter,
+        &manager,
+        &[picks[0], beowulf, bigfoot],
+        &[],
+    )
+    .await
+    .expect("both banked swaps spent in one submission");
 
     assert_eq!(snapshot.swaps_available, 0);
     assert_eq!(
@@ -861,7 +909,7 @@ async fn submitting_an_unchanged_roster_spends_nothing() {
     let manager = app.manager("SherlockMain").await;
     let picks = locked_at_round(&app, winter, &manager, 2, true).await;
 
-    let snapshot = service::swap_roster(&app.state, winter, &manager, &picks)
+    let snapshot = service::swap_roster(&app.state, winter, &manager, &picks, &[])
         .await
         .expect("changing nothing breaks no rule");
 
@@ -891,6 +939,7 @@ async fn a_swap_still_cannot_reach_a_hero_outside_the_pool() {
         winter,
         &manager,
         &[picks[0], picks[1], outsider],
+        &[],
     )
     .await
     .expect_err("Nikola Tesla is not in Winter's pool");

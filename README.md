@@ -315,6 +315,50 @@ Unused windows carry over for free — skipping one banks nothing explicitly, it
 A window grants one **submission**, not a running budget, so the builder stages changes locally and
 `POST /entries/me/swaps` sends the whole proposed roster once.
 
+### Roster roles
+
+An optional layer, switched per tournament by `tournaments.roles_enabled` ("Roster Roles" on the
+admin tournament form). An admin defines the tournament's roles — "Attacker", "Healer" — each with an
+optional per-roster cap and the in-game stats it rewards:
+
+| Role | Rewards | Cap |
+|---|---|---|
+| Attacker | `ATTACKS` × 1.0, `DAMAGE_DEALT` × 0.25 | — |
+| Healer | `HEALING` × 1.5 | 1 per roster |
+
+A manager gives every hero on their roster a role, and a roster cannot lock until each hero has one
+within the caps. When an admin records a match they can upload its **stats sheet** — CSV or JSON, one
+row per hero per game:
+
+```csv
+game,hero,ATTACKS,DAMAGE_DEALT,HEALING
+1,Sherlock Holmes,4,8,0
+1,Yennenga,0,0,3
+```
+
+```json
+[{ "game": 1, "hero": "Sherlock Holmes", "stats": { "ATTACKS": 4, "DAMAGE_DEALT": 8 } }]
+```
+
+A `side` column (1 or 2) may name the hero's side instead of the hero. The leaderboard then gains a
+**Role Bonus** column: each game a held hero played, priced by the role *its manager* chose. Sherlock
+as an Attacker above earns 4 + 8 × 0.25 = 6.00, and Yennenga as a Healer earns 3 × 1.5 = 4.50 — so the
+same match is worth different amounts to managers who gave the same hero different roles.
+
+Why it is built the way it is:
+
+* **The bonus is derived, like every other point.** Stats are facts about the match, stored with it;
+  roles are the manager's; weights are reference data. Retune a weight and every past round
+  re-prices on the next read.
+* **Assignments are a log** (`entry_hero_roles … from_round`), for the reason swaps are. Roles are
+  free while drafting and fixed at lock, but a manager may re-assign them inside a swap window — at
+  no cost to their swap allowance — and the rounds already played keep the role they were scored
+  under.
+* **Switching roles off deletes nothing.** The column disappears and totals revert; switching it back
+  on restores both.
+* **Stat names are free-form**, like scoring metrics: whatever the tournament's sheet has columns for.
+  A stat no role weights is recorded and worth nothing.
+
 ---
 
 ## Scoring
@@ -409,6 +453,9 @@ POST /api/tournaments/{id}/entries               register — grants the tournam
 GET  /api/tournaments/{id}/entries/me            roster + budget status
 PUT  /api/tournaments/{id}/entries/me/slots      { "heroIds": [...] }
 POST /api/tournaments/{id}/entries/me/lock       commit roster
+POST /api/tournaments/{id}/entries/me/swaps      { "heroIds": [...], "roles": [...] }   in an open window
+GET  /api/tournaments/{id}/roles                 the roles on offer and the stats they reward
+PUT  /api/tournaments/{id}/entries/me/roles      { "assignments": [{ "heroId", "roleId" }] }
 GET  /api/tournaments/{id}/standings             StandingsBoard — metric columns + ranked rows
 GET  /api/tournaments/{id}/matches               ?sinceMatchId= &limit=   ticker feed
 ```
@@ -431,7 +478,7 @@ and everything under `/entries` require a verified token.
 `/api/admin/**`, gated by `Access::Admin` (backed by `managers.is_admin`, our own data — never an
 identity-provider claim). This is the write path for everything that used to be seed-only: tournaments,
 heroes, maps, a tournament's hero pool and pricing, its board pool, scoring rule sets and coefficients,
-and match results (create/update/delete). `/admin` in the frontend is the UI over it.
+roster roles, and match results (create/update/delete) — each game's per-hero stats included. `/admin` in the frontend is the UI over it.
 
 `umfl_domain::match_policy::validate` validates a match submission before save (each game's map in
 the tournament's pool, every hero played, drafted or banned in its hero pool, no duplicate or unknown

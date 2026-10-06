@@ -30,8 +30,8 @@ pub async fn insert_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
     sqlx::query_scalar!(
         r#"insert into tournaments
                (name, format, status, start_date, end_date, capacity, roster_size, credit_grant,
-                current_round, swaps_per_round, swap_window_open)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                current_round, swaps_per_round, swap_window_open, roles_enabled)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            returning id"#,
         t.name,
         format_to_db(t.format),
@@ -43,7 +43,8 @@ pub async fn insert_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
         t.credit_grant,
         t.current_round,
         t.swaps_per_round,
-        t.swap_window_open
+        t.swap_window_open,
+        t.roles_enabled
     )
     .fetch_one(db)
     .await
@@ -70,7 +71,8 @@ pub async fn update_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
         r#"update tournaments
               set name = $2, format = $3, status = $4, start_date = $5,
                   end_date = $6, capacity = $7, roster_size = $8, credit_grant = $9,
-                  current_round = $10, swaps_per_round = $11, swap_window_open = $12
+                  current_round = $10, swaps_per_round = $11, swap_window_open = $12,
+                  roles_enabled = $13
             where id = $1"#,
         id,
         t.name,
@@ -83,7 +85,8 @@ pub async fn update_tournament(db: impl PgExecutor<'_>, t: &Tournament) -> sqlx:
         t.credit_grant,
         t.current_round,
         t.swaps_per_round,
-        t.swap_window_open
+        t.swap_window_open,
+        t.roles_enabled
     )
     .execute(db)
     .await?;
@@ -115,6 +118,70 @@ pub async fn insert_roster_swaps(
         round,
         &out_ids,
         &in_ids
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Replaces a **draft** entry's whole role log with `assignments`, all from
+/// round one.
+///
+/// A draft has no history worth keeping -- nothing has been played under any
+/// of these roles yet -- so an edit simply overwrites. Once the entry locks,
+/// changes go through [`upsert_entry_roles`] instead and the log grows.
+pub async fn replace_draft_roles(
+    conn: &mut PgConnection,
+    entry_id: i64,
+    assignments: &[(i64, i64)],
+) -> sqlx::Result<()> {
+    sqlx::query!("delete from entry_hero_roles where entry_id = $1", entry_id)
+        .execute(&mut *conn)
+        .await?;
+    upsert_entry_roles(conn, entry_id, 1, assignments).await
+}
+
+/// Records `assignments` as in force from `round` on.
+///
+/// An upsert on `(entry_id, hero_id, from_round)`: changing a role twice in
+/// one swap window leaves one row for that round, the last choice -- nothing
+/// has been played under the first yet, so there is nothing for it to price.
+pub async fn upsert_entry_roles(
+    conn: &mut PgConnection,
+    entry_id: i64,
+    round: i32,
+    assignments: &[(i64, i64)],
+) -> sqlx::Result<()> {
+    if assignments.is_empty() {
+        return Ok(());
+    }
+    let hero_ids: Vec<i64> = assignments.iter().map(|(hero, _)| *hero).collect();
+    let role_ids: Vec<i64> = assignments.iter().map(|(_, role)| *role).collect();
+    sqlx::query!(
+        "insert into entry_hero_roles (entry_id, hero_id, from_round, role_id)
+         select $1, h, $2, r from unnest($3::bigint[], $4::bigint[]) as t(h, r)
+         on conflict (entry_id, hero_id, from_round) do update set role_id = excluded.role_id",
+        entry_id,
+        round,
+        &hero_ids,
+        &role_ids
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// Drops a **draft** entry's roles for heroes no longer on it, so a hero
+/// dropped and later re-picked starts without a stale role.
+pub async fn delete_draft_roles_except(
+    conn: &mut PgConnection,
+    entry_id: i64,
+    kept_hero_ids: &[i64],
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "delete from entry_hero_roles where entry_id = $1 and hero_id <> all($2)",
+        entry_id,
+        kept_hero_ids
     )
     .execute(conn)
     .await?;

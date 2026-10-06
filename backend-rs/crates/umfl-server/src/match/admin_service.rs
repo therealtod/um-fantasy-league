@@ -14,6 +14,7 @@ use sqlx::PgConnection;
 use std::collections::BTreeSet;
 use umfl_domain::match_policy::{self, MatchBanInput, MatchGameInput, MatchParticipantInput};
 use umfl_domain::match_result::MatchResult;
+use umfl_domain::roster_roles;
 use umfl_domain::{DomainError, Violation};
 
 use crate::error::{ApiError, ApiResult};
@@ -403,6 +404,14 @@ fn to_games(games: &[MatchGameInput]) -> Vec<MatchGameWrite> {
                     hero_id: p.hero_id,
                     health_remaining: p.health_remaining,
                     is_winner: p.is_winner,
+                    // Normalised on the way in, because that is what the
+                    // policy checked for duplicates and what a role's
+                    // weights are keyed by.
+                    stats: p
+                        .stats
+                        .iter()
+                        .map(|(stat, value)| (roster_roles::normalise_stat(stat), *value))
+                        .collect(),
                 })
                 .collect(),
         })

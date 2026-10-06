@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update roster_roles set name = $2, max_per_roster = $3, sort_order = $4 where id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7e00822f2349c9f65cae9a0c70bbc3ec4a3702ec8e171913a96a1fc124601dc1"
+}

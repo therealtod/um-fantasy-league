@@ -30,6 +30,7 @@ function blankForm(): CreateTournamentRequest {
     rosterSize: 3,
     creditGrant: 10000,
     swapsPerRound: 0,
+    rolesEnabled: false,
   }
 }
 
@@ -71,6 +72,7 @@ function startEdit(tournament: Tournament) {
     // than taking them from this form. They move only through the two buttons
     // on the list row below.
     swapsPerRound: tournament.swapsPerRound,
+    rolesEnabled: tournament.rolesEnabled,
   }
   showForm.value = true
 }
@@ -269,6 +271,18 @@ async function saveTournament() {
             class="field-input"
             placeholder="e.g., 10000"
           />
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <span class="label-caps">Roster Roles</span>
+          <label class="flex cursor-pointer items-center gap-2 font-mono text-sm text-ink">
+            <input id="tournament-roles" v-model="form.rolesEnabled" type="checkbox" />
+            <span>Managers assign a role to each hero</span>
+          </label>
+          <p class="font-mono text-[11px] text-ink-dim">
+            Managers give each hero a role, and a match's stats sheet earns a role bonus. Switching
+            it off hides the bonus without deleting anything.
+          </p>
         </div>
       </div>
 

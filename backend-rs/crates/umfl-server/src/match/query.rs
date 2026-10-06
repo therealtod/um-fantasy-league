@@ -194,7 +194,7 @@ pub async fn find_by_tournament_since(
 }
 
 /// Attaches participants (with their drafts), games (with their own
-/// participants) and bans to a page of match headers.
+/// participants and their stats) and bans to a page of match headers.
 ///
 /// Every map below is an [`IndexMap`], iterated in the order the ordered
 /// query filled it.
@@ -266,6 +266,27 @@ async fn assemble(
     .fetch_all(&mut *conn)
     .await?;
 
+    // Each side's stats per game, keyed by (game, side) -- the same key
+    // `match_game_stats` references `match_game_participants` by. Ordered by
+    // stat name so a hero's stats read back in a stable order.
+    let mut stats: IndexMap<(i64, i32), IndexMap<String, i32>> = IndexMap::new();
+    for row in sqlx::query!(
+        "select mgs.game_id, mgs.side, mgs.stat, mgs.value
+         from match_game_stats mgs
+         join match_games mg on mg.id = mgs.game_id
+         where mg.match_id = any($1)
+         order by mgs.game_id, mgs.side, mgs.stat",
+        &match_ids
+    )
+    .fetch_all(&mut *conn)
+    .await?
+    {
+        stats
+            .entry((row.game_id, row.side))
+            .or_default()
+            .insert(row.stat, row.value);
+    }
+
     // Joined through match_games to recover match_id, which
     // match_game_participants does not itself carry.
     let mut game_participants: IndexMap<i64, Vec<GameParticipantResult>> = IndexMap::new();
@@ -291,6 +312,9 @@ async fn assemble(
                 hero_name: row.hero_name,
                 health_remaining: row.health_remaining,
                 is_winner: row.is_winner,
+                stats: stats
+                    .swap_remove(&(row.game_id, row.side))
+                    .unwrap_or_default(),
             });
     }
 

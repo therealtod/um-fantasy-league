@@ -39,6 +39,7 @@ function invited(overrides: Partial<Tournament> = {}): Tournament {
     currentRound: 3,
     swapsPerRound: 1,
     swapWindowOpen: true,
+    rolesEnabled: false,
     myEntryStatus: 'LOCKED',
     ...overrides,
   }

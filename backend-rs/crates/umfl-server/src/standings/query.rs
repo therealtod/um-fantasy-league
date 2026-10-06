@@ -83,6 +83,7 @@ pub async fn rosters(
             credit_grant: row.credit_grant,
             heroes: Vec::new(),
             swaps: Vec::new(),
+            role_assignments: Vec::new(),
         });
         // The hero id is the presence check: it is null for an entry with no
         // slots, and the slot's own columns are then null with it.
@@ -100,10 +101,23 @@ pub async fn rosters(
     // entry. `heroes` above is the roster held *now*; these are the exchanges
     // that produced it, and the fold needs both to price a match against the
     // roster its round was actually played with.
-    let mut swaps = tournament_query::swaps_by_entry_for_tournament(conn, tournament_id).await?;
+    let mut swaps =
+        tournament_query::swaps_by_entry_for_tournament(&mut *conn, tournament_id).await?;
     for entry in by_entry.values_mut() {
         if let Some(log) = swaps.shift_remove(&entry.entry_id) {
             entry.swaps = log;
+        }
+    }
+
+    // The role log, the same way. Read whether or not the tournament uses
+    // roles: the fold ignores it when the book is `None`, and one cheap query
+    // is simpler than a second code path.
+    let mut roles =
+        tournament_query::role_assignments_by_entry_for_tournament(&mut *conn, tournament_id)
+            .await?;
+    for entry in by_entry.values_mut() {
+        if let Some(log) = roles.shift_remove(&entry.entry_id) {
+            entry.role_assignments = log;
         }
     }
 

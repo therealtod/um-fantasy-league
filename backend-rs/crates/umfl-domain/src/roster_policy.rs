@@ -47,6 +47,28 @@ pub enum RosterRule {
     /// This entry already submitted its swaps for the current round. A window
     /// grants one submission, not a running budget to spend a click at a time.
     AlreadySwappedThisRound,
+
+    /// Roles were submitted for a tournament that does not use them.
+    RolesDisabled,
+
+    /// A submitted role id is not one of this tournament's roles.
+    UnknownRole,
+
+    /// A role was given to a hero that is not on this roster, or the same hero
+    /// was given two roles in one submission.
+    RoleHeroNotOnRoster,
+
+    /// A hero on the roster has no role, in a tournament that uses roles. Only
+    /// raised where a roster commits -- locking, or a hero arriving by swap --
+    /// never while a draft is still a scratchpad.
+    RoleUnassigned,
+
+    /// More heroes in one role than its `max_per_roster` allows.
+    RoleCapExceeded,
+
+    /// A locked roster's roles can only change while a swap window is open,
+    /// for the same reason its heroes can only change then.
+    RoleChangeClosed,
 }
 
 impl RosterRule {
@@ -62,6 +84,12 @@ impl RosterRule {
             Self::SwapWindowClosed => "SWAP_WINDOW_CLOSED",
             Self::SwapLimitExceeded => "SWAP_LIMIT_EXCEEDED",
             Self::AlreadySwappedThisRound => "ALREADY_SWAPPED_THIS_ROUND",
+            Self::RolesDisabled => "ROLES_DISABLED",
+            Self::UnknownRole => "UNKNOWN_ROLE",
+            Self::RoleHeroNotOnRoster => "ROLE_HERO_NOT_ON_ROSTER",
+            Self::RoleUnassigned => "ROLE_UNASSIGNED",
+            Self::RoleCapExceeded => "ROLE_CAP_EXCEEDED",
+            Self::RoleChangeClosed => "ROLE_CHANGE_CLOSED",
         }
     }
 }
@@ -84,7 +112,7 @@ pub struct RosterViolation {
 }
 
 impl RosterViolation {
-    fn new(rule: RosterRule, message: impl Into<String>) -> Self {
+    pub(crate) fn new(rule: RosterRule, message: impl Into<String>) -> Self {
         Self {
             rule,
             message: message.into(),
@@ -416,6 +444,7 @@ mod tests {
             current_round: 1,
             swaps_per_round: 0,
             swap_window_open: false,
+            roles_enabled: false,
         }
     }
 
