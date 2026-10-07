@@ -350,6 +350,10 @@ Why it is built the way it is:
 * **The bonus is derived, like every other point.** Stats are facts about the match, stored with it;
   roles are the manager's; weights are reference data. Retune a weight and every past round
   re-prices on the next read.
+* **A role never costs points.** Each game's bonus floors at 0. A negative weight is allowed, but it
+  only offsets the role's other stats in the same game. A game that nets out below zero earns no
+  bonus instead of a penalty. A role is the manager's bet on a hero, so it can add to what the hero
+  earned but never take from it. Unlike a scoring coefficient, a role weight can never be a penalty.
 * **Assignments are a log** (`entry_hero_roles … from_round`), for the reason swaps are. Roles are
   free while drafting and fixed at lock, but a manager may re-assign them inside a swap window — at
   no cost to their swap allowance — and the rounds already played keep the role they were scored

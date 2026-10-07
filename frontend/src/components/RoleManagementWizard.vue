@@ -191,7 +191,8 @@ async function confirmDelete() {
         <span class="label-caps">Rewarded Stats</span>
         <p class="font-mono text-[11px] text-ink-dim">
           Each stat is a column of the match stats sheet; a hero in this role earns its count times
-          the weight, every game it plays.
+          the weight, every game it plays. A negative weight only offsets the others: a game's bonus
+          never drops below 0.
         </p>
 
         <div class="flex flex-col gap-3">

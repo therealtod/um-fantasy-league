@@ -1422,6 +1422,42 @@ mod tests {
         assert_eq!(board.rows[0].total_points, 19.25);
     }
 
+    /// A role's floor is 0 per game: a game that nets negative earns nothing,
+    /// and does not cancel what another game earned.
+    #[test]
+    fn a_penalising_role_never_takes_points_away() {
+        use crate::roster_roles::RosterRole;
+        let reckless = RoleBook::new([RosterRole {
+            id: 1,
+            name: "Reckless".into(),
+            max_per_roster: None,
+            weights: [("ATTACKS", "1.0000"), ("HEALING", "-2.0000")]
+                .into_iter()
+                .map(|(stat, w)| (stat.to_string(), Decimal::from_str(w).unwrap()))
+                .collect(),
+        }]);
+        let mut clean = match_in_round(2, 2);
+        clean.games[0].participants[0].stats = [("ATTACKS".to_string(), 5)].into_iter().collect();
+        let entry = with_roles(roster(1, "Reckless", &[(7, "Bigfoot", 2500)]), &[(7, 1, 1)]);
+
+        let board = board_with_roles(
+            1,
+            // Round 1: 5 attacks - 4 healing * 2 = -3, floored to 0. Round 2: +5.
+            &[match_with_stats(1, 1), clean],
+            &standard(),
+            &[entry],
+            Some(&reckless),
+        );
+
+        let row = &board.rows[0];
+        assert_eq!(row.breakdown[ROLE_BONUS_METRIC], 5.0, "not 5 - 3 = 2");
+        assert_eq!(row.round_points, 24.25, "round 2 is 19.25 plus the bonus");
+        assert_eq!(
+            row.total_points, 43.5,
+            "19.25 twice, plus 5 from round 2 only"
+        );
+    }
+
     #[test]
     fn without_roles_the_board_is_exactly_the_plain_board() {
         let entry = with_roles(

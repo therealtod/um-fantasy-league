@@ -120,6 +120,13 @@ pub fn current_roles(assignments: &[RoleAssignment]) -> IndexMap<i64, i64> {
 /// [`crate::scoring_engine::breakdown`] follows, so a displayed bonus is
 /// exactly the sum of its parts. A stat the role does not weight is ignored,
 /// and a weighted stat the game did not record scores zero.
+///
+/// **The floor is 0**: a role is something a manager chooses *for* a hero, so
+/// it can add to what the hero earned but never take from it. A negative
+/// weight is still legal -- it offsets the role's other stats within the same
+/// game -- but a game whose stats net out below zero earns no bonus rather
+/// than a penalty. The floor is per game, the unit the bonus is priced in, so
+/// one bad game cannot eat into a good one either.
 pub fn role_bonus(role: &RosterRole, stats: &IndexMap<String, i32>) -> f64 {
     let total: f64 = role
         .weights
@@ -132,7 +139,10 @@ pub fn role_bonus(role: &RosterRole, stats: &IndexMap<String, i32>) -> f64 {
             Some(round2(f64::from(value) * weight))
         })
         .sum();
-    round2(total)
+    // Not `.max(0.0)`, which may hand back the -0.0 a negative total rounds
+    // through and serialise it as such.
+    let total = round2(total);
+    if total > 0.0 { total } else { 0.0 }
 }
 
 /// Checks the roles a manager has given their roster.
@@ -458,9 +468,38 @@ mod tests {
     }
 
     #[test]
-    fn a_negative_weight_is_a_penalty() {
-        let reckless = role(1, "Reckless", None, &[("DAMAGE_TAKEN", "-0.5000")]);
-        assert_eq!(role_bonus(&reckless, &stats(&[("DAMAGE_TAKEN", 6)])), -3.0);
+    fn a_negative_weight_offsets_the_other_stats_in_the_same_game() {
+        let reckless = role(
+            1,
+            "Reckless",
+            None,
+            &[("ATTACKS", "1.0000"), ("DAMAGE_TAKEN", "-0.5000")],
+        );
+        // 5 * 1.0 - 6 * 0.5 = 2.0
+        assert_eq!(
+            role_bonus(&reckless, &stats(&[("ATTACKS", 5), ("DAMAGE_TAKEN", 6)])),
+            2.0
+        );
+    }
+
+    #[test]
+    fn a_role_never_yields_negative_points() {
+        let reckless = role(
+            1,
+            "Reckless",
+            None,
+            &[("ATTACKS", "1.0000"), ("DAMAGE_TAKEN", "-0.5000")],
+        );
+        // 1 * 1.0 - 6 * 0.5 = -2.0, floored.
+        let bonus = role_bonus(&reckless, &stats(&[("ATTACKS", 1), ("DAMAGE_TAKEN", 6)]));
+        assert_eq!(bonus, 0.0);
+        assert!(bonus.is_sign_positive(), "a floored bonus is +0, not -0");
+
+        let penalty_only = role(2, "Glass", None, &[("DAMAGE_TAKEN", "-0.5000")]);
+        assert_eq!(
+            role_bonus(&penalty_only, &stats(&[("DAMAGE_TAKEN", 6)])),
+            0.0
+        );
     }
 
     // -- validate_assignments -----------------------------------------------

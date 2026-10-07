@@ -338,7 +338,10 @@ Admin API below; nothing outside that surface writes reference data or results.
   (`match_game_stats`, keyed `(game_id, side)` onto `match_game_participants`). The **role bonus** is
   that game's stats priced by the role *this entry* gave the hero, folded at read time by
   `umfl_domain::standings::board_with_roles` into a `ROLE_BONUS` column appended after the rule set's
-  own — nothing stores it, and retuning a weight re-prices every round on the next read. Three
+  own — nothing stores it, and retuning a weight re-prices every round on the next read. **The bonus
+  floors at 0 per game** (`roster_roles::role_bonus`): a negative weight is legal and offsets the
+  role's other stats within that game, but a game that nets negative earns 0, never a penalty. The
+  floor is per game, so a bad game cannot cancel a good one. Don't move it to the column total. Three
   consequences worth not undoing. **Assignments are a log, like swaps**: `entry_hero_roles
   (entry_id, hero_id, from_round, role_id)`, and the role in force for a round is the row with the
   greatest `from_round` not past it (`roster_roles::role_at`), so re-assigning a role in a swap
