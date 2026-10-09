@@ -63,15 +63,47 @@ export function roleProblems(
     )
   }
 
+  const usage = roleUsage(heroIds, roles)
   for (const role of available) {
     if (role.maxPerRoster === undefined) continue
-    const taken = heroIds.filter((heroId) => roles[heroId] === role.id).length
+    const taken = usage.get(role.id) ?? 0
     if (taken > role.maxPerRoster) {
       problems.push(`At most ${role.maxPerRoster} ${role.name} — ${taken} assigned.`)
     }
   }
 
   return problems
+}
+
+/** How many of `heroIds` hold each role, roleId → count — what a capped option shows as `1/1`. */
+export function roleUsage(heroIds: number[], roles: RoleMap): Map<number, number> {
+  const usage = new Map<number, number>()
+  for (const heroId of heroIds) {
+    const roleId = roles[heroId]
+    if (roleId !== undefined) usage.set(roleId, (usage.get(roleId) ?? 0) + 1)
+  }
+  return usage
+}
+
+/**
+ * The heroes holding a role that is over its cap — every holder, since any one
+ * of them could be the one to move. A draft may sit like this (it is a
+ * scratchpad, as it may run over budget); lock is where the cap bites.
+ */
+export function overCapHeroIds(
+  heroIds: number[],
+  roles: RoleMap,
+  available: RosterRole[],
+): Set<number> {
+  const usage = roleUsage(heroIds, roles)
+  const over = new Set(
+    available
+      .filter(
+        (role) => role.maxPerRoster !== undefined && (usage.get(role.id) ?? 0) > role.maxPerRoster,
+      )
+      .map((role) => role.id),
+  )
+  return new Set(heroIds.filter((heroId) => over.has(roles[heroId]!)))
 }
 
 /** "ATTACKS ×1 · DAMAGE DEALT ×0.25" — what a role rewards, as a one-line hint. */

@@ -533,13 +533,32 @@ describe('roster store', () => {
       const store = useRosterStore()
       withRoles(store)
       seed(store, [1, 2])
-      const violations: RosterViolation[] = [{ rule: 'ROLE_CAP_EXCEEDED', message: 'At most 1 Healer' }]
+      const violations: RosterViolation[] = [{ rule: 'TOURNAMENT_CLOSED', message: 'Frozen' }]
       vi.mocked(api.setRoles).mockRejectedValueOnce(new ApiError(422, { detail: 'nope', violations }))
 
       await store.setRole(1, HEALER)
 
       expect(store.roleFor(1)).toBeUndefined()
       expect(store.violations).toEqual(violations)
+    })
+
+    it('clears a draft role, saving the roster without it', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], {
+        roleAssignments: [
+          { heroId: 1, roleId: ATTACKER },
+          { heroId: 2, roleId: HEALER },
+        ],
+      })
+      vi.mocked(api.setRoles).mockResolvedValueOnce(
+        roster([1, 2], { roleAssignments: [{ heroId: 1, roleId: ATTACKER }] }),
+      )
+
+      await store.setRole(2, null)
+
+      expect(api.setRoles).toHaveBeenCalledWith(TOURNAMENT_ID, [{ heroId: 1, roleId: ATTACKER }])
+      expect(store.roleFor(2)).toBeUndefined()
     })
 
     it('will not lock until every hero has a role, and says why', () => {
@@ -631,6 +650,33 @@ describe('roster store', () => {
 
       expect(api.setRoles).toHaveBeenCalledWith(TOURNAMENT_ID, [
         { heroId: 1, roleId: ATTACKER },
+        { heroId: 2, roleId: ATTACKER },
+      ])
+    })
+
+    it('holds a locked roster’s capped role mid-move until the caps are kept again', async () => {
+      const store = useRosterStore()
+      withRoles(store)
+      seed(store, [1, 2], {
+        locked: true,
+        status: 'LOCKED',
+        swapWindowOpen: true,
+        swapsAvailable: 1,
+        roleAssignments: [
+          { heroId: 1, roleId: ATTACKER },
+          { heroId: 2, roleId: HEALER },
+        ],
+      })
+      vi.mocked(api.setRoles).mockResolvedValueOnce(roster([1, 2], { locked: true }))
+
+      await store.setRole(1, HEALER)
+      expect(api.setRoles, 'two Healers would be refused').not.toHaveBeenCalled()
+      expect(store.roleFor(1)).toBe(HEALER)
+      expect(store.roleIssues).toEqual(['At most 1 Healer — 2 assigned.'])
+
+      await store.setRole(2, ATTACKER)
+      expect(api.setRoles).toHaveBeenCalledWith(TOURNAMENT_ID, [
+        { heroId: 1, roleId: HEALER },
         { heroId: 2, roleId: ATTACKER },
       ])
     })

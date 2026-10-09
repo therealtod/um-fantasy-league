@@ -366,19 +366,58 @@ async fn a_draft_may_go_without_roles_but_cannot_lock_without_them() {
 }
 
 #[tokio::test]
-async fn a_capped_role_cannot_be_taken_twice() {
+async fn a_draft_may_run_a_role_over_its_cap_but_cannot_lock_that_way() {
     let app = TestApp::spawn().await;
     let winter = app.tournament_id(WINTER).await;
     enable_roles(&app, winter, true).await;
     let manager = app.manager("SherlockMain").await;
     let picks = drafted(&app, winter, &manager).await;
     let healer = role_id(&app, winter, "Healer").await;
+    let tactician = role_id(&app, winter, "Tactician").await;
+    let two_healers = [
+        (picks[0], healer),
+        (picks[1], healer),
+        (picks[2], tactician),
+    ];
+
+    // The scratchpad lets Healer move straight from one hero to the next...
+    let snapshot = service::set_roles(&app.state, winter, &manager, &two_healers)
+        .await
+        .expect("a draft is a scratchpad");
+    assert_eq!(snapshot.role_assignments, two_healers);
+
+    // ...but the cap holds where it counts.
+    let err = service::lock_roster(&app.state, winter, &manager)
+        .await
+        .expect_err("Healer is capped at one");
+    assert_eq!(rules(&err), ["ROLE_CAP_EXCEEDED"]);
+}
+
+#[tokio::test]
+async fn a_locked_roster_cannot_run_a_role_over_its_cap() {
+    let app = TestApp::spawn().await;
+    let winter = app.tournament_id(WINTER).await;
+    enable_roles(&app, winter, true).await;
+    let manager = app.manager("SherlockMain").await;
+    let picks = locked_with_roles(&app, winter, &manager).await;
+    let healer = role_id(&app, winter, "Healer").await;
+    let tactician = role_id(&app, winter, "Tactician").await;
+    tournament_admin_service::advance_round(&app.state, winter)
+        .await
+        .unwrap();
+    tournament_admin_service::set_swap_window(&app.state, winter, true)
+        .await
+        .unwrap();
 
     let err = service::set_roles(
         &app.state,
         winter,
         &manager,
-        &[(picks[0], healer), (picks[1], healer)],
+        &[
+            (picks[0], healer),
+            (picks[1], healer),
+            (picks[2], tactician),
+        ],
     )
     .await
     .expect_err("Healer is capped at one");

@@ -346,7 +346,10 @@ Admin API below; nothing outside that surface writes reference data or results.
   (entry_id, hero_id, from_round, role_id)`, and the role in force for a round is the row with the
   greatest `from_round` not past it (`roster_roles::role_at`), so re-assigning a role in a swap
   window re-prices only the rounds after it. A draft has no history worth keeping and simply
-  overwrites its rows at round 1; once locked, a change is upserted at `current_round`, only while
+  overwrites its rows at round 1 — and, like an over-budget draft, may run a role past its cap
+  (`validate_assignments`' `enforce_caps` is false only there), so a capped role moves from one
+  hero to another in two edits; the cap bites at lock, on a swap and on every locked-roster change,
+  where the store simply holds the save until the roles are valid again. Once locked, a change is upserted at `current_round`, only while
   a swap window is open, and spends no swap allowance. **Stats are match facts**: written only by
   `r#match::writer` inside the match's own transaction and assembled into `MatchResult`, so
   `MatchResultCache`'s existing invalidation already covers them — no new hook. **The bonus is per

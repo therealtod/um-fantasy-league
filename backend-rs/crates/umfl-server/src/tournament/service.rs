@@ -310,6 +310,7 @@ pub async fn swap_roster(
         role_input,
         book.as_ref(),
         required,
+        true,
     ));
     if !violations.is_empty() {
         return Err(roster_rule(violations));
@@ -356,7 +357,9 @@ pub async fn swap_roster(
 ///
 /// * **A draft** (while the tournament still takes roster changes) is a
 ///   scratchpad: the log is simply overwritten, every row from round one, and
-///   a hero may still be left without a role -- that only bites at lock.
+///   a hero may still be left without a role, or a role may run over its
+///   cap -- both only bite at lock, so a capped role can move straight from
+///   one hero to another.
 /// * **A locked roster** may change roles only while a swap window is open.
 ///   Changes are appended to the log from the current round, so the rounds
 ///   already played keep the role they were scored under; the roster has to
@@ -405,6 +408,7 @@ pub async fn set_roles(
         assignments,
         book.as_ref(),
         required,
+        entry.is_locked(),
     ));
     if !violations.is_empty() {
         return Err(roster_rule(violations));
@@ -641,7 +645,9 @@ fn lock_role_violations(
     book: Option<&RoleBook>,
 ) -> Vec<RosterViolation> {
     match book {
-        Some(book) => roster_roles::validate_assignments(hero_ids, current, Some(book), hero_ids),
+        Some(book) => {
+            roster_roles::validate_assignments(hero_ids, current, Some(book), hero_ids, true)
+        }
         None => Vec::new(),
     }
 }

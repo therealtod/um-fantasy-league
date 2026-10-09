@@ -329,14 +329,21 @@ export const useRosterStore = defineStore('roster', () => {
    *  - **A draft** — the whole roster's roles are saved straight away, with the
    *    previous roles restored if the server refuses.
    *  - **A locked roster with an open window** — the same save, but the server
-   *    wants every hero assigned, so it waits until none is missing.
+   *    wants every hero assigned and every cap kept, so it waits until the
+   *    roles are valid again. That is what lets a capped role move from one
+   *    hero to another in two clicks rather than a refusal on the first.
+   *
+   * `null` clears the hero's role, which only a draft offers.
    */
-  async function setRole(heroId: number, roleId: number) {
+  async function setRole(heroId: number, roleId: number | null) {
     const id = tournamentId.value
     if (id === null || !rolesEditable.value) return
 
     const previous = { ...roleOf.value }
-    roleOf.value = { ...previous, [heroId]: roleId }
+    const next = { ...previous }
+    if (roleId === null) delete next[heroId]
+    else next[heroId] = roleId
+    roleOf.value = next
     error.value = null
     violations.value = []
 
@@ -344,7 +351,7 @@ export const useRosterStore = defineStore('roster', () => {
     // With an exchange staged the role rides along with it; with nothing
     // staged a window still lets roles change on their own, saved now.
     if (staging.value && swapsStaged.value > 0) return
-    if (locked.value && heroIds.some((hero) => roleOf.value[hero] === undefined)) return
+    if (locked.value && roleProblems(heroIds, next, roles.value, heroIds).length > 0) return
 
     saving.value = true
     try {

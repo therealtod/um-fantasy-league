@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { RosterRole } from '@/api/types'
-import { assignmentsFor, describeWeights, roleProblems, swapRoles, toRoleMap } from './rosterRoles'
+import {
+  assignmentsFor,
+  describeWeights,
+  overCapHeroIds,
+  roleProblems,
+  roleUsage,
+  swapRoles,
+  toRoleMap,
+} from './rosterRoles'
 
 const ATTACKER = 1
 const HEALER = 2
@@ -43,6 +51,19 @@ describe('roleProblems', () => {
 
   it('does not count a stale role for a hero no longer on the roster', () => {
     expect(roleProblems([10], { 10: HEALER, 99: HEALER }, roles, [10])).toEqual([])
+  })
+})
+
+describe('roleUsage and overCapHeroIds', () => {
+  it('counts each role among the roster, ignoring heroes without one and stale entries', () => {
+    const usage = roleUsage([10, 11, 12], { 10: ATTACKER, 11: ATTACKER, 99: HEALER })
+    expect([...usage]).toEqual([[ATTACKER, 2]])
+  })
+
+  it('flags every holder of an over-cap role, and nobody under a cap or uncapped', () => {
+    const map = { 10: HEALER, 11: HEALER, 12: ATTACKER, 13: ATTACKER }
+    expect([...overCapHeroIds([10, 11, 12, 13], map, roles)]).toEqual([10, 11])
+    expect(overCapHeroIds([10, 12], map, roles).size).toBe(0)
   })
 })
 

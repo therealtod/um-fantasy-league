@@ -151,7 +151,10 @@ pub fn role_bonus(role: &RosterRole, stats: &IndexMap<String, i32>) -> f64 {
 /// after this submission. `require_complete` names the heroes that must have a
 /// role: the whole roster at lock, the arrivals on a swap, and nobody while a
 /// draft is still a scratchpad, where a hero without a role yet is not an
-/// error.
+/// error. `enforce_caps` is the same distinction for `max_per_roster`: true at
+/// lock and on a locked roster, false on a draft, which may run a role over
+/// its cap the way it may run over budget -- otherwise moving a capped role
+/// from one hero to another would need a detour through a third role.
 ///
 /// Every broken rule is reported, not just the first, exactly as
 /// [`crate::roster_policy`] does.
@@ -160,6 +163,7 @@ pub fn validate_assignments(
     assignments: &[(i64, i64)],
     book: Option<&RoleBook>,
     require_complete: &[i64],
+    enforce_caps: bool,
 ) -> Vec<RosterViolation> {
     let mut violations = Vec::new();
 
@@ -224,6 +228,9 @@ pub fn validate_assignments(
         ));
     }
 
+    if !enforce_caps {
+        return violations;
+    }
     // In the book's own order, so the message is stable.
     for role in book.roles() {
         let Some(cap) = role.max_per_roster else {
@@ -506,25 +513,26 @@ mod tests {
 
     #[test]
     fn a_complete_valid_assignment_passes() {
-        let violations = validate_assignments(&[7, 9], &[(7, 1), (9, 2)], Some(&book()), &[7, 9]);
+        let violations =
+            validate_assignments(&[7, 9], &[(7, 1), (9, 2)], Some(&book()), &[7, 9], true);
         assert!(violations.is_empty(), "{violations:?}");
     }
 
     #[test]
     fn roles_on_a_tournament_without_them_are_refused() {
         assert_eq!(
-            rules(&validate_assignments(&[7], &[(7, 1)], None, &[])),
+            rules(&validate_assignments(&[7], &[(7, 1)], None, &[], true)),
             vec![RosterRule::RolesDisabled]
         );
         assert!(
-            validate_assignments(&[7], &[], None, &[7]).is_empty(),
+            validate_assignments(&[7], &[], None, &[7], true).is_empty(),
             "with roles off, nothing is required either"
         );
     }
 
     #[test]
     fn an_unknown_role_and_an_off_roster_hero_are_both_reported() {
-        let violations = validate_assignments(&[7], &[(7, 99), (8, 1)], Some(&book()), &[]);
+        let violations = validate_assignments(&[7], &[(7, 99), (8, 1)], Some(&book()), &[], true);
         assert_eq!(
             rules(&violations),
             vec![RosterRule::UnknownRole, RosterRule::RoleHeroNotOnRoster]
@@ -533,14 +541,14 @@ mod tests {
 
     #[test]
     fn the_same_hero_given_two_roles_is_refused() {
-        let violations = validate_assignments(&[7], &[(7, 1), (7, 2)], Some(&book()), &[]);
+        let violations = validate_assignments(&[7], &[(7, 1), (7, 2)], Some(&book()), &[], true);
         assert_eq!(rules(&violations), vec![RosterRule::RoleHeroNotOnRoster]);
     }
 
     #[test]
     fn a_draft_may_leave_heroes_without_a_role_but_a_commit_may_not() {
-        assert!(validate_assignments(&[7, 9], &[(7, 1)], Some(&book()), &[]).is_empty());
-        let violations = validate_assignments(&[7, 9], &[(7, 1)], Some(&book()), &[7, 9]);
+        assert!(validate_assignments(&[7, 9], &[(7, 1)], Some(&book()), &[], true).is_empty());
+        let violations = validate_assignments(&[7, 9], &[(7, 1)], Some(&book()), &[7, 9], true);
         assert_eq!(rules(&violations), vec![RosterRule::RoleUnassigned]);
         assert!(
             violations[0].message.contains('9'),
@@ -551,7 +559,7 @@ mod tests {
 
     #[test]
     fn a_role_over_its_cap_is_refused() {
-        let violations = validate_assignments(&[7, 9], &[(7, 2), (9, 2)], Some(&book()), &[]);
+        let violations = validate_assignments(&[7, 9], &[(7, 2), (9, 2)], Some(&book()), &[], true);
         assert_eq!(rules(&violations), vec![RosterRule::RoleCapExceeded]);
         assert!(
             violations[0].message.contains("Healer"),
@@ -561,10 +569,23 @@ mod tests {
     }
 
     #[test]
+    fn a_draft_may_run_a_role_over_its_cap() {
+        assert!(
+            validate_assignments(&[7, 9], &[(7, 2), (9, 2)], Some(&book()), &[], false).is_empty()
+        );
+    }
+
+    #[test]
     fn an_uncapped_role_takes_the_whole_roster() {
         assert!(
-            validate_assignments(&[7, 9, 11], &[(7, 1), (9, 1), (11, 1)], Some(&book()), &[])
-                .is_empty()
+            validate_assignments(
+                &[7, 9, 11],
+                &[(7, 1), (9, 1), (11, 1)],
+                Some(&book()),
+                &[],
+                true
+            )
+            .is_empty()
         );
     }
 

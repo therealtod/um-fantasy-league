@@ -327,7 +327,9 @@ optional per-roster cap and the in-game stats it rewards:
 | Healer | `HEALING` × 1.5 | 1 per roster |
 
 A manager gives every hero on their roster a role, and a roster cannot lock until each hero has one
-within the caps. When an admin records a match they can upload its **stats sheet** — CSV or JSON, one
+within the caps. Like the budget, a cap only bites at lock: a draft may sit two Healers deep for a
+moment, so moving the Healer role from one hero to another is two clicks rather than a detour through
+a third role, and the builder flags both rows until one of them moves. When an admin records a match they can upload its **stats sheet** — CSV or JSON, one
 row per hero per game:
 
 ```csv

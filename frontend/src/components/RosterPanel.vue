@@ -4,7 +4,7 @@ import BudgetMeter from './BudgetMeter.vue'
 import DestructiveConfirmPanel from './DestructiveConfirmPanel.vue'
 import { useRosterStore } from '@/stores/roster'
 import { lockBlockedReason, swapBlockedReason } from '@/domain/rosterGuidance'
-import { describeWeights } from '@/domain/rosterRoles'
+import { describeWeights, overCapHeroIds, roleUsage } from '@/domain/rosterRoles'
 import { formatCredits } from '@/lib/format'
 
 const roster = useRosterStore()
@@ -59,6 +59,29 @@ const swapBlocked = computed(() => heroSwapBlocked.value ?? roleBlocked.value)
 function roleOf(heroId: number) {
   const roleId = roster.roleFor(heroId)
   return roster.roles.find((role) => role.id === roleId)
+}
+
+/** How many of the roster's heroes hold each role, for the `1/1` beside a capped option. */
+const usage = computed(() => roleUsage(roster.selectedIds, roster.roleOf))
+
+/** The heroes sitting on a role past its cap, flagged on their own row. */
+const overCap = computed(() => overCapHeroIds(roster.selectedIds, roster.roleOf, roster.roles))
+
+function roleLabel(role: { id: number; name: string; maxPerRoster?: number }) {
+  if (role.maxPerRoster === undefined) return role.name
+  return `${role.name} (${usage.value.get(role.id) ?? 0}/${role.maxPerRoster})`
+}
+
+/**
+ * A locked roster's role change is held back while the roles break a rule (see
+ * `roster.setRole`), and with no lock button on screen nothing else would say so.
+ */
+const unsavedRoles = computed(() =>
+  roster.locked && roster.rolesEditable && !roster.staging ? roleBlocked.value : null,
+)
+
+function onRoleChange(heroId: number, value: string) {
+  roster.setRole(heroId, value === '' ? null : Number(value))
 }
 
 /**
@@ -135,16 +158,23 @@ async function confirmLock() {
         <div v-if="roster.rolesEnabled" class="mt-2 pl-7">
           <select
             class="field-input-sm w-full cursor-pointer"
+            :class="{ 'border-magenta': overCap.has(hero.id) }"
             :value="roster.roleFor(hero.id) ?? ''"
             :disabled="!roster.rolesEditable || roster.saving"
             :aria-label="`Role for ${hero.name}`"
-            @change="roster.setRole(hero.id, Number(($event.target as HTMLSelectElement).value))"
+            :aria-invalid="overCap.has(hero.id) || undefined"
+            @change="onRoleChange(hero.id, ($event.target as HTMLSelectElement).value)"
           >
-            <option value="" disabled>Choose a role…</option>
+            <!-- A draft may clear a role; a locked roster needs one on every hero. -->
+            <option value="" :disabled="roster.locked">No role</option>
             <option v-for="role in roster.roles" :key="role.id" :value="role.id">
-              {{ role.name }}{{ role.maxPerRoster ? ` (max ${role.maxPerRoster})` : '' }}
+              {{ roleLabel(role) }}
             </option>
           </select>
+          <p v-if="overCap.has(hero.id)" class="mt-1 font-mono text-[10px] text-magenta">
+            {{ roleOf(hero.id)!.name }} is over its cap —
+            {{ usage.get(roleOf(hero.id)!.id) }} of {{ roleOf(hero.id)!.maxPerRoster }}. Move one.
+          </p>
           <p v-if="roleOf(hero.id)" class="mt-1 font-mono text-[10px] text-ink-dim">
             {{ describeWeights(roleOf(hero.id)!) }}
           </p>
@@ -159,6 +189,10 @@ async function confirmLock() {
         <span class="label-caps">Empty slot</span>
       </li>
     </ul>
+
+    <p v-if="unsavedRoles" class="px-5 pb-4 font-mono text-[11px] text-magenta">
+      Role changes not saved yet — {{ unsavedRoles }}
+    </p>
 
     <!-- Aggregates -->
     <div class="border-t border-edge px-5 py-4">
