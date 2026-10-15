@@ -700,8 +700,10 @@ be struck twice in one series; only the discarding is gone.
 pure). Normalisation covers the drift actually seen — case, whitespace, the `.` in `Dr. Ellie Sattler`,
 `&` versus `and` — and nothing more. A near miss that silently resolves to the wrong hero scores
 points for the wrong manager and is invisible until someone doubts the standings; an unmatched name
-is merely reported. Don't turn this into an alias table: a genuinely differently-named hero is a
-catalogue question.
+is merely reported. The one exception is `ALIASES`, a short, hand-curated list of spellings the
+source has actually been seen to emit (`Dr. Sattler`, a game row naming just `Triss` or `Yennefer`
+of `Yennefer & Triss`); it never grows by similarity, and a genuinely differently-named hero is
+still a catalogue question.
 
 Anything unresolved comes back in `unresolved[]` with the source's own spelling and never blocks the
 *import* — only the recording. The two `…_NOT_IN_POOL` reasons are the ones that fire in practice:

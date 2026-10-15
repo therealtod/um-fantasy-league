@@ -32,7 +32,13 @@ use indexmap::IndexMap;
 /// Both sides are written pre-normalised -- `dr sattler`, not `Dr. Sattler` --
 /// so a lookup is a plain map hit rather than a second pass through
 /// [`normalise`]. [`ALIASES_ARE_PRE_NORMALISED`] is the test that keeps them so.
-const ALIASES: &[(&str, &str)] = &[("dr sattler", "dr ellie sattler")];
+const ALIASES: &[(&str, &str)] = &[
+    ("dr sattler", "dr ellie sattler"),
+    // A game row names whichever of the pair was fielded, while the draft
+    // keeps the full box name.
+    ("triss", "yennefer and triss"),
+    ("yennefer", "yennefer and triss"),
+];
 
 pub struct NameResolver {
     by_normalised_name: IndexMap<String, i64>,
@@ -91,6 +97,7 @@ mod tests {
                 ("Dr. Ellie Sattler", 3),
                 ("Jekyll & Hyde", 4),
                 ("T. Rex", 5),
+                ("Yennefer & Triss", 6),
             ]
             .into_iter()
             .map(|(name, id)| (name.to_string(), id)),
@@ -138,6 +145,8 @@ mod tests {
     fn resolves_a_known_source_alias() {
         assert_eq!(resolver().resolve(Some("Dr. Sattler")), Some(3));
         assert_eq!(resolver().resolve(Some("  dr sattler  ")), Some(3));
+        assert_eq!(resolver().resolve(Some("Triss")), Some(6));
+        assert_eq!(resolver().resolve(Some("Yennefer")), Some(6));
     }
 
     #[test]
