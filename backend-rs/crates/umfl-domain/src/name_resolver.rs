@@ -38,6 +38,9 @@ const ALIASES: &[(&str, &str)] = &[
     // keeps the full box name.
     ("triss", "yennefer and triss"),
     ("yennefer", "yennefer and triss"),
+    // The source names Buffy after whichever sidekick she was fielded with.
+    ("buffy giles", "buffy"),
+    ("buffy xander", "buffy"),
 ];
 
 pub struct NameResolver {
@@ -98,6 +101,7 @@ mod tests {
                 ("Jekyll & Hyde", 4),
                 ("T. Rex", 5),
                 ("Yennefer & Triss", 6),
+                ("Buffy", 7),
             ]
             .into_iter()
             .map(|(name, id)| (name.to_string(), id)),
@@ -147,6 +151,8 @@ mod tests {
         assert_eq!(resolver().resolve(Some("  dr sattler  ")), Some(3));
         assert_eq!(resolver().resolve(Some("Triss")), Some(6));
         assert_eq!(resolver().resolve(Some("Yennefer")), Some(6));
+        assert_eq!(resolver().resolve(Some("Buffy Giles")), Some(7));
+        assert_eq!(resolver().resolve(Some("Buffy Xander")), Some(7));
     }
 
     #[test]

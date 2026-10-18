@@ -702,8 +702,8 @@ pure). Normalisation covers the drift actually seen — case, whitespace, the `.
 points for the wrong manager and is invisible until someone doubts the standings; an unmatched name
 is merely reported. The one exception is `ALIASES`, a short, hand-curated list of spellings the
 source has actually been seen to emit (`Dr. Sattler`, a game row naming just `Triss` or `Yennefer`
-of `Yennefer & Triss`); it never grows by similarity, and a genuinely differently-named hero is
-still a catalogue question.
+of `Yennefer & Triss`, `Buffy Giles`/`Buffy Xander` for `Buffy`); it never grows by similarity, and
+a genuinely differently-named hero is still a catalogue question.
 
 Anything unresolved comes back in `unresolved[]` with the source's own spelling and never blocks the
 *import* — only the recording. The two `…_NOT_IN_POOL` reasons are the ones that fire in practice:
