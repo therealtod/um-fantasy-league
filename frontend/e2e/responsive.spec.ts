@@ -9,7 +9,7 @@ import { PLAYER_A_URL } from '../playwright.config'
  * e2e suite, needs a live backend — see `global-setup.ts`.
  */
 
-const ROUTES = ['/lobby', '/standings', '/heroes', '/admin', '/login']
+const ROUTES = ['/lobby', '/standings', '/heroes', '/hall-of-fame', '/admin', '/login']
 
 test.describe('responsive layout', () => {
   test('no route scrolls horizontally on a phone viewport', async ({ page }) => {

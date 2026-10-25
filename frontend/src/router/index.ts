@@ -56,6 +56,12 @@ const router = createRouter({
       meta: { title: 'Hero Performance', public: true, background: true },
     },
     {
+      path: '/hall-of-fame',
+      name: 'hall-of-fame',
+      component: () => import('@/views/HallOfFameView.vue'),
+      meta: { title: 'Hall of Fame', public: true, background: true },
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: () => import('@/views/AdminDashboardView.vue'),

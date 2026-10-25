@@ -7,6 +7,7 @@ import type {
   CreateMapRequest,
   CreateScoringRuleSetRequest,
   CreateTournamentRequest,
+  HallOfFame,
   Hero,
   HeroAdminDto,
   HeroPoolEntryRequest,
@@ -221,6 +222,9 @@ export const api = {
 
   heroStats: (tournamentId: number): Promise<HeroStatsBoard> =>
     request(`/tournaments/${tournamentId}/hero-stats`),
+
+  /** Every completed tournament's podium, newest first, plus the all-time titles table. */
+  hallOfFame: (): Promise<HallOfFame> => request('/hall-of-fame'),
 
   admin: {
     // Tournaments

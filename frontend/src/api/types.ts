@@ -188,6 +188,42 @@ export interface HeroStatsBoard {
   categories: HeroCategory[]
 }
 
+/** One completed tournament and the managers who finished on its podium. */
+export interface HallOfFameEntry {
+  tournamentId: number
+  name: string
+  format: TournamentFormat
+  startDate: string
+  /** Absent, not null, when no end date was ever entered. */
+  endDate?: string
+  ruleSetName: string
+  /** Every entry on the final board, not only the podium. */
+  entrants: number
+  /**
+   * The final board's rows ranked 3rd or better, in board order. Ties share a
+   * rank, so a tied podium can hold more than three rows.
+   */
+  podium: StandingsRow[]
+}
+
+/** One manager's record across every completed tournament. */
+export interface TitleRow {
+  rank: number
+  managerId: number
+  handle: string
+  displayName: string
+  /** First places, a shared one included. */
+  titles: number
+  /** Podium finishes, titles included. */
+  podiums: number
+}
+
+export interface HallOfFame {
+  titles: TitleRow[]
+  /** Newest first. */
+  tournaments: HallOfFameEntry[]
+}
+
 export interface TickerGameSide {
   /** Free text. Absent when the result was recorded unattributed — render a fallback. */
   playerLabel?: string

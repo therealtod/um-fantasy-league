@@ -23,5 +23,6 @@ pub fn routes() -> Router<AppState> {
         .merge(crate::map::routes())
         .merge(crate::r#match::routes())
         .merge(crate::standings::routes())
+        .merge(crate::hall_of_fame::routes())
         .merge(crate::matchimport::routes())
 }

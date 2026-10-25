@@ -17,3 +17,24 @@ export function formatCredits(value: number): string {
 export function formatPoints(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}`
 }
+
+const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+/** `start_date`/`end_date` are plain dates; parse as UTC so they never shift a day. */
+function formatDay(value: string): string {
+  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`)
+  return Number.isNaN(parsed.getTime()) ? value : DATE_FORMAT.format(parsed)
+}
+
+/** A tournament's dates as one line: a single day when it has no distinct end date. */
+export function formatDateRange(startDate: string, endDate?: string | null): string {
+  const start = formatDay(startDate)
+  if (!endDate) return start
+  const end = formatDay(endDate)
+  return end === start ? start : `${start} – ${end}`
+}

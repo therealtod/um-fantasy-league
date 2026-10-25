@@ -5,6 +5,7 @@
 //! not acquire them.
 
 pub mod error;
+pub mod hall_of_fame;
 pub mod hero_stats;
 pub mod match_result;
 pub mod rounding;

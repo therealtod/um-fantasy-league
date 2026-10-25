@@ -13,6 +13,7 @@
 mod harness;
 
 mod actuator;
+mod hall_of_fame;
 mod hero_admin;
 mod hero_stats;
 mod map_admin;

@@ -65,6 +65,7 @@ async fn the_public_reads_need_no_credential() {
         "/api/tournaments/1/matches",
         "/api/tournaments/1/hero-stats",
         "/api/tournaments/1/roles",
+        "/api/hall-of-fame",
         "/actuator/health",
         "/actuator/info",
     ] {

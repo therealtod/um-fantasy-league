@@ -124,6 +124,13 @@ pub fn rules() -> &'static [Rule] {
                 pattern: "/api/tournaments/*/roles",
                 access: Access::Permit,
             },
+            // Who won the completed tournaments -- read off the same boards
+            // `/standings` serves, so it is public for the same reason.
+            Rule {
+                method: Some(Method::GET),
+                pattern: "/api/hall-of-fame",
+                access: Access::Permit,
+            },
             // Must precede `/api/**` -- first match wins.
             Rule {
                 method: None,
@@ -258,6 +265,7 @@ mod tests {
             "/api/tournaments/1/matches",
             "/api/tournaments/1/hero-stats",
             "/api/tournaments/1/roles",
+            "/api/hall-of-fame",
         ] {
             assert_eq!(
                 required_access(&Method::GET, path),

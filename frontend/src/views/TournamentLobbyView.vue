@@ -8,7 +8,7 @@ import { useRosterStore } from '@/stores/roster'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { Tournament } from '@/api/types'
 import { swapInviteOpen } from '@/domain/tournamentStatus'
-import { formatCredits } from '@/lib/format'
+import { formatCredits, formatDateRange } from '@/lib/format'
 
 const router = useRouter()
 const tournamentsStore = useTournamentsStore()
@@ -21,24 +21,8 @@ function enrolmentPercent(tournament: Tournament) {
   return Math.min(100, Math.round((tournament.enrolled / tournament.capacity) * 100))
 }
 
-const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-  timeZone: 'UTC',
-})
-
-/** `start_date`/`end_date` are plain dates; parse as UTC so they never shift a day. */
-function day(value: string) {
-  const parsed = new Date(`${value.slice(0, 10)}T00:00:00Z`)
-  return Number.isNaN(parsed.getTime()) ? value : DATE_FORMAT.format(parsed)
-}
-
 function dateRange(tournament: Tournament) {
-  const start = day(tournament.startDate)
-  if (!tournament.endDate) return start
-  const end = day(tournament.endDate)
-  return end === start ? start : `${start} – ${end}`
+  return formatDateRange(tournament.startDate, tournament.endDate)
 }
 
 async function register(tournament: Tournament) {

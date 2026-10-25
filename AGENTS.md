@@ -151,7 +151,7 @@ body.
 (`crates/umfl-server/src/auth/authorize.rs`)'s `rules()` table, an ordered list of
 `(method, ant-style path pattern, access)` rows that `authorize` walks first-match-wins. It allowlists
 the read-only GETs that viewing a tournament needs — nobody needs an account to browse tournaments,
-hero pools, roster roles, standings, hero performance or match history, only to enter and draft — and everything else under `/api/**`
+hero pools, roster roles, standings, hero performance, match history or the Hall of Fame, only to enter and draft — and everything else under `/api/**`
 is `Access::Authenticated`, with a trailing `/**` → `Access::Deny` backstop. Keep it in step with
 `the_public_reads_need_no_credential` in `tests/it/security.rs`, which asserts it from the outside. The two credential
 paths (`auth::dev`, `auth::supabase`) differ only in how a credential is *verified*, never in which
@@ -426,6 +426,13 @@ sortable by any column (`src/domain/heroStats.ts`'s `heroMatrix`/`sortMatrix`); 
 the server's rank for the sorted column, never re-derived, and ties keep the server's order in
 either direction.
 
+`GET /api/hall-of-fame` (`hall_of_fame::service`, public) is every `COMPLETED` tournament's board
+folded by `umfl_domain::hall_of_fame::build` into a podium (the board's own rows ranked 3rd or better,
+so a tie can put four managers on it) plus an all-time titles table (titles, then podiums, ranked
+1, 2, 2, 4 on the pair). Each board is `standings::service::board` called unchanged, one after another,
+so a podium is exactly the top of what `/standings` shows and nothing stores a winner: correcting a
+match after a tournament finished re-crowns its champion on the next read.
+
 `GET /api/tournaments/{id}/standings/stream` is an SSE endpoint (`standings::sse::StandingsSseHub`)
 that pushes a bare "something changed" event after `r#match::admin_service::record`/`correct`/`delete`
 commits. The event carries no board/ticker payload — the frontend already knows how to pull fresh
@@ -512,7 +519,8 @@ field is *absent* on the wire, not `null`; templates need a `?? '—'` fallback 
 
 Stores: `auth` (Supabase session), `manager`, `heroes` (keyed by tournament — cost is
 tournament-scoped), `tournaments`, `roster`, `standings`, `heroStats` (the per-hero tables, loaded and
-refreshed exactly like `standings` and off the same `/standings/stream` signal). `roster` keeps an optimistic `selectedIds`
+refreshed exactly like `standings` and off the same `/standings/stream` signal), `hallOfFame` (loaded on
+every visit to `/hall-of-fame`, with no stream: completed results rarely move). `roster` keeps an optimistic `selectedIds`
 and rolls it back if the server rejects, and an optimistic `roleOf` (heroId → roleId) beside it for
 the same reason, along with the tournament's `roles`: a draft saves a role on change, a staged swap
 sends the arrivals' roles with the swap itself, and a locked roster with nothing staged saves a
@@ -548,7 +556,7 @@ it posts to. The wizard and each of its section components import it as `matchFo
 `matchForm.` call site marks a rule and anything without one is rendering. Tests split the same way — `matchForm.spec.ts` is data-in/data-out
 and owns every rule, `MatchResultWizard.spec.ts` mounts only to pin the wiring between the two.
 
-Routes: `/lobby`, `/standings`, `/heroes` (`HeroStatsView.vue`) and `/login` are public; `/tournaments/:tournamentId/roster` requires
+Routes: `/lobby`, `/standings`, `/heroes` (`HeroStatsView.vue`), `/hall-of-fame` (`HallOfFameView.vue`) and `/login` are public; `/tournaments/:tournamentId/roster` requires
 a session plus a `beforeEnter` guard that bounces to the lobby unless the manager has an entry or
 the tournament accepts registration. `/admin` (`AdminDashboardView.vue`) has a `beforeEnter` guard
 that bounces non-admins to the lobby, and `AppShell.vue` only renders the nav link when
