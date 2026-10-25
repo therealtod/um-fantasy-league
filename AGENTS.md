@@ -431,7 +431,11 @@ folded by `umfl_domain::hall_of_fame::build` into a podium (the board's own rows
 so a tie can put four managers on it) plus an all-time titles table (titles, then podiums, ranked
 1, 2, 2, 4 on the pair). Each board is `standings::service::board` called unchanged, one after another,
 so a podium is exactly the top of what `/standings` shows and nothing stores a winner: correcting a
-match after a tournament finished re-crowns its champion on the next read.
+match after a tournament finished re-crowns its champion on the next read. The leaderboard's champion
+badge reads the same endpoint: `StandingsView` loads the `hallOfFame` store on mount and
+`src/domain/champions.ts` maps each manager to the tournaments they won. It is deliberately not a
+`StandingsRow` field — every `/standings` read, and so every SSE-triggered refresh burst, would then
+fold every completed tournament's board as well.
 
 `GET /api/tournaments/{id}/standings/stream` is an SSE endpoint (`standings::sse::StandingsSseHub`)
 that pushes a bare "something changed" event after `r#match::admin_service::record`/`correct`/`delete`

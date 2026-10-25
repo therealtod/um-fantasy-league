@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { useHallOfFameStore } from '@/stores/hallOfFame'
 import { useManagerStore } from '@/stores/manager'
 import { useStandingsStore } from '@/stores/standings'
 import { useTournamentsStore } from '@/stores/tournaments'
 import type { MetricColumn } from '@/api/types'
+import { championLabel, championships } from '@/domain/champions'
 import { standingsAvailable } from '@/domain/tournamentStatus'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { formatPoints as points } from '@/lib/format'
@@ -11,6 +13,7 @@ import { formatPoints as points } from '@/lib/format'
 const standings = useStandingsStore()
 const tournaments = useTournamentsStore()
 const managerStore = useManagerStore()
+const hallOfFame = useHallOfFameStore()
 
 /** Standings follow the live tournament; fall back to the first listed. */
 const options = computed(() => tournaments.tournaments.filter((t) => standingsAvailable(t.status)))
@@ -24,7 +27,12 @@ function start(id: number | null) {
   void standings.load(id)
 }
 
-onMounted(() => start(standings.tournamentId ?? defaultTournamentId()))
+onMounted(() => {
+  start(standings.tournamentId ?? defaultTournamentId())
+  // Only for the champion badges: a failed load leaves its error in that store,
+  // unrendered here, and the board simply shows no badges.
+  void hallOfFame.load()
+})
 onUnmounted(() => standings.stop())
 
 watch(
@@ -40,6 +48,10 @@ function onTournamentChange(event: Event) {
 }
 
 const isMe = (managerId: number) => managerStore.manager?.id === managerId
+
+/** Manager id → tournaments won, for the badge beside a past champion's handle. */
+const champions = computed(() => championships(hallOfFame.hallOfFame))
+const titlesWon = (managerId: number) => champions.value.get(managerId) ?? []
 
 const board = computed(() => standings.board)
 /** The leaderboard's columns are whatever the active rule set defines. */
@@ -192,13 +204,26 @@ const currentTournament = computed(() =>
             <td class="cell-pinned cell-pinned-manager px-3 py-3 md:px-4">
               <!-- Capped: this column is pinned, so an unusually long display
                    name would otherwise eat the width the metrics scroll into —
-                   and push the total's pin offset off the column boundary. -->
-              <p
-                class="max-w-[6rem] truncate font-mono text-xs font-bold uppercase md:max-w-[9rem]"
-                :class="isMe(row.managerId) ? 'text-magenta' : 'text-ink'"
-              >
-                {{ row.handle }}
-              </p>
+                   and push the total's pin offset off the column boundary.
+                   The champion badge shares that cap: the handle truncates
+                   around it, the badge itself never does. -->
+              <div class="flex max-w-[6rem] items-center gap-1 md:max-w-[9rem]">
+                <p
+                  class="min-w-0 truncate font-mono text-xs font-bold uppercase"
+                  :class="isMe(row.managerId) ? 'text-magenta' : 'text-ink'"
+                >
+                  {{ row.handle }}
+                </p>
+                <span
+                  v-if="titlesWon(row.managerId).length"
+                  class="shrink-0 border border-lime/50 bg-lime/10 px-0.5 font-mono text-[10px] leading-none font-bold whitespace-nowrap text-lime"
+                  role="img"
+                  :title="championLabel(titlesWon(row.managerId))"
+                  :aria-label="championLabel(titlesWon(row.managerId))"
+                >🏆<template v-if="titlesWon(row.managerId).length > 1"
+                  >×{{ titlesWon(row.managerId).length }}</template
+                ></span>
+              </div>
               <p class="max-w-[6rem] truncate font-mono text-[10px] text-ink-dim md:max-w-[9rem]">
                 {{ row.displayName }}
               </p>
